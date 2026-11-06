@@ -12,11 +12,12 @@ export type DispatcherDeps = {
   automations: readonly Automation[];
   store: ClaimStore;
   log: Logger;
+  prepare?: (event: Event) => Promise<Event>;
 };
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-export function createDispatcher({ automations, store, log }: DispatcherDeps): Dispatcher {
+export function createDispatcher({ automations, store, log, prepare }: DispatcherDeps): Dispatcher {
   const inFlight = new Set<Promise<void>>();
 
   const matchesSafely = (automation: Automation, event: Event): boolean => {
@@ -58,11 +59,23 @@ export function createDispatcher({ automations, store, log }: DispatcherDeps): D
     }
   };
 
+  const prepareSafely = async (event: Event): Promise<Event> => {
+    if (!prepare) return event;
+    try {
+      return await prepare(event);
+    } catch (err) {
+      log.warn("prepare failed, continuing with original event", { externalId: event.externalId, error: errorMessage(err) });
+      return event;
+    }
+  };
+
   return {
     enqueue(event) {
-      const work = Promise.all(
-        automations.filter((a) => matchesSafely(a, event)).map((a) => runOne(a, event)),
-      ).then(() => undefined);
+      const work = prepareSafely(event)
+        .then((ready) =>
+          Promise.all(automations.filter((a) => matchesSafely(a, ready)).map((a) => runOne(a, ready))),
+        )
+        .then(() => undefined);
       inFlight.add(work);
       void work.finally(() => inFlight.delete(work));
     },

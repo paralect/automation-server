@@ -23,10 +23,10 @@ const memoryLogger = () => {
   return { log, entries };
 };
 
-const setup = (automations: Automation[]) => {
+const setup = (automations: Automation[], prepare?: (event: Event) => Promise<Event>) => {
   const { log, entries } = memoryLogger();
   const store = createSqliteStore({ path: ":memory:" });
-  return { dispatcher: createDispatcher({ automations, store, log }), entries };
+  return { dispatcher: createDispatcher({ automations, store, log, prepare }), entries };
 };
 
 const auto = (name: string, run: Automation["run"], kind = "thing") =>
@@ -128,5 +128,30 @@ describe("dispatcher", () => {
     const start = Date.now();
     await dispatcher.drain(30);
     expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  test("prepare runs inside tracked work and automations receive the prepared event", async () => {
+    const seen: unknown[] = [];
+    const { dispatcher } = setup([auto("a", async (e) => void seen.push(e.payload))], async (e) => {
+      await new Promise((r) => setTimeout(r, 30));
+      return { ...e, payload: "prepared" };
+    });
+    dispatcher.enqueue(event());
+    expect(seen).toEqual([]);
+    await dispatcher.drain(1000);
+    expect(seen).toEqual(["prepared"]);
+  });
+
+  test("a failing prepare falls back to the original event and logs a warning without the payload", async () => {
+    const seen: unknown[] = [];
+    const { dispatcher, entries } = setup([auto("a", async (e) => void seen.push(e.externalId))], async () => {
+      throw new Error("enrich down");
+    });
+    dispatcher.enqueue(event());
+    await dispatcher.drain(1000);
+    expect(seen).toEqual(["e1"]);
+    const warn = entries.find((e) => e.level === "warn");
+    expect(warn?.fields?.error).toBe("enrich down");
+    expect(JSON.stringify(entries)).not.toContain("SECRET-PAYLOAD");
   });
 });
