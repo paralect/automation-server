@@ -1,0 +1,196 @@
+import { createAutomations } from "@automation-server/automations";
+import { createDispatcher, createSqliteStore, type Logger } from "@automation-server/core";
+import { createSentrySource } from "@automation-server/sources";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+import { createApp } from "../src/app";
+
+const SECRET = "test-client-secret";
+const fixture = new Uint8Array(
+  readFileSync(new URL("../../../packages/sources/test/fixtures/sentry-event-alert.json", import.meta.url)),
+);
+const sign = (body: Uint8Array, secret = SECRET) => createHmac("sha256", secret).update(body).digest("hex");
+
+type GithubCall = { method: string; path: string };
+
+function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
+  const calls: GithubCall[] = [];
+  const logs: string[] = [];
+  const failNextIssueCreate = { value: false };
+  const gate = { current: Promise.resolve() as Promise<void> };
+
+  const fakeGithub = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? "GET";
+    calls.push({ method, path: url.pathname });
+    await gate.current;
+    if (url.pathname === "/search/issues") return Response.json({ items: [] });
+    if (url.pathname.endsWith("/labels")) return Response.json({}, { status: 201 });
+    if (url.pathname.endsWith("/issues") && method === "POST") {
+      if (failNextIssueCreate.value) {
+        failNextIssueCreate.value = false;
+        return new Response("boom", { status: 500 });
+      }
+      return Response.json({ number: 7, html_url: "https://github.test/acme/widgets/issues/7" }, { status: 201 });
+    }
+    return new Response("unexpected", { status: 500 });
+  }) as typeof fetch;
+
+  const log: Logger = {
+    info: (m, f) => logs.push(JSON.stringify({ m, f })),
+    warn: (m, f) => logs.push(JSON.stringify({ m, f })),
+    error: (m, f) => logs.push(JSON.stringify({ m, f })),
+  };
+  const store = createSqliteStore({ path: ":memory:" });
+  const automations = createAutomations({
+    sentryToGithubIssue: {
+      repo: { owner: "acme", name: "widgets" },
+      token: "gh-token",
+      levels: ["error"],
+      environments: [],
+      minEventCount: 1,
+      apiBaseUrl: "https://github.test",
+      fetch: fakeGithub,
+    },
+  });
+  const dispatcher = createDispatcher({ automations, store, log });
+  const sentry = createSentrySource({ clientSecret: SECRET });
+  const app = createApp({ sources: { [sentry.name]: sentry }, dispatcher, log, maxBodyBytes });
+
+  const post = (path: string, body: Uint8Array, headers: Record<string, string> = {}) =>
+    app.request(path, { method: "POST", body, headers });
+  const deliver = (body = fixture, headers: Record<string, string> = {}) =>
+    post("/webhooks/sentry", body, {
+      "sentry-hook-resource": "event_alert",
+      "sentry-hook-signature": sign(body),
+      ...headers,
+    });
+  const issueCreates = () => calls.filter((c) => c.method === "POST" && c.path.endsWith("/issues")).length;
+
+  return { app, dispatcher, calls, logs, deliver, post, issueCreates, failNextIssueCreate, gate };
+}
+
+let t: ReturnType<typeof setup>;
+beforeEach(() => {
+  t = setup();
+});
+
+describe("POST /webhooks/:source", () => {
+  test("valid signed alert responds 200 before GitHub work finishes, then creates exactly one issue", async () => {
+    let release!: () => void;
+    t.gate.current = new Promise<void>((r) => (release = r));
+    const res = await t.deliver();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(t.issueCreates()).toBe(0);
+    release();
+    await t.dispatcher.drain(2000);
+    expect(t.issueCreates()).toBe(1);
+  });
+
+  test("redelivery of the same payload creates one issue", async () => {
+    await t.deliver();
+    await t.dispatcher.drain(2000);
+    await t.deliver();
+    await t.dispatcher.drain(2000);
+    expect(t.issueCreates()).toBe(1);
+  });
+
+  test("a GitHub 500 releases the claim so a redelivery succeeds", async () => {
+    t.failNextIssueCreate.value = true;
+    await t.deliver();
+    await t.dispatcher.drain(2000);
+    expect(t.issueCreates()).toBe(1);
+    await t.deliver();
+    await t.dispatcher.drain(2000);
+    expect(t.issueCreates()).toBe(2);
+    await t.deliver();
+    await t.dispatcher.drain(2000);
+    expect(t.issueCreates()).toBe(2);
+  });
+
+  test("wrong signature gives 401 with an empty body and no GitHub calls", async () => {
+    const res = await t.deliver(fixture, { "sentry-hook-signature": sign(fixture, "other-secret") });
+    expect(res.status).toBe(401);
+    expect(await res.text()).toBe("");
+    await t.dispatcher.drain(500);
+    expect(t.calls).toHaveLength(0);
+    expect(t.logs.join("\n")).not.toContain("other-secret");
+  });
+
+  test("missing signature gives 401", async () => {
+    const res = await t.post("/webhooks/sentry", fixture, { "sentry-hook-resource": "event_alert" });
+    expect(res.status).toBe(401);
+    expect(await res.text()).toBe("");
+    expect(t.calls).toHaveLength(0);
+  });
+
+  test("tampered body gives 401", async () => {
+    const tampered = new Uint8Array([...fixture, 0x20]);
+    const res = await t.post("/webhooks/sentry", tampered, {
+      "sentry-hook-resource": "event_alert",
+      "sentry-hook-signature": sign(fixture),
+    });
+    expect(res.status).toBe(401);
+    expect(t.calls).toHaveLength(0);
+  });
+
+  test("unsupported resource with a valid signature is acknowledged and ignored", async () => {
+    const res = await t.deliver(fixture, { "sentry-hook-resource": "installation" });
+    expect(res.status).toBe(200);
+    await t.dispatcher.drain(500);
+    expect(t.calls).toHaveLength(0);
+    expect(t.logs.some((l) => l.includes("unsupported_resource:installation"))).toBe(true);
+  });
+
+  test("body over the cap gives 413 by content-length", async () => {
+    const small = setup({ maxBodyBytes: 100 });
+    const res = await small.deliver();
+    expect(res.status).toBe(413);
+    expect(small.calls).toHaveLength(0);
+  });
+
+  test("body over the cap gives 413 while streaming without a content-length", async () => {
+    const small = setup({ maxBodyBytes: 100 });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(60));
+        controller.enqueue(new Uint8Array(60));
+        controller.close();
+      },
+    });
+    const res = await small.app.request("/webhooks/sentry", {
+      method: "POST",
+      body: stream,
+      duplex: "half",
+      headers: { "sentry-hook-resource": "event_alert" },
+    } as RequestInit);
+    expect(res.status).toBe(413);
+  });
+
+  test("unknown source gives 404", async () => {
+    const res = await t.post("/webhooks/nope", fixture);
+    expect(res.status).toBe(404);
+  });
+
+  test("inherited object keys are not sources", async () => {
+    const res = await t.post("/webhooks/constructor", fixture);
+    expect(res.status).toBe(404);
+  });
+
+  test("logs never contain the GitHub token", async () => {
+    await t.deliver();
+    await t.dispatcher.drain(2000);
+    expect(t.logs.join("\n")).not.toContain("gh-token");
+  });
+});
+
+describe("GET /health", () => {
+  test("returns ok", async () => {
+    const res = await t.app.request("/health");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ok" });
+  });
+});

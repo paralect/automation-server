@@ -7,5 +7,6 @@ export default defineConfig({
   clean: true,
   deps: {
     alwaysBundle: [/@automation-server\/.*/],
+    neverBundle: [/^bun:/],
   },
 });

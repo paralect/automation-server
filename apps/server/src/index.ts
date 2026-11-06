@@ -1,74 +1,55 @@
-import { appRouter } from "@automation-server/api/routers/index";
-import { OpenAPIHandler } from "@orpc/openapi/fetch";
-import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
-import { onError } from "@orpc/server";
-import { RPCHandler } from "@orpc/server/fetch";
-import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import { logger } from "hono/logger";
+import { createAutomations } from "@automation-server/automations";
+import { createDispatcher, createLogger, createSqliteStore } from "@automation-server/core";
+import { createSentrySource } from "@automation-server/sources";
 
-import { createContext } from "./context";
+import { createApp } from "./app";
+import { buildConfig } from "./config";
 import { ENV } from "./env.server";
 
-const app = new Hono();
+const config = buildConfig(ENV);
+const log = createLogger();
 
-app.use(logger());
-app.use(
-  "/*",
-  cors({
-    origin: ENV.CORS_ORIGIN,
-    allowMethods: ["GET", "POST", "OPTIONS"],
-  }),
-);
+const store = createSqliteStore({ path: config.databasePath });
 
-export const apiHandler = new OpenAPIHandler(appRouter, {
-  plugins: [
-    new OpenAPIReferencePlugin({
-      schemaConverters: [new ZodToJsonSchemaConverter()],
-    }),
-  ],
-  interceptors: [
-    onError((error) => {
-      console.error(error);
-    }),
-  ],
+const sentry = createSentrySource({
+  clientSecret: config.sentry.clientSecret,
+  apiBaseUrl: config.sentry.apiBaseUrl,
+  authToken: config.sentry.authToken,
+});
+const sources = { [sentry.name]: sentry };
+
+const automations = createAutomations({
+  sentryToGithubIssue: {
+    repo: config.github.repo,
+    token: config.github.token,
+    levels: config.filters.levels,
+    environments: config.filters.environments,
+    minEventCount: config.filters.minEventCount,
+  },
 });
 
-export const rpcHandler = new RPCHandler(appRouter, {
-  interceptors: [
-    onError((error) => {
-      console.error(error);
-    }),
-  ],
+const dispatcher = createDispatcher({
+  automations,
+  store,
+  log,
+  prepare: (event) => sources[event.source]?.enrich?.(event) ?? Promise.resolve(event),
 });
 
-app.use("/*", async (c, next) => {
-  const context = await createContext({ context: c });
+const app = createApp({ sources, dispatcher, log, corsOrigin: ENV.CORS_ORIGIN });
+const server = Bun.serve({ port: config.port, fetch: app.fetch });
+log.info("server started", { port: server.port, repo: `${config.github.repo.owner}/${config.github.repo.name}` });
 
-  const rpcResult = await rpcHandler.handle(c.req.raw, {
-    prefix: "/rpc",
-    context: context,
-  });
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log.info("shutting down", { signal });
+  await server.stop();
+  await dispatcher.drain(10_000);
+  store.close();
+  log.info("shutdown complete");
+  process.exit(0);
+}
 
-  if (rpcResult.matched) {
-    return c.newResponse(rpcResult.response.body, rpcResult.response);
-  }
-
-  const apiResult = await apiHandler.handle(c.req.raw, {
-    prefix: "/api-reference",
-    context: context,
-  });
-
-  if (apiResult.matched) {
-    return c.newResponse(apiResult.response.body, apiResult.response);
-  }
-
-  await next();
-});
-
-app.get("/", (c) => {
-  return c.text("OK");
-});
-
-export default app;
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

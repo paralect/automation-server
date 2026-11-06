@@ -19,6 +19,9 @@
       "name": "server",
       "dependencies": {
         "@automation-server/api": "workspace:*",
+        "@automation-server/automations": "workspace:*",
+        "@automation-server/core": "workspace:*",
+        "@automation-server/sources": "workspace:*",
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",
         "@orpc/zod": "catalog:",

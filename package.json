@@ -23,7 +23,8 @@
     "check-types": "turbo run check-types",
     "dev:server": "turbo run dev -F server --",
     "env:generate": "varlock codegen --path ./apps/server/",
-    "postinstall": "varlock codegen --path ./apps/server/"
+    "postinstall": "varlock codegen --path ./apps/server/",
+    "test": "turbo run test"
   },
   "dependencies": {
     "zod": "catalog:"

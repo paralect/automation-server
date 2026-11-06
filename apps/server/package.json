@@ -6,12 +6,16 @@
     "build": "tsc -b ../../packages/api && tsdown",
     "check-types": "tsc -b ../../packages/api && tsc --noEmit",
     "compile": "bun build --compile --no-compile-autoload-dotenv --minify --sourcemap --bytecode ./src/index.ts --outfile server",
-    "dev": "bun run --hot src/index.ts",
+    "dev": "bun run --watch src/index.ts",
     "start": "bun run dist/index.mjs",
-    "env:generate": "varlock codegen"
+    "env:generate": "varlock codegen",
+    "test": "bun test"
   },
   "dependencies": {
     "@automation-server/api": "workspace:*",
+    "@automation-server/automations": "workspace:*",
+    "@automation-server/core": "workspace:*",
+    "@automation-server/sources": "workspace:*",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
     "@orpc/zod": "catalog:",
