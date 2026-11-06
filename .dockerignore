@@ -1,0 +1,17 @@
+**/node_modules
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+.git
+.claude
+.agents
+**/.env
+**/.env.*
+!**/.env.schema
+!**/.env.example
+**/*.db
+**/*.db-*
+**/data
+**/coverage
+Dockerfile
+.dockerignore
