@@ -1,54 +1,134 @@
 # automation-server
 
-This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines Hono, ORPC, and more.
+A small webhook server that turns events from external services into actions. Today it ships one flow: a Sentry issue alert becomes one GitHub issue, labelled so that a GitHub Action that watches issues labelled `sentry` can pick it up from there.
 
-## Features
+```
+Sentry issue alert
+      |
+      v
+POST /webhooks/sentry  --- verify HMAC-SHA256 over the raw body (401 on failure)
+      |
+      v
+Source.parse  ----------- Event { source, kind, externalId, payload }
+      |  (200 returned here, work continues in the background)
+      v
+Dispatcher  ------------- claim (automation, externalId) in sqlite; duplicates are skipped
+      |
+      v
+Automation  ------------- filters (level, environment, event count) -> GitHub issue
+```
 
-- **TypeScript** - For type safety and improved developer experience
-- **Hono** - Lightweight, performant server framework
-- **oRPC** - End-to-end type-safe APIs with OpenAPI integration
-- **Bun** - Runtime environment
-- **Turborepo** - Optimized monorepo build system
+Sentry expects a response within about one second, so the server answers `200` as soon as the signature checks out and the event is parsed. Enrichment and the GitHub calls run in the background and are drained on shutdown.
 
-## Getting Started
+## Behavior
 
-First, install the dependencies:
+- **One GitHub issue per Sentry issue.** The issue body carries a `Sentry Issue: <id>` marker. Before creating, the automation searches for an open issue with that marker. Deliveries are also deduplicated by a sqlite claim, so a redelivered alert is skipped. A failed run releases its claim, so a redelivery can retry.
+- **Filters.** `SENTRY_LEVELS` (default `error,fatal`), `SENTRY_ENVIRONMENTS` (empty means all) and `SENTRY_MIN_EVENT_COUNT` (default `1`).
+- **Event count needs a token.** The `event_alert` payload has no event count, first seen or last seen. Those come from the Sentry API, so set `SENTRY_AUTH_TOKEN` to enable them. Without it, the count filter is not applied and the issue omits those stats.
+- **Redaction.** Issue content is scrubbed of common secret shapes before it is sent to GitHub. Payload bodies and secrets are never logged.
+
+## Setup
+
+### Sentry
+
+1. In Sentry, open Settings, then Developer Settings, then create a new Internal Integration.
+2. Set the Webhook URL to `https://<your-host>/webhooks/sentry`.
+3. Enable the Alert Rule Action toggle so the integration can be used as an alert action.
+4. Save, then copy the Client Secret from the integration page. This is `SENTRY_CLIENT_SECRET`.
+5. Create or edit an Issue Alert and add the action "Send a notification via <integration name>".
+6. Optional: from the same integration page, copy a token for `SENTRY_AUTH_TOKEN`. Give it read access to Issue & Event.
+
+These steps follow Sentry's [integration platform docs](https://docs.sentry.io/organization/integrations/integration-platform/). The docs confirm Developer Settings, the Client Secret signature, per-integration tokens and the "Send a notification via <your integration>" action. The Alert Rule Action toggle and the exact scope label were not found in the public docs text, so check them against your Sentry UI.
+
+### GitHub
+
+Create a fine-grained personal access token at Settings, Developer settings, Personal access tokens.
+
+- Repository access: only the one repository that should receive issues.
+- Repository permissions: Issues set to Read and write. Metadata is read-only and implicit.
+
+Use it as `GITHUB_TOKEN`, and set `GITHUB_REPO` to `owner/name`.
+
+## Configuration
+
+Configuration is validated at startup with [Varlock](https://varlock.dev). A missing or invalid required value stops the server and names the variable. The schema is `apps/server/.env.schema`. Put local values in `apps/server/.env.local` (see `apps/server/.env.example`). Run `bun run env:generate` after changing the schema.
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `SENTRY_CLIENT_SECRET` | yes | | Client Secret of the Sentry integration. Verifies webhook signatures. |
+| `GITHUB_TOKEN` | yes | | GitHub token with Issues: Read and write on the target repo. |
+| `GITHUB_REPO` | yes | | Target repository as `owner/name`. |
+| `PORT` | no | `3000` | HTTP port. |
+| `DATABASE_PATH` | no | `./data/automation.db` | sqlite file for claims. Keep it on persistent storage. |
+| `SENTRY_AUTH_TOKEN` | no | | Enables issue stats enrichment (count, first and last seen). |
+| `SENTRY_API_BASE_URL` | no | `https://sentry.io` | Sentry host. The token is only sent to this origin. |
+| `SENTRY_LEVELS` | no | `error,fatal` | Comma-separated levels that create an issue. |
+| `SENTRY_ENVIRONMENTS` | no | empty (all) | Comma-separated environments to handle. |
+| `SENTRY_MIN_EVENT_COUNT` | no | `1` | Minimum event count, applied only when the count is known. |
+| `CORS_ORIGIN` | no | | Origin allowed on the browser-facing oRPC routes. Not used by webhooks. |
+
+## Running
 
 ```bash
 bun install
+bun run dev        # watch mode on http://localhost:3000
+bun run test
+bun run check-types
+bun run build      # apps/server/dist/index.mjs
+bun run start      # run the built server (from apps/server)
 ```
 
-Then, run the development server:
+`GET /health` returns `{"status":"ok"}`. On SIGTERM or SIGINT the server stops accepting connections, waits up to 10 seconds for in-flight work, closes the store and exits.
+
+### Docker
 
 ```bash
-bun run dev
+docker build -t automation-server .
+docker run -d --name automation-server -p 3000:3000 \
+  -v automation-data:/data \
+  -e SENTRY_CLIENT_SECRET=... \
+  -e GITHUB_TOKEN=... \
+  -e GITHUB_REPO=your-org/your-repo \
+  automation-server
 ```
 
-The API is running at [http://localhost:3000](http://localhost:3000).
+The image runs as a non-root user and stores the claim database at `/data/automation.db`. Mount a volume on `/data` so claims survive restarts.
 
-## Environment Configuration
+## Adding an automation
 
-Each app owns its environment schema in `.env.schema`. Varlock generates `src/env.ts` during installation; run `bun run env:generate` after changing a schema. Commit schemas, and keep secrets in ignored env files or your deployment platform.
+Automations match events and run. The dispatcher handles claiming, retries on failure and logging.
 
-Import the generated `ENV` accessor in application code. Shared database and auth packages receive configuration or initialized clients from the application. See [Varlock's monorepo guide](https://varlock.dev/guides/monorepos/).
+```ts
+// packages/automations/src/notifyOnFatal/automation.ts
+import { defineAutomation } from "@automation-server/core/automation";
+import { isSentryIssueAlert } from "@automation-server/sources/sentry/event";
 
-Bun's automatic env loading is disabled in `bunfig.toml`; the framework integration or server bootstrap loads Varlock. Node deployments must include Varlock and its dependencies alongside the app schema.
+export const notifyOnFatal = defineAutomation({
+  name: "notify-on-fatal",
+  matches: isSentryIssueAlert,
+  async run(event, { log }) {
+    if (event.payload.level !== "fatal") return;
+    log.info("fatal alert", { issueId: event.payload.issueId });
+  },
+});
+```
 
-Run standalone Node/Bun tools that use Varlock from the owning app directory so they load that app's schema and env files. `env:generate` only generates TypeScript files; it does not initialize environment values in a subsequent command.
+Then add one line to the list in `packages/automations/src/registry.ts`. Throwing from `run` releases the claim so the delivery can be retried.
 
 ## Project Structure
 
 ```
 automation-server/
 ├── apps/
-│   └── server/      # Backend API (Hono, ORPC)
+│   └── server/          # Hono app: webhook routes, config, wiring, Bun.serve entry
 ├── packages/
-│   ├── api/         # API layer / business logic
+│   ├── core/            # Event, Source, Automation, dispatcher, sqlite claim store, logger
+│   ├── sources/         # Sentry source: signature check, payload parsing, optional enrichment
+│   ├── automations/     # Automations and the registry (sentry-to-github-issue)
+│   ├── api/             # oRPC routers
+│   └── config/          # Shared tsconfig
 ```
 
-## Available Scripts
+## License
 
-- `bun run dev`: Start all applications in development mode
-- `bun run build`: Build all applications
-- `bun run dev:server`: Start only the server
-- `bun run check-types`: Check TypeScript types across all apps
+MIT
