@@ -3,3 +3,5 @@ export * from "./event";
 export * from "./logger";
 export * from "./source";
 export * from "./store";
+export * from "./dispatcher";
+export * from "./sqliteStore";
