@@ -1,0 +1,21 @@
+{
+  "name": "@automation-server/sources",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@automation-server/core": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@automation-server/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}

@@ -47,9 +47,45 @@
         "typescript": "catalog:",
       },
     },
+    "packages/automations": {
+      "name": "@automation-server/automations",
+      "dependencies": {
+        "@automation-server/core": "workspace:*",
+        "@automation-server/sources": "workspace:*",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@automation-server/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/config": {
       "name": "@automation-server/config",
       "version": "0.0.0",
+    },
+    "packages/core": {
+      "name": "@automation-server/core",
+      "dependencies": {
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@automation-server/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/sources": {
+      "name": "@automation-server/sources",
+      "dependencies": {
+        "@automation-server/core": "workspace:*",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@automation-server/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
     },
   },
   "catalog": {
@@ -64,7 +100,13 @@
   "packages": {
     "@automation-server/api": ["@automation-server/api@workspace:packages/api"],
 
+    "@automation-server/automations": ["@automation-server/automations@workspace:packages/automations"],
+
     "@automation-server/config": ["@automation-server/config@workspace:packages/config"],
+
+    "@automation-server/core": ["@automation-server/core@workspace:packages/core"],
+
+    "@automation-server/sources": ["@automation-server/sources@workspace:packages/sources"],
 
     "@emnapi/core": ["@emnapi/core@2.0.0-beta.2", "", { "dependencies": { "@emnapi/wasi-threads": "2.2.0", "tslib": "^2.4.0" } }, "sha512-MzCVoWtcg4Pm2B3je5mMvYMvj3MmBKw+fU7vbsJc9/iT8ip6/eYIHo/Dsm/mr+wsHB6SEyJDuxB09Yy6r/8+4A=="],
 
