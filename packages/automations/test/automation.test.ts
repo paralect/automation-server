@@ -9,6 +9,9 @@ import type { SentryToGithubIssueConfig } from "../src/sentryToGithubIssue/confi
 import { alert, sentryEvent } from "./fixtures";
 import { json, mockFetch } from "./github.test";
 
+const isList = (c: { url: string; method: string }) =>
+  c.method === "GET" && new URL(c.url).pathname === "/repos/o/r/issues";
+
 const TOKEN = "ghp_SUPERSECRETTOKEN";
 
 const setup = (handler: Parameters<typeof mockFetch>[0], over: Partial<SentryToGithubIssueConfig> = {}) => {
@@ -32,17 +35,17 @@ const setup = (handler: Parameters<typeof mockFetch>[0], over: Partial<SentryToG
 };
 
 const happy = (c: { url: string; method: string }) => {
-  if (c.url.includes("/search/issues")) return json(200, { items: [] });
+  if (isList(c)) return json(200, []);
   if (c.url.endsWith("/labels")) return json(201, {});
   return json(201, { number: 9, html_url: "https://github.com/o/r/issues/9" });
 };
 
 describe("sentry-to-github-issue automation", () => {
-  test("happy path: search, labels, then issue", async () => {
+  test("happy path: list, labels, then issue", async () => {
     const t = setup(happy);
     await t.automation.run(sentryEvent(alert()), { log: t.log });
     expect(t.calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual([
-      "GET /search/issues",
+      "GET /repos/o/r/issues",
       "POST /repos/o/r/labels",
       "POST /repos/o/r/labels",
       "POST /repos/o/r/labels",
@@ -60,8 +63,8 @@ describe("sentry-to-github-issue automation", () => {
 
   test("existing open issue means no create", async () => {
     const t = setup((c) =>
-      c.url.includes("/search/issues")
-        ? json(200, { items: [{ html_url: "https://github.com/o/r/issues/3", body: "x\nSentry Issue: 4501" }] })
+      isList(c)
+        ? json(200, [{ html_url: "https://github.com/o/r/issues/3", body: "x\nSentry Issue: 4501" }])
         : json(500, {}),
     );
     await t.automation.run(sentryEvent(alert()), { log: t.log });
@@ -70,7 +73,7 @@ describe("sentry-to-github-issue automation", () => {
 
   test("label already exists is fine", async () => {
     const t = setup((c) =>
-      c.url.includes("/search/issues") ? json(200, { items: [] })
+      isList(c) ? json(200, [])
         : c.url.endsWith("/labels") ? json(422, { errors: [{ code: "already_exists" }] })
         : json(201, { number: 1, html_url: "u" }),
     );
@@ -80,7 +83,7 @@ describe("sentry-to-github-issue automation", () => {
 
   test("label 403 throws clearly and does not create", async () => {
     const t = setup((c) =>
-      c.url.includes("/search/issues") ? json(200, { items: [] }) : json(403, {}),
+      isList(c) ? json(200, []) : json(403, {}),
     );
     const err = await t.automation.run(sentryEvent(alert()), { log: t.log }).catch((e: Error) => e);
     expect((err as Error).message).toContain("status 403");
@@ -91,7 +94,7 @@ describe("sentry-to-github-issue automation", () => {
 
   test("create 500 throws so the claim is released", async () => {
     const t = setup((c) =>
-      c.url.includes("/search/issues") ? json(200, { items: [] })
+      isList(c) ? json(200, [])
         : c.url.endsWith("/labels") ? json(201, {})
         : json(500, {}),
     );

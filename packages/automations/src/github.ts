@@ -12,9 +12,11 @@ export type GithubClientConfig = {
 export type GithubLabel = { name: string; color?: string; description?: string };
 export type CreatedIssue = { number: number; html_url: string };
 
-const searchResponse = z.object({
-  items: z.array(z.object({ html_url: z.string(), body: z.string().nullish() })),
-});
+const issueList = z.array(
+  z.object({ html_url: z.string(), body: z.string().nullish(), pull_request: z.unknown().optional() }),
+);
+const PAGE_SIZE = 100;
+const MAX_PAGES = 5;
 const createdIssue = z.object({ number: z.number(), html_url: z.string() });
 const errorBody = z.object({
   message: z.string().optional(),
@@ -78,16 +80,22 @@ export function createGithubClient(config: GithubClientConfig) {
       for (const l of labels) await ensureLabel(typeof l === "string" ? { name: l } : l);
     },
 
+    // Lists open `sentry` issues instead of using search: search is rate limited, lags behind new issues, and
+    // is rejected for some fine-grained tokens that can otherwise read the repo.
     async findOpenIssueBySentryId(issueId: string): Promise<string | null> {
       const marker = `Sentry Issue: ${issueId}`;
-      const q = `repo:${owner}/${name} is:issue is:open in:body "${marker}"`;
-      const path = `/search/issues?q=${encodeURIComponent(q)}`;
-      const res = await request("GET", path);
-      if (!res.ok) throw await fail("GET", path, res);
-      const { items } = searchResponse.parse(await res.json());
-      // Search tokenizes loosely and matches substrings like ids sharing a prefix, so confirm the exact marker line.
-      const hit = items.find((i) => (i.body ?? "").split(/\r?\n/).some((line) => line.trim() === marker));
-      return hit?.html_url ?? null;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const path = `${repoPath}/issues?state=open&labels=sentry&per_page=${PAGE_SIZE}&page=${page}`;
+        const res = await request("GET", path);
+        if (!res.ok) throw await fail("GET", path, res);
+        const items = issueList.parse(await res.json());
+        const hit = items.find(
+          (i) => !i.pull_request && (i.body ?? "").split(/\r?\n/).some((line) => line.trim() === marker),
+        );
+        if (hit) return hit.html_url;
+        if (items.length < PAGE_SIZE) break;
+      }
+      return null;
     },
 
     async createIssue(issue: { title: string; body: string; labels: string[] }): Promise<CreatedIssue> {

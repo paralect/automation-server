@@ -59,24 +59,35 @@ describe("github client", () => {
     expect((err as Error).message).not.toContain(TOKEN);
   });
 
-  test("find: builds query and verifies exact marker line", async () => {
+  test("find: lists open sentry issues and verifies the exact marker line", async () => {
     const { fn, calls } = mockFetch(() =>
-      json(200, {
-        items: [
-          { html_url: "https://github.com/o/r/issues/1", body: "x\nSentry Issue: 45010\n" },
-          { html_url: "https://github.com/o/r/issues/2", body: "link\nSentry Issue: 4501\n- Level" },
-        ],
-      }),
+      json(200, [
+        { html_url: "https://github.com/o/r/issues/1", body: "x\nSentry Issue: 45010\n" },
+        { html_url: "https://github.com/o/r/pull/9", body: "Sentry Issue: 4501", pull_request: {} },
+        { html_url: "https://github.com/o/r/issues/2", body: "link\nSentry Issue: 4501\n- Level" },
+      ]),
     );
-    const url = await make(fn).findOpenIssueBySentryId("4501");
-    expect(url).toBe("https://github.com/o/r/issues/2");
-    const q = new URL(calls[0]!.url).searchParams.get("q");
-    expect(q).toBe('repo:o/r is:issue is:open in:body "Sentry Issue: 4501"');
+    expect(await make(fn).findOpenIssueBySentryId("4501")).toBe("https://github.com/o/r/issues/2");
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/repos/o/r/issues");
+    expect(url.searchParams.get("state")).toBe("open");
+    expect(url.searchParams.get("labels")).toBe("sentry");
   });
 
-  test("find: no exact match returns null; null body tolerated", async () => {
-    const { fn } = mockFetch(() => json(200, { items: [{ html_url: "u", body: null }, { html_url: "v", body: "Sentry Issue: 45011" }] }));
+  test("find: no exact match returns null; null body and pull requests tolerated", async () => {
+    const { fn } = mockFetch(() =>
+      json(200, [{ html_url: "u", body: null }, { html_url: "v", body: "Sentry Issue: 45011" }, { html_url: "p", body: "Sentry Issue: 4501", pull_request: {} }]),
+    );
     expect(await make(fn).findOpenIssueBySentryId("4501")).toBeNull();
+  });
+
+  test("find: follows pages until a short page and stops after finding a hit", async () => {
+    const full = Array.from({ length: 100 }, (_, i) => ({ html_url: `u${i}`, body: "Sentry Issue: 1" }));
+    const { fn, calls } = mockFetch((c) =>
+      json(200, new URL(c.url).searchParams.get("page") === "1" ? full : [{ html_url: "hit", body: "Sentry Issue: 4501" }]),
+    );
+    expect(await make(fn).findOpenIssueBySentryId("4501")).toBe("hit");
+    expect(calls).toHaveLength(2);
   });
 
   test("find: non-2xx throws", async () => {
@@ -95,7 +106,7 @@ describe("github client", () => {
     expect((err as Error).message).not.toContain(TOKEN);
   });
 
-  test("search 422 surfaces GitHub's validation message", async () => {
+  test("find: 422 surfaces GitHub's validation message", async () => {
     const { fn } = mockFetch(() =>
       json(422, { message: "Validation Failed", errors: [{ message: "The listed users and repositories cannot be searched" }] }),
     );

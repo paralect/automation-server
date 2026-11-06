@@ -22,7 +22,7 @@ Sentry expects a response within about one second, so the server answers `200` a
 
 ## Behavior
 
-- **One GitHub issue per Sentry issue.** The issue body carries a `Sentry Issue: <id>` marker. Before creating, the automation searches for an open issue with that marker. Deliveries are also deduplicated by a sqlite claim, so a redelivered alert is skipped. A failed run releases its claim, so a redelivery can retry.
+- **One GitHub issue per Sentry issue.** The issue body carries a `Sentry Issue: <id>` marker. Before creating, the automation looks through the repo's open issues labelled `sentry` for that marker. Deliveries are also deduplicated by a sqlite claim, so a redelivered alert is skipped. A failed run releases its claim, so a redelivery can retry.
 - **Filters.** `SENTRY_LEVELS` (default `error,fatal`), `SENTRY_ENVIRONMENTS` (empty means all) and `SENTRY_MIN_EVENT_COUNT` (default `1`).
 - **Event count needs a token.** The `event_alert` payload has no event count, first seen or last seen. Those come from the Sentry API, so set `SENTRY_AUTH_TOKEN` to enable them. Without it, the count filter is not applied and the issue omits those stats.
 - **Redaction.** Issue content is scrubbed of common secret shapes before it is sent to GitHub. Payload bodies and secrets are never logged.

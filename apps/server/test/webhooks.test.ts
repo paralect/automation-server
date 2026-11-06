@@ -26,7 +26,7 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
     const method = init?.method ?? "GET";
     calls.push({ method, path: url.pathname });
     await gate.current;
-    if (url.pathname === "/search/issues") return Response.json({ items: [] });
+    if (url.pathname.endsWith("/issues") && method === "GET") return Response.json([]);
     if (url.pathname.endsWith("/labels")) return Response.json({}, { status: 201 });
     if (url.pathname.endsWith("/issues") && method === "POST") {
       if (failNextIssueCreate.value) {
