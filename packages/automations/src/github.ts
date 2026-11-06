@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { redactText } from "./redact";
+
 export type GithubClientConfig = {
   repo: { owner: string; name: string };
   token: string;
@@ -14,7 +16,10 @@ const searchResponse = z.object({
   items: z.array(z.object({ html_url: z.string(), body: z.string().nullish() })),
 });
 const createdIssue = z.object({ number: z.number(), html_url: z.string() });
-const errorBody = z.object({ errors: z.array(z.object({ code: z.string().optional() })).optional() });
+const errorBody = z.object({
+  message: z.string().optional(),
+  errors: z.array(z.object({ code: z.string().optional(), message: z.string().optional() })).optional(),
+});
 
 export type GithubClient = ReturnType<typeof createGithubClient>;
 
@@ -45,8 +50,17 @@ export function createGithubClient(config: GithubClientConfig) {
     return res;
   }
 
-  const fail = (method: string, path: string, res: Response): Error =>
-    new Error(`GitHub API ${method} ${path.split("?")[0]} failed with status ${res.status}`);
+  // GitHub's own error text (never our request body or token) is what tells a permissions problem from a bad query.
+  async function fail(method: string, path: string, res: Response): Promise<Error> {
+    const parsed = errorBody.safeParse(await res.json().catch(() => null));
+    const detail = parsed.success
+      ? [parsed.data.message, ...(parsed.data.errors ?? []).map((e) => e.message)].filter(Boolean).join("; ")
+      : "";
+    const safe = redactText(detail.split(config.token).join("[redacted]")).slice(0, 300);
+    return new Error(
+      `GitHub API ${method} ${path.split("?")[0]} failed with status ${res.status}${safe ? `: ${safe}` : ""}`,
+    );
+  }
 
   async function ensureLabel(label: GithubLabel): Promise<void> {
     const path = `${repoPath}/labels`;
@@ -56,7 +70,7 @@ export function createGithubClient(config: GithubClientConfig) {
       const parsed = errorBody.safeParse(await res.json().catch(() => null));
       if (parsed.success && parsed.data.errors?.some((e) => e.code === "already_exists")) return;
     }
-    throw fail("POST", path, res);
+    throw await fail("POST", path, res);
   }
 
   return {
@@ -69,7 +83,7 @@ export function createGithubClient(config: GithubClientConfig) {
       const q = `repo:${owner}/${name} is:issue is:open in:body "${marker}"`;
       const path = `/search/issues?q=${encodeURIComponent(q)}`;
       const res = await request("GET", path);
-      if (!res.ok) throw fail("GET", path, res);
+      if (!res.ok) throw await fail("GET", path, res);
       const { items } = searchResponse.parse(await res.json());
       // Search tokenizes loosely and matches substrings like ids sharing a prefix, so confirm the exact marker line.
       const hit = items.find((i) => (i.body ?? "").split(/\r?\n/).some((line) => line.trim() === marker));
@@ -79,7 +93,7 @@ export function createGithubClient(config: GithubClientConfig) {
     async createIssue(issue: { title: string; body: string; labels: string[] }): Promise<CreatedIssue> {
       const path = `${repoPath}/issues`;
       const res = await request("POST", path, issue);
-      if (!res.ok) throw fail("POST", path, res);
+      if (!res.ok) throw await fail("POST", path, res);
       return createdIssue.parse(await res.json());
     },
   };

@@ -48,7 +48,8 @@ describe("github client", () => {
   test("403 throws naming status and endpoint, never token", async () => {
     const { fn } = mockFetch(() => json(403, { message: `bad ${TOKEN} user@x.com` }));
     const err = await make(fn).ensureLabels(["x"]).catch((e: Error) => e);
-    expect((err as Error).message).toBe("GitHub API POST /repos/o/r/labels failed with status 403");
+    expect((err as Error).message).toStartWith("GitHub API POST /repos/o/r/labels failed with status 403");
+    expect((err as Error).message).not.toContain("user@x.com");
     expect((err as Error).message).not.toContain(TOKEN);
   });
 
@@ -87,9 +88,20 @@ describe("github client", () => {
     const good = mockFetch(() => json(201, { number: 7, html_url: "https://github.com/o/r/issues/7", extra: 1 }));
     expect(await make(good.fn).createIssue({ title: "t", body: "b", labels: ["a"] })).toEqual({ number: 7, html_url: "https://github.com/o/r/issues/7" });
     expect(good.calls[0]?.body).toEqual({ title: "t", body: "b", labels: ["a"] });
-    const bad = mockFetch(() => json(500, { message: "secret body" }));
+    const bad = mockFetch(() => json(500, { message: "Server Error" }));
     const err = await make(bad.fn).createIssue({ title: "t", body: "SECRET-CONTENT", labels: [] }).catch((e: Error) => e);
-    expect((err as Error).message).toBe("GitHub API POST /repos/o/r/issues failed with status 500");
+    expect((err as Error).message).toBe("GitHub API POST /repos/o/r/issues failed with status 500: Server Error");
+    expect((err as Error).message).not.toContain("SECRET-CONTENT");
+    expect((err as Error).message).not.toContain(TOKEN);
+  });
+
+  test("search 422 surfaces GitHub's validation message", async () => {
+    const { fn } = mockFetch(() =>
+      json(422, { message: "Validation Failed", errors: [{ message: "The listed users and repositories cannot be searched" }] }),
+    );
+    await expect(make(fn).findOpenIssueBySentryId("1")).rejects.toThrow(
+      "status 422: Validation Failed; The listed users and repositories cannot be searched",
+    );
   });
 
   test("custom apiBaseUrl", async () => {
