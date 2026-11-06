@@ -1,0 +1,39 @@
+{
+  "name": "automation-server",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "zod": "^4.5.4",
+      "typescript": "^6.0.3",
+      "@types/bun": "^1.4.3",
+      "varlock": "1.23.0",
+      "@orpc/server": "^1.15.6",
+      "@orpc/openapi": "^1.15.6",
+      "@orpc/zod": "^1.15.6"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "check-types": "turbo run check-types",
+    "dev:server": "turbo run dev -F server --",
+    "env:generate": "varlock codegen --path ./apps/server/",
+    "postinstall": "varlock codegen --path ./apps/server/"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@automation-server/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "turbo": "^2.11.7",
+    "typescript": "catalog:",
+    "varlock": "catalog:"
+  },
+  "packageManager": "bun@1.4.3"
+}

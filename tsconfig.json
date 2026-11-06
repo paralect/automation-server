@@ -1,0 +1,3 @@
+{
+  "extends": "@automation-server/config/tsconfig.base.json"
+}
