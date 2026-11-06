@@ -1,0 +1,47 @@
+{
+  "action": "triggered",
+  "data": {
+    "event": {
+      "issue_id": "4242",
+      "issue_url": "https://sentry.io/api/0/issues/4242/",
+      "web_url": "https://sentry.io/organizations/example-org/issues/4242/events/abc123/",
+      "event_id": "abc123",
+      "title": "TypeError: cannot read properties of undefined",
+      "culprit": "checkout(app/cart.ts)",
+      "level": "fatal",
+      "platform": "node",
+      "datetime": "2026-01-02T03:04:05Z",
+      "release": { "version": "web@1.2.3" },
+      "tags": [["environment", "production"], ["runtime", "node 22"]],
+      "exception": {
+        "values": [
+          {
+            "type": "TypeError",
+            "value": "cannot read properties of undefined",
+            "stacktrace": {
+              "frames": [
+                { "filename": "node_modules/lib/index.js", "function": "run", "lineno": 10, "colno": 2, "in_app": false, "vars": { "secretVar": "VARS_LEAK" } },
+                { "filename": "app/cart.ts", "module": "app/cart", "function": "checkout", "lineno": 42, "colno": 7, "in_app": true, "context_line": "const total = cart.items.length;", "vars": { "token": "VARS_LEAK" } }
+              ]
+            }
+          }
+        ]
+      },
+      "breadcrumbs": {
+        "values": [
+          { "timestamp": "2026-01-02T03:04:01Z", "type": "http", "category": "fetch", "level": "info", "message": null, "data": { "url": "https://api.example.com/cart", "method": "GET", "status_code": 200, "headers": "BC_HEADER_LEAK" } },
+          { "timestamp": 1767323043.5, "type": "default", "category": "ui.click", "message": "button#pay" }
+        ]
+      },
+      "user": { "id": "u-1", "email": "jane.doe@example.com", "ip_address": "203.0.113.7" },
+      "request": {
+        "url": "https://app.example.com/checkout",
+        "cookies": [["session", "COOKIE_LEAK"]],
+        "headers": [["Authorization", "HEADER_LEAK"], ["User-Agent", "UA_LEAK"]],
+        "data": { "card": "DATA_LEAK" }
+      },
+      "contexts": { "device": { "name": "CONTEXT_LEAK" } }
+    },
+    "triggered_rule": "Fatal in production"
+  }
+}
