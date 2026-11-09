@@ -1,81 +1,39 @@
 # automation-server
 
-A small webhook server that turns events from external services into actions. Today it ships one flow: a Sentry issue alert becomes one GitHub issue, labelled so that a GitHub Action that watches issues labelled `sentry` can pick it up from there.
+A small, self-hosted webhook server that turns events from external services into actions.
+
+Each integration plugs in at one of two points: a **source** receives and verifies webhooks from a service, and an **automation** reacts to the normalized events. Delivery, deduplication, retries and logging are handled once, in the core.
 
 ```
-Sentry issue alert
-      |
-      v
-POST /webhooks/sentry  --- verify HMAC-SHA256 over the raw body (401 on failure)
-      |
-      v
-Source.parse  ----------- Event { source, kind, externalId, payload }
-      |  (200 returned here, work continues in the background)
-      v
-Dispatcher  ------------- claim (automation, externalId) in sqlite; duplicates are skipped
-      |
-      v
-Automation  ------------- filters (level, environment, event count) -> GitHub issue
+POST /webhooks/<source>  --- Source.verify (raw body, 401 on failure)
+        |
+        v
+Source.parse  ------------- Event { source, kind, externalId, payload }
+        |  (200 returned here, work continues in the background)
+        v
+Dispatcher  --------------- claim (automation, externalId) in sqlite; duplicates are skipped
+        |
+        v
+Automation(s)  ------------ match the event, do the work, release the claim on failure
 ```
 
-Sentry expects a response within about one second, so the server answers `200` as soon as the signature checks out and the event is parsed. Enrichment and the GitHub calls run in the background and are drained on shutdown.
+## Integrations
 
-## Behavior
-
-- **One GitHub issue per Sentry issue.** The issue body carries a `Sentry Issue: <id>` marker. Before creating, the automation looks through the repo's open issues labelled `sentry` for that marker. Deliveries are also deduplicated by a sqlite claim, so a redelivered alert is skipped. A failed run releases its claim, so a redelivery can retry.
-- **Filters.** `SENTRY_LEVELS` (default `error,fatal`), `SENTRY_ENVIRONMENTS` (empty means all) and `SENTRY_MIN_EVENT_COUNT` (default `1`).
-- **Event count needs a token.** The `event_alert` payload has no event count, first seen or last seen. Those come from the Sentry API, so set `SENTRY_AUTH_TOKEN` to enable them. Without it, the count filter is not applied and the issue omits those stats.
-- **Redaction.** Issue content is scrubbed of common secret shapes before it is sent to GitHub. Payload bodies and secrets are never logged.
-
-## Setup
-
-### Sentry
-
-1. In Sentry, open Settings, then Developer Settings, then create a new Internal Integration.
-2. Set the Webhook URL to `https://<your-host>/webhooks/sentry`.
-3. Enable the Alert Rule Action toggle so the integration can be used as an alert action.
-4. Save, then copy the Client Secret from the integration page. This is `SENTRY_CLIENT_SECRET`.
-5. Create or edit an Issue Alert and add the action "Send a notification via <integration name>".
-6. Optional: from the same integration page, copy a token for `SENTRY_AUTH_TOKEN`. Give it read access to Issue & Event.
-
-These steps follow Sentry's [integration platform docs](https://docs.sentry.io/organization/integrations/integration-platform/). The docs confirm Developer Settings, the Client Secret signature, per-integration tokens and the "Send a notification via <your integration>" action. The Alert Rule Action toggle and the exact scope label were not found in the public docs text, so check them against your Sentry UI.
-
-### GitHub
-
-Create a fine-grained personal access token at Settings, Developer settings, Personal access tokens.
-
-- Repository access: only the one repository that should receive issues.
-- Repository permissions: Issues set to Read and write. Metadata is read-only and implicit.
-
-Use it as `GITHUB_TOKEN`, and set `GITHUB_REPO` to `owner/name`.
-
-## Configuration
-
-Configuration is validated at startup with [Varlock](https://varlock.dev). A missing or invalid required value stops the server and names the variable. The schema is `apps/server/.env.schema`. Put local values in `apps/server/.env.local` (see `apps/server/.env.example`). Run `bun run env:generate` after changing the schema.
-
-| Variable | Required | Default | Description |
+| Integration | Kind | What it does | Docs |
 | --- | --- | --- | --- |
-| `SENTRY_CLIENT_SECRET` | yes | | Client Secret of the Sentry integration. Verifies webhook signatures. |
-| `GITHUB_TOKEN` | yes | | GitHub token with Issues: Read and write on the target repo. |
-| `GITHUB_REPO` | yes | | Target repository as `owner/name`. |
-| `PORT` | no | `3000` | HTTP port. |
-| `DATABASE_PATH` | no | `./data/automation.db` | sqlite file for claims. Keep it on persistent storage. |
-| `SENTRY_AUTH_TOKEN` | no | | Enables issue stats enrichment (count, first and last seen). |
-| `SENTRY_API_BASE_URL` | no | `https://sentry.io` | Sentry host. The token is only sent to this origin. |
-| `SENTRY_LEVELS` | no | `error,fatal` | Comma-separated levels that create an issue. |
-| `SENTRY_ENVIRONMENTS` | no | empty (all) | Comma-separated environments to handle. |
-| `SENTRY_MIN_EVENT_COUNT` | no | `1` | Minimum event count, applied only when the count is known. |
-| `CORS_ORIGIN` | no | | Origin allowed on the browser-facing oRPC routes. Not used by webhooks. |
+| Sentry | source | Verifies and parses Sentry issue alerts (`POST /webhooks/sentry`) | [docs/integrations/sentry.md](docs/integrations/sentry.md) |
+| GitHub Issues | action | Creates one labelled GitHub issue per Sentry issue (`sentry-to-github-issue`) | [docs/integrations/sentry.md](docs/integrations/sentry.md) |
 
-## Running
+More are planned. See [docs/adding-an-integration.md](docs/adding-an-integration.md) to add your own.
+
+## Quick start
+
+Requires [Bun](https://bun.sh) 1.4+.
 
 ```bash
 bun install
-bun run dev        # watch mode on http://localhost:3000
-bun run test
-bun run check-types
-bun run build      # apps/server/dist/index.mjs
-bun run start      # run the built server (from apps/server)
+cp apps/server/.env.example apps/server/.env.local   # fill in the values
+bun run dev                                          # http://localhost:3000
 ```
 
 `GET /health` returns `{"status":"ok"}`. On SIGTERM or SIGINT the server stops accepting connections, waits up to 10 seconds for in-flight work, closes the store and exits.
@@ -86,36 +44,36 @@ bun run start      # run the built server (from apps/server)
 docker build -t automation-server .
 docker run -d --name automation-server -p 3000:3000 \
   -v automation-data:/data \
-  -e SENTRY_CLIENT_SECRET=... \
-  -e GITHUB_TOKEN=... \
-  -e GITHUB_REPO=your-org/your-repo \
+  --env-file apps/server/.env.local \
   automation-server
 ```
 
-The image runs as a non-root user and stores the claim database at `/data/automation.db`. Mount a volume on `/data` so claims survive restarts.
+The image runs as a non-root user and keeps its state in `/data/automation.db`. Mount a volume on `/data` so claims survive restarts.
 
-## Adding an automation
+## Configuration
 
-Automations match events and run. The dispatcher handles claiming, retries on failure and logging.
+Configuration is validated at startup with [Varlock](https://varlock.dev). A missing or invalid required value stops the server and names the variable. The schema lives in `apps/server/.env.schema`; put local values in `apps/server/.env.local` (see `apps/server/.env.example`). Run `bun run env:generate` after changing the schema.
 
-```ts
-// packages/automations/src/notifyOnFatal/automation.ts
-import { defineAutomation } from "@automation-server/core/automation";
-import { isSentryIssueAlert } from "@automation-server/sources/sentry/event";
+Server-wide settings:
 
-export const notifyOnFatal = defineAutomation({
-  name: "notify-on-fatal",
-  matches: isSentryIssueAlert,
-  async run(event, { log }) {
-    if (event.payload.level !== "fatal") return;
-    log.info("fatal alert", { issueId: event.payload.issueId });
-  },
-});
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `PORT` | no | `3000` | HTTP port. |
+| `DATABASE_PATH` | no | `./data/automation.db` | sqlite file for claims. Keep it on persistent storage. |
+| `CORS_ORIGIN` | no | | Origin allowed on the browser-facing oRPC routes. Not used by webhooks. |
+
+Each integration documents its own variables in its page under [docs/integrations](docs/integrations).
+
+## Development
+
+```bash
+bun run dev           # watch mode
+bun run test          # all workspaces
+bun run check-types
+bun run build         # apps/server/dist/index.mjs
 ```
 
-Then add one line to the list in `packages/automations/src/registry.ts`. Throwing from `run` releases the claim so the delivery can be retried.
-
-## Project Structure
+## Project structure
 
 ```
 automation-server/
@@ -123,12 +81,25 @@ automation-server/
 │   └── server/          # Hono app: webhook routes, config, wiring, Bun.serve entry
 ├── packages/
 │   ├── core/            # Event, Source, Automation, dispatcher, sqlite claim store, logger
-│   ├── sources/         # Sentry source: signature check, payload parsing, optional enrichment
-│   ├── automations/     # Automations and the registry (sentry-to-github-issue)
+│   ├── sources/         # One folder per service that sends webhooks (sentry/)
+│   ├── automations/     # One folder per automation, plus the registry
 │   ├── api/             # oRPC routers
 │   └── config/          # Shared tsconfig
+├── docs/                # Architecture, integration guides
+└── github-actions/      # Reusable GitHub Actions workflows (stored, not active)
 ```
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Adding an integration](docs/adding-an-integration.md)
+- [Sentry integration](docs/integrations/sentry.md)
+- [GitHub Actions library](github-actions/README.md)
+
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT
+[MIT](LICENSE)

@@ -1,5 +1,15 @@
 {
   "name": "automation-server",
+  "description": "Self-hosted webhook server that turns events from external services into actions",
+  "license": "MIT",
+  "keywords": [
+    "webhooks",
+    "automation",
+    "sentry",
+    "github",
+    "hono",
+    "bun"
+  ],
   "private": true,
   "workspaces": {
     "packages": [
