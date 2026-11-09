@@ -20,6 +20,8 @@ The skill and the workflow are still specific to the project they came from. Bef
 
 It needs the `CODEX_AUTH_JSON` secret and refuses to run in public repositories.
 
+Optional repository variables: `CODEX_MODEL` and `CODEX_REASONING_EFFORT` (default `high`). Without an explicit effort Codex can run with reasoning disabled, which was observed in a real run of the SEO workflow.
+
 ## Notes on `codex-seo-autopilot.yml`
 
 Copy it into the marketing site's repository. It runs daily and on demand, and opens a new PR on a `seo-autopilot/<date>-<run id>` branch each time it changes something.
@@ -27,7 +29,7 @@ Copy it into the marketing site's repository. It runs daily and on demand, and o
 **Setup**
 
 - Auth, one of: secret `OPENAI_API_KEY` (works in any repository), or secret `CODEX_AUTH_JSON` (private repositories only, with optional `GH_PAT_FOR_SECRET_WRITE` to store the rotated token).
-- Repository variables: `SEO_SITE`, `SEO_PRODUCT`, `SEO_CONVERSION`, and optionally `SEO_COMPETITORS` (default "find them"). These are the skill's five setup lines. The ship mode is fixed to "PR for review". Optional `CODEX_MODEL`.
+- Repository variables: `SEO_SITE`, `SEO_PRODUCT`, `SEO_CONVERSION`, and optionally `SEO_COMPETITORS` (default "find them"). These are the skill's five setup lines. The ship mode is fixed to "PR for review". Optional `CODEX_MODEL` and `CODEX_REASONING_EFFORT` (default `high`).
 - Allow Actions to create pull requests in the repository settings.
 - Adapt the dependency install step to the site's stack. The skill runs the repo's lint, type check and build before it ships.
 
