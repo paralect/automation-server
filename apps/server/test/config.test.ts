@@ -11,6 +11,7 @@ const base: RawEnv = {
   SENTRY_MIN_EVENT_COUNT: 1,
   GITHUB_TOKEN: "token",
   GITHUB_REPO: "acme/widgets",
+  LOG_RETENTION_DAYS: 30,
 };
 
 describe("parseCsv", () => {
@@ -38,6 +39,8 @@ describe("buildConfig", () => {
       port: 3000,
       databasePath: "./data/automation.db",
       sentry: { clientSecret: "secret", authToken: undefined, apiBaseUrl: "https://sentry.io" },
+      adminToken: undefined,
+      retentionDays: 30,
       github: { token: "token", repo: { owner: "acme", name: "widgets" } },
       filters: { levels: ["error", "fatal"], environments: [], minEventCount: 1 },
     });
@@ -53,6 +56,11 @@ describe("buildConfig", () => {
     expect(config.sentry.authToken).toBe("sntrys_x");
     expect(config.filters.environments).toEqual(["production", "staging"]);
     expect(config.filters.minEventCount).toBe(5);
+  });
+
+  test("empty admin token counts as absent", () => {
+    expect(buildConfig({ ...base, ADMIN_API_TOKEN: "" }).adminToken).toBeUndefined();
+    expect(buildConfig({ ...base, ADMIN_API_TOKEN: "x".repeat(32) }).adminToken).toBe("x".repeat(32));
   });
 
   test("empty auth token counts as absent", () => {

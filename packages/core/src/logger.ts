@@ -1,3 +1,5 @@
+import type { LogEntry, LogLevel } from "./activity";
+
 export type LogFields = Readonly<Record<string, unknown>>;
 
 export type Logger = {
@@ -6,8 +8,15 @@ export type Logger = {
   error(message: string, fields?: LogFields): void;
 };
 
-export function createLogger(base: LogFields = {}, write: (line: string) => void = (l) => console.log(l)): Logger {
-  const emit = (level: string) => (message: string, fields?: LogFields) =>
-    write(JSON.stringify({ time: new Date().toISOString(), level, message, ...base, ...fields }));
+export function createLogger(
+  base: LogFields = {},
+  write: (line: string) => void = (l) => console.log(l),
+  record?: (entry: LogEntry) => void,
+): Logger {
+  const emit = (level: LogLevel) => (message: string, fields?: LogFields) => {
+    const entry: LogEntry = { time: new Date().toISOString(), level, message, fields: { ...base, ...fields } };
+    write(JSON.stringify({ time: entry.time, level, message, ...entry.fields }));
+    record?.(entry);
+  };
   return { info: emit("info"), warn: emit("warn"), error: emit("error") };
 }

@@ -1,3 +1,4 @@
+import type { ActivityStore } from "./activity";
 import type { Automation } from "./automation";
 import type { Event } from "./event";
 import type { Logger } from "./logger";
@@ -13,11 +14,12 @@ export type DispatcherDeps = {
   store: ClaimStore;
   log: Logger;
   prepare?: (event: Event) => Promise<Event>;
+  activity?: ActivityStore;
 };
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-export function createDispatcher({ automations, store, log, prepare }: DispatcherDeps): Dispatcher {
+export function createDispatcher({ automations, store, log, prepare, activity }: DispatcherDeps): Dispatcher {
   const inFlight = new Set<Promise<void>>();
 
   const matchesSafely = (automation: Automation, event: Event): boolean => {
@@ -29,33 +31,58 @@ export function createDispatcher({ automations, store, log, prepare }: Dispatche
     }
   };
 
+  const record = <T>(what: string, scoped: Record<string, string>, fn: (activity: ActivityStore) => T): T | undefined => {
+    if (!activity) return undefined;
+    try {
+      return fn(activity);
+    } catch (err) {
+      log.error(`activity ${what} failed`, { ...scoped, error: errorMessage(err) });
+      return undefined;
+    }
+  };
+
   const runOne = async (automation: Automation, event: Event): Promise<void> => {
     const key = claimKey(automation.name, event.externalId);
     const scoped = { automation: automation.name, externalId: event.externalId };
+    const runStart = () => ({
+      automation: automation.name,
+      source: event.source,
+      kind: event.kind,
+      externalId: event.externalId,
+      startedAt: new Date().toISOString(),
+    });
     try {
       if (!store.claim(key)) {
-        log.info("duplicate skipped", scoped);
+        const runId = record("recordDuplicate", scoped, (a) => a.recordDuplicate(runStart()));
+        log.info("duplicate skipped", runId ? { ...scoped, runId } : scoped);
         return;
       }
     } catch (err) {
       log.error("claim failed", { ...scoped, error: errorMessage(err) });
       return;
     }
+    const runId = record("startRun", scoped, (a) => a.startRun(runStart()));
+    const tagged = runId ? { ...scoped, runId } : scoped;
     const child: Logger = {
-      info: (m, f) => log.info(m, { ...scoped, ...f }),
-      warn: (m, f) => log.warn(m, { ...scoped, ...f }),
-      error: (m, f) => log.error(m, { ...scoped, ...f }),
+      info: (m, f) => log.info(m, { ...tagged, ...f }),
+      warn: (m, f) => log.warn(m, { ...tagged, ...f }),
+      error: (m, f) => log.error(m, { ...tagged, ...f }),
+    };
+    const finish = (status: "succeeded" | "failed", error?: string) => {
+      if (runId) record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: new Date().toISOString() }));
     };
     try {
       await automation.run(event, { log: child });
       store.complete(key);
+      finish("succeeded");
     } catch (err) {
       try {
         store.release(key);
       } catch (releaseErr) {
         log.error("release failed", { ...scoped, error: errorMessage(releaseErr) });
       }
-      log.error("automation failed", { ...scoped, error: errorMessage(err) });
+      log.error("automation failed", { ...tagged, error: errorMessage(err) });
+      finish("failed", errorMessage(err));
     }
   };
 

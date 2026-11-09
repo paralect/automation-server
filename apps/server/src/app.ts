@@ -2,14 +2,14 @@ import { appRouter } from "@automation-server/api/routers/index";
 import type { Dispatcher, Logger, Source } from "@automation-server/core";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
-import { onError } from "@orpc/server";
+import { ORPCError, onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
-import { createContext } from "./context";
+import { createContext, type AdminDeps } from "./context";
 import { createWebhookRoutes } from "./webhooks";
 
 export type AppDeps = {
@@ -18,9 +18,10 @@ export type AppDeps = {
   log: Logger;
   corsOrigin?: string;
   maxBodyBytes?: number;
+  admin: AdminDeps;
 };
 
-export function createApp({ sources, dispatcher, log, corsOrigin, maxBodyBytes }: AppDeps) {
+export function createApp({ sources, dispatcher, log, corsOrigin, maxBodyBytes, admin }: AppDeps) {
   const app = new Hono();
 
   app.use(logger());
@@ -43,6 +44,7 @@ export function createApp({ sources, dispatcher, log, corsOrigin, maxBodyBytes }
     ],
     interceptors: [
       onError((error) => {
+        if (error instanceof ORPCError && (error.code === "UNAUTHORIZED" || error.code === "NOT_FOUND")) return;
         console.error(error);
       }),
     ],
@@ -51,13 +53,14 @@ export function createApp({ sources, dispatcher, log, corsOrigin, maxBodyBytes }
   const rpcHandler = new RPCHandler(appRouter, {
     interceptors: [
       onError((error) => {
+        if (error instanceof ORPCError && (error.code === "UNAUTHORIZED" || error.code === "NOT_FOUND")) return;
         console.error(error);
       }),
     ],
   });
 
   app.use("/*", async (c, next) => {
-    const context = await createContext({ context: c });
+    const context = await createContext({ context: c, ...admin });
 
     const rpcResult = await rpcHandler.handle(c.req.raw, {
       prefix: "/rpc",

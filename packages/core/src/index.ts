@@ -6,3 +6,4 @@ export * from "./store";
 export * from "./dispatcher";
 export * from "./sqliteStore";
 export * from "./activity";
+export * from "./sqliteActivityStore";

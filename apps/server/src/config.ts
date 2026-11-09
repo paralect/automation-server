@@ -10,6 +10,8 @@ export type ServerConfig = {
     token: string;
     repo: { owner: string; name: string };
   };
+  adminToken?: string;
+  retentionDays: number;
   filters: {
     levels: string[];
     environments: string[];
@@ -28,6 +30,8 @@ export type RawEnv = {
   SENTRY_MIN_EVENT_COUNT: number;
   GITHUB_TOKEN: string;
   GITHUB_REPO: string;
+  ADMIN_API_TOKEN?: string;
+  LOG_RETENTION_DAYS: number;
 };
 
 export const parseCsv = (value: string | undefined): string[] =>
@@ -54,6 +58,8 @@ export function buildConfig(env: RawEnv): ServerConfig {
       authToken: env.SENTRY_AUTH_TOKEN || undefined,
       apiBaseUrl: env.SENTRY_API_BASE_URL,
     },
+    adminToken: env.ADMIN_API_TOKEN || undefined,
+    retentionDays: env.LOG_RETENTION_DAYS,
     github: { token: env.GITHUB_TOKEN, repo: parseRepo(env.GITHUB_REPO) },
     filters: {
       levels: parseCsv(env.SENTRY_LEVELS),

@@ -1,5 +1,5 @@
 import { createAutomations } from "@automation-server/automations";
-import { createDispatcher, createSqliteStore, type Logger } from "@automation-server/core";
+import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
 import { createSentrySource } from "@automation-server/sources";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
@@ -57,7 +57,12 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
   });
   const dispatcher = createDispatcher({ automations, store, log });
   const sentry = createSentrySource({ clientSecret: SECRET });
-  const app = createApp({ sources: { [sentry.name]: sentry }, dispatcher, log, maxBodyBytes });
+  const admin = {
+    activity: createSqliteActivityStore({ path: ":memory:" }),
+    adminToken: undefined,
+    system: { startedAt: new Date().toISOString(), sources: [sentry.name], automations: [], retentionDays: 30 },
+  };
+  const app = createApp({ sources: { [sentry.name]: sentry }, dispatcher, log, maxBodyBytes, admin });
 
   const post = (path: string, body: Uint8Array, headers: Record<string, string> = {}) =>
     app.request(path, { method: "POST", body, headers });
@@ -178,6 +183,14 @@ describe("POST /webhooks/:source", () => {
   test("inherited object keys are not sources", async () => {
     const res = await t.post("/webhooks/constructor", fixture);
     expect(res.status).toBe(404);
+  });
+
+  test("a verified delivery logs webhook received with identity only", async () => {
+    await t.deliver();
+    await t.dispatcher.drain(2000);
+    const received = t.logs.map((l) => JSON.parse(l)).find((l) => l.m === "webhook received");
+    expect(received.f).toMatchObject({ source: "sentry", kind: "issue_alert", externalId: "1117540176" });
+    expect(Object.keys(received.f).sort()).toEqual(["externalId", "kind", "source"]);
   });
 
   test("logs never contain the GitHub token", async () => {
