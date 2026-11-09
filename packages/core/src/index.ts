@@ -5,3 +5,4 @@ export * from "./source";
 export * from "./store";
 export * from "./dispatcher";
 export * from "./sqliteStore";
+export * from "./activity";

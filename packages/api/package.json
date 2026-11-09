@@ -10,6 +10,7 @@
     "check-types": "tsc -b"
   },
   "dependencies": {
+    "@automation-server/core": "workspace:*",
     "@orpc/client": "^1.15.6",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",

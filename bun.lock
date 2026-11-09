@@ -39,6 +39,7 @@
     "packages/api": {
       "name": "@automation-server/api",
       "dependencies": {
+        "@automation-server/core": "workspace:*",
         "@orpc/client": "^1.15.6",
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",
