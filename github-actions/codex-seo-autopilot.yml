@@ -1,0 +1,226 @@
+name: Codex SEO autopilot
+
+# Runs the seo-autopilot skill (https://il.ly/skills/seo-autopilot) with Codex on
+# a daily schedule and opens a PR with whatever it shipped. The skill keeps its
+# own state in seo/ and decides by itself whether the run is daily, weekly or
+# monthly. See github-actions/README.md for setup.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run even if an earlier SEO autopilot PR is still open
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# auth.json holds a refresh token that rotates on use, so two runs in parallel
+# would invalidate each other. Runs must queue, never cancel.
+concurrency:
+  group: codex-auth
+  cancel-in-progress: false
+
+env:
+  CODEX_VERSION: latest
+  # The skill is fetched from upstream, pinned to one commit and verified by
+  # hash, so a change upstream cannot alter the prompt this job runs with.
+  SKILL_REF: b507495d943195812825d63d01473359c4efb27f
+  SKILL_SHA256: 73d504d5dfcfbe8195a80197c63da5697346ff0c9b09eccb4a5ed9de77c7ab22
+
+jobs:
+  seo:
+    name: Run SEO autopilot with Codex
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      # The skill reads state from seo/ on the default branch. While an earlier
+      # PR is unmerged that state is missing, so a new run would redo its work.
+      - name: Skip while a previous run is awaiting review
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("seo-autopilot/"))] | length')
+          if [ "$open" -gt 0 ]; then
+            echo "::notice::$open SEO autopilot PR(s) still open. Merge or close them, or run with force."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The Codex ChatGPT login (auth.json) must never run in a public repo.
+      # An OPENAI_API_KEY has no such limit, so it is preferred when set.
+      - name: Check credentials
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "CODEX_AUTH_MODE=api-key" >> "$GITHUB_ENV"
+          elif [ -n "$CODEX_AUTH_JSON" ]; then
+            private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)
+            if [ "$private" != "true" ]; then
+              echo "::error::CODEX_AUTH_JSON must never run in a public repository. Set OPENAI_API_KEY instead."
+              exit 1
+            fi
+            echo "CODEX_AUTH_MODE=auth-json" >> "$GITHUB_ENV"
+          else
+            echo "::error::Set the OPENAI_API_KEY or CODEX_AUTH_JSON secret."
+            exit 1
+          fi
+
+      # persist-credentials is off so the job token is not left in .git/config
+      # where the model could read it. The push step passes it explicitly.
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          persist-credentials: false
+
+      # Adapt to the site's stack. The skill runs the repo's lint, type check
+      # and build before it ships, so they must work here.
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.skip != 'true' && hashFiles('package-lock.json') != ''
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true' && hashFiles('package-lock.json') != ''
+        run: npm ci
+
+      - name: Install Codex CLI
+        if: steps.gate.outputs.skip != 'true'
+        run: npm install -g "@openai/codex@${CODEX_VERSION}"
+
+      - name: Prepare Codex home
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          CODEX_MODEL: ${{ vars.CODEX_MODEL }}
+        run: |
+          home="$RUNNER_TEMP/codex-home"
+          mkdir -p "$home/skills/seo-autopilot"
+          chmod 700 "$home"
+          umask 077
+          {
+            echo 'cli_auth_credentials_store = "file"'
+            echo 'approval_policy = "never"'
+            echo 'web_search = "live"'
+            if [ -n "$CODEX_MODEL" ]; then
+              printf 'model = "%s"\n' "$CODEX_MODEL"
+            fi
+            echo
+            echo '[sandbox_workspace_write]'
+            echo 'network_access = true'
+          } > "$home/config.toml"
+          echo "CODEX_HOME=$home" >> "$GITHUB_ENV"
+          export CODEX_HOME="$home"
+          if [ "$CODEX_AUTH_MODE" = "api-key" ]; then
+            printf '%s' "$OPENAI_API_KEY" | codex login --with-api-key
+          else
+            printf '%s' "$CODEX_AUTH_JSON" > "$home/auth.json"
+            sha256sum "$home/auth.json" | cut -d' ' -f1 > "$RUNNER_TEMP/auth.sha256"
+          fi
+
+      - name: Install the seo-autopilot skill
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          dest="$CODEX_HOME/skills/seo-autopilot/SKILL.md"
+          curl -fsSL "https://raw.githubusercontent.com/Illyism/seo-skills/$SKILL_REF/seo/seo-autopilot/SKILL.md" -o "$dest"
+          echo "$SKILL_SHA256  $dest" | sha256sum -c -
+
+      # The five setup lines of the skill. Values arrive through env, never
+      # interpolated into the script.
+      - name: Write brief
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          SEO_SITE: ${{ vars.SEO_SITE }}
+          SEO_PRODUCT: ${{ vars.SEO_PRODUCT }}
+          SEO_CONVERSION: ${{ vars.SEO_CONVERSION }}
+          SEO_COMPETITORS: ${{ vars.SEO_COMPETITORS }}
+        run: |
+          for v in SEO_SITE SEO_PRODUCT SEO_CONVERSION; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Repository variable $v is not set."
+              exit 1
+            fi
+          done
+          {
+            printf 'Site:          %s\n' "$SEO_SITE"
+            printf 'Product:       %s\n' "$SEO_PRODUCT"
+            printf 'Conversion:    %s\n' "$SEO_CONVERSION"
+            printf 'Competitors:   %s\n' "${SEO_COMPETITORS:-find them}"
+            printf 'Ship mode:     PR for review\n'
+          } > "$RUNNER_TEMP/brief.md"
+
+      # No GH_TOKEN here on purpose: the model reads untrusted web pages and can
+      # edit the checkout, but cannot push or open PRs. The next step does that.
+      - name: Run Codex
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          codex exec \
+            --sandbox workspace-write \
+            --output-last-message "$RUNNER_TEMP/pr-body.md" \
+            "Use \$seo-autopilot. The five setup lines are in $RUNNER_TEMP/brief.md. Ship mode is PR for review: edit files in the checkout, but do not run git commit, git push or create a PR. The workflow does that. Your final message becomes the PR body, so write the report from the skill: what shipped, what is broken, what you need from the owner."
+
+      - name: Open PR
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "::notice::Codex produced no change."
+            exit 0
+          fi
+          if git status --porcelain -- .github .agents | grep -q .; then
+            echo "::error::Codex changed files under .github or .agents, which this workflow refuses to push."
+            exit 1
+          fi
+          branch="seo-autopilot/$(date -u +%Y-%m-%d)-$GITHUB_RUN_ID"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "SEO autopilot $(date -u +%Y-%m-%d)"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+          {
+            cat "$RUNNER_TEMP/pr-body.md" 2>/dev/null || true
+            printf '\n\nRun log: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } > "$RUNNER_TEMP/pr-body-final.md"
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$branch" \
+            --title "SEO autopilot $(date -u +%Y-%m-%d)" \
+            --body-file "$RUNNER_TEMP/pr-body-final.md"
+
+      # Codex may have rotated the refresh token. Persist it even when an
+      # earlier step failed, or the next run starts with a dead token.
+      - name: Write back rotated auth.json
+        if: always() && env.CODEX_AUTH_MODE == 'auth-json'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_SECRET_WRITE }}
+        run: |
+          [ -f "$RUNNER_TEMP/auth.sha256" ] || exit 0
+          after=$(sha256sum "$CODEX_HOME/auth.json" | cut -d' ' -f1)
+          [ "$after" != "$(cat "$RUNNER_TEMP/auth.sha256")" ] || exit 0
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::auth.json changed but GH_PAT_FOR_SECRET_WRITE is not set. Update CODEX_AUTH_JSON by hand or the next run may fail."
+            exit 0
+          fi
+          gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
