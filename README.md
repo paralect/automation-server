@@ -64,6 +64,17 @@ Server-wide settings:
 
 Each integration documents its own variables in its page under [docs/integrations](docs/integrations).
 
+## GitHub Actions workflows
+
+Ready-made GitHub Actions workflows live in [`github-actions/`](github-actions/README.md). They are stored there, not active in this repository. Copy the one you need into the `.github/workflows/` directory of the target repository.
+
+| Workflow | What it does |
+| --- | --- |
+| [`codex-issue-fix.yml`](github-actions/codex-issue-fix.yml) | Opens a draft PR with a Codex-written fix for each new issue. Pairs with the Sentry integration: issues labelled `sentry` can trigger it. |
+| [`codex-seo-autopilot.yml`](github-actions/codex-seo-autopilot.yml) | Runs the [seo-autopilot](https://il.ly/skills/seo-autopilot) skill with Codex every day and opens a PR with the changes. |
+
+Setup, secrets and caveats for each workflow are in [github-actions/README.md](github-actions/README.md).
+
 ## Development
 
 ```bash
@@ -94,7 +105,7 @@ automation-server/
 - [Architecture](docs/architecture.md)
 - [Adding an integration](docs/adding-an-integration.md)
 - [Sentry integration](docs/integrations/sentry.md)
-- [GitHub Actions library](github-actions/README.md)
+- [GitHub Actions workflows](github-actions/README.md)
 
 ## Contributing
 
