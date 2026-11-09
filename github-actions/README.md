@@ -6,6 +6,7 @@ Workflow files kept here for reuse. They are **not active** in this repository: 
 | --- | --- |
 | [`codex-issue-fix.yml`](codex-issue-fix.yml) | Opens a draft PR with a Codex-written fix for each new issue. |
 | [`codex-seo-autopilot.yml`](codex-seo-autopilot.yml) | Daily run of the [seo-autopilot](https://il.ly/skills/seo-autopilot) skill with Codex. Opens one PR per run. |
+| [`codex-changelog.yml`](codex-changelog.yml) | On every push to the production branch, Codex writes a changelog note from the pushed commits and opens a PR. |
 
 ## Notes on `codex-issue-fix.yml`
 
@@ -41,3 +42,32 @@ Copy it into the marketing site's repository. It runs daily and on demand, and o
 - The Codex step has network and web search enabled, and no GitHub token. The push and PR steps run afterwards, and refuse to push changes under `.github` or `.agents`. The checkout does not persist credentials.
 - The model reads untrusted web pages while holding the OpenAI credential. Use a key with a spending limit.
 - Not run end to end. `web_search` and `network_access` keys in the generated `config.toml` and the unattended skill run still need a first real run to confirm.
+
+## Notes on `codex-changelog.yml`
+
+Copy it into the product's repository, and copy [`skills/write-changelog`](skills/write-changelog) to `.agents/skills/write-changelog/` next to it. Codex finds the skill in the checkout, the workflow does not install it.
+
+**Setup**
+
+- Auth, one of: secret `OPENAI_API_KEY` (any repository), or secret `CODEX_AUTH_JSON` (private repositories only, with optional `GH_PAT_FOR_SECRET_WRITE` to store the rotated token).
+- Repository variables, all optional:
+  - `PRODUCTION_BRANCH`: the branch whose pushes produce a changelog. Default `production`.
+  - `CHANGELOG_DIR`: the folder that holds the notes. Default `changelog`. Codex matches the format of the notes already in it.
+  - `CHANGELOG_BASE_BRANCH`: the branch the PR targets. Default is the repository's default branch.
+  - `CODEX_MODEL` and `CODEX_REASONING_EFFORT` (default `high`).
+- Allow Actions to create pull requests in the repository settings.
+
+**Behavior**
+
+- The workflow triggers on every push and matches the branch inside the job, because branch filters cannot read variables. Pushes to other branches show up as skipped runs.
+- The window is the push itself, from the previous tip of the production branch to the new one. For a new branch or a force push it falls back to the last commit that touched `CHANGELOG_DIR`, then to the last 50 commits.
+- A push that only changes `CHANGELOG_DIR` is skipped. That is what merging the changelog PR into the production branch looks like, and without the skip the workflow would feed itself.
+- The PR branch is `changelog/<short sha>`, built on `CHANGELOG_BASE_BRANCH`, so commits that are on the production branch but not on the base never leak into the PR. A rerun updates the branch and does not open a second PR.
+- If the push has nothing a user would notice, Codex writes no note and no PR opens.
+- The Codex step has no network and no GitHub token. The push step refuses any change outside `CHANGELOG_DIR`.
+- The skill writes text only. The original Paralect skill also drew cover images from a running app and uploaded them to a CDN. That needs a dev server and bucket credentials, so it is left out here.
+- Production pushes share the `codex-auth` queue with the other Codex workflows. GitHub keeps one pending run per group, so two production pushes landing while a run is active can drop the older pending one and its note. Rerun it from the Actions tab. Pushes to other branches use their own group and cannot displace it.
+- A push workflow runs from the pushed commit. The workflow file and `.agents/skills/write-changelog/` must be on the production branch itself. Copying them only to the default branch does nothing until the next promotion.
+- Pushes and PRs made with the job token do not start other workflows, so the changelog PR gets no CI. If the base branch requires status checks, merge the PR with a bypass, or change the push and `gh pr create` steps to use a GitHub App or PAT token.
+- The Open PR step fails if the note or the PR body contains the OpenAI key or a value from `auth.json`.
+- Not run end to end yet. The gate and range logic were exercised locally in bash, the rest needs a first real run.

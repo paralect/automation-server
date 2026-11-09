@@ -1,0 +1,282 @@
+name: Codex changelog
+
+# On every push to the production branch, runs the write-changelog skill with
+# Codex over the commits of that push and opens a PR with the new changelog
+# note. Codex runs the skill from .agents/skills/write-changelog/ (copy it from
+# github-actions/skills/write-changelog). See github-actions/README.md for setup.
+on:
+  push:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# auth.json holds a refresh token that rotates on use, so two runs in parallel
+# would invalidate each other. Runs must queue, never cancel.
+# Pushes to other branches get their own group, or their skipped runs would
+# replace a pending production run in the queue.
+concurrency:
+  group: ${{ github.ref_name == (vars.PRODUCTION_BRANCH || 'production') && 'codex-auth' || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  CODEX_VERSION: latest
+  # Repository variables, all optional except that PRODUCTION_BRANCH defaults
+  # to "production". CHANGELOG_BASE_BRANCH defaults to the default branch.
+  PRODUCTION_BRANCH: ${{ vars.PRODUCTION_BRANCH || 'production' }}
+  CHANGELOG_DIR: ${{ vars.CHANGELOG_DIR || 'changelog' }}
+  CHANGELOG_BASE_BRANCH: ${{ vars.CHANGELOG_BASE_BRANCH || github.event.repository.default_branch }}
+
+jobs:
+  changelog:
+    name: Write changelog with Codex
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Branch filters under `on.push` cannot read variables, so the production
+    # branch is matched here. Every other push ends as a skipped run.
+    if: github.ref_type == 'branch' && github.ref_name == (vars.PRODUCTION_BRANCH || 'production')
+
+    steps:
+      # persist-credentials is off so the job token is not left in .git/config
+      # where the model could read it. The push step passes it explicitly.
+      # Full history, because the commit window is a range inside it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The window is what this push brought in. A new branch or a force push
+      # has no usable "before", so it falls back to the last commit that touched
+      # the changelog folder, then to the last 50 commits.
+      # A push that only touches the changelog folder is the merge of a
+      # changelog PR. It is skipped, or the workflow would feed itself.
+      - name: Collect commits
+        id: window
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          dir="${CHANGELOG_DIR%/}"
+          dir="${dir#./}"
+          if [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..$GITHUB_SHA"
+          else
+            last=$(git log -1 --first-parent --format=%H "$GITHUB_SHA" -- "$dir")
+            if [ "$last" = "$GITHUB_SHA" ]; then
+              echo "::notice::The pushed commit is the last changelog commit. Skipping."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            elif [ -n "$last" ]; then
+              range="$last..$GITHUB_SHA"
+            else
+              range="--max-count=50 $GITHUB_SHA"
+            fi
+          fi
+          echo "Window: $range"
+
+          if [[ "$range" == *..* ]]; then
+            files=$(git diff --name-only "$range")
+            if [ -z "$files" ]; then
+              echo "::notice::No file changes in the push. Nothing to write."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            outside=$(printf '%s\n' "$files" | grep -v "^$dir/" || true)
+            if [ -z "$outside" ]; then
+              echo "::notice::The push only changes $dir/. Skipping."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          git log --no-merges --date=short --format='%h %ad %an%n%s%n%b%n---' --shortstat $range | head -c 200000 > "$RUNNER_TEMP/commits.md"
+          if [ ! -s "$RUNNER_TEMP/commits.md" ]; then
+            echo "::notice::No commits in the window. Nothing to write."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "WINDOW=$range" >> "$GITHUB_ENV"
+
+      # The Codex ChatGPT login (auth.json) must never run in a public repo.
+      # An OPENAI_API_KEY has no such limit, so it is preferred when set.
+      - name: Check credentials
+        if: steps.window.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "CODEX_AUTH_MODE=api-key" >> "$GITHUB_ENV"
+          elif [ -n "$CODEX_AUTH_JSON" ]; then
+            private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)
+            if [ "$private" != "true" ]; then
+              echo "::error::CODEX_AUTH_JSON must never run in a public repository. Set OPENAI_API_KEY instead."
+              exit 1
+            fi
+            echo "CODEX_AUTH_MODE=auth-json" >> "$GITHUB_ENV"
+          else
+            echo "::error::Set the OPENAI_API_KEY or CODEX_AUTH_JSON secret."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.window.outputs.skip != 'true'
+        with:
+          node-version: 22
+
+      - name: Install Codex CLI
+        if: steps.window.outputs.skip != 'true'
+        run: npm install -g "@openai/codex@${CODEX_VERSION}"
+
+      - name: Prepare Codex home
+        if: steps.window.outputs.skip != 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          CODEX_MODEL: ${{ vars.CODEX_MODEL }}
+          CODEX_REASONING_EFFORT: ${{ vars.CODEX_REASONING_EFFORT }}
+        run: |
+          home="$RUNNER_TEMP/codex-home"
+          mkdir -p "$home"
+          chmod 700 "$home"
+          umask 077
+          {
+            echo 'cli_auth_credentials_store = "file"'
+            echo 'approval_policy = "never"'
+            printf 'model_reasoning_effort = "%s"\n' "${CODEX_REASONING_EFFORT:-high}"
+            if [ -n "$CODEX_MODEL" ]; then
+              printf 'model = "%s"\n' "$CODEX_MODEL"
+            fi
+          } > "$home/config.toml"
+          echo "CODEX_HOME=$home" >> "$GITHUB_ENV"
+          export CODEX_HOME="$home"
+          if [ "$CODEX_AUTH_MODE" = "api-key" ]; then
+            printf '%s' "$OPENAI_API_KEY" | codex login --with-api-key
+          else
+            printf '%s' "$CODEX_AUTH_JSON" > "$home/auth.json"
+            sha256sum "$home/auth.json" | cut -d' ' -f1 > "$RUNNER_TEMP/auth.sha256"
+          fi
+
+      # Commit messages are untrusted prompt input. They stay in a file and are
+      # never interpolated into a script.
+      - name: Write brief
+        if: steps.window.outputs.skip != 'true'
+        run: |
+          {
+            dir="${CHANGELOG_DIR%/}"
+            printf 'Changelog folder: %s\n' "${dir#./}"
+            printf 'Date:             %s\n' "$(date -u +%Y-%m-%d)"
+            printf 'Production branch: %s\n' "$PRODUCTION_BRANCH"
+            printf 'Pushed commit:    %s\n' "$GITHUB_SHA"
+            printf 'Commit window:    %s\n' "$WINDOW"
+            printf 'Commits file:     %s\n' "$RUNNER_TEMP/commits.md"
+          } > "$RUNNER_TEMP/brief.md"
+
+      # The PR lands on the base branch, which may already hold notes the
+      # production checkout lacks. Bring them in so Codex sees the real file
+      # names and newest notes, and the later cherry-pick cannot collide.
+      - name: Sync existing notes from the base branch
+        if: steps.window.outputs.skip != 'true'
+        run: |
+          dir="${CHANGELOG_DIR%/}"
+          dir="${dir#./}"
+          if git cat-file -e "origin/$CHANGELOG_BASE_BRANCH:$dir" 2>/dev/null; then
+            git checkout "origin/$CHANGELOG_BASE_BRANCH" -- "$dir"
+            if ! git diff --cached --quiet; then
+              git -c user.name=ci -c user.email=ci@localhost commit -qm "Sync changelog from base"
+            fi
+          fi
+
+      # No GH_TOKEN here on purpose: the model can edit the checkout but cannot
+      # push or open PRs. The next step does that. Network stays off.
+      - name: Run Codex
+        if: steps.window.outputs.skip != 'true'
+        run: |
+          codex exec \
+            --sandbox workspace-write \
+            --output-last-message "$RUNNER_TEMP/pr-body.md" \
+            "Use \$write-changelog. The brief is at $RUNNER_TEMP/brief.md. Write the note into the changelog folder, but do not run git commit, git push or create a PR. The workflow does that. Your final message becomes the PR body."
+
+      - name: Open PR
+        if: steps.window.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          dir="${CHANGELOG_DIR%/}"
+          dir="${dir#./}"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "::notice::Codex wrote no note. Final message: $(head -c 500 "$RUNNER_TEMP/pr-body.md" 2>/dev/null)"
+            exit 0
+          fi
+          bad=""
+          while IFS= read -r f; do
+            case "$f" in
+              "$dir"/*) ;;
+              *) bad="$bad $f" ;;
+            esac
+          done < <(git -c core.quotePath=false status --porcelain | cut -c4-)
+          if [ -n "$bad" ]; then
+            echo "::error::Codex changed files outside $dir/, which this workflow refuses to push:$bad"
+            exit 1
+          fi
+
+          short="${GITHUB_SHA:0:7}"
+          branch="changelog/$short"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+
+          # Refuse a note or PR body that carries a credential the model could
+          # have read from CODEX_HOME.
+          secrets=$(mktemp)
+          { printf '%s\n' "$OPENAI_API_KEY"; jq -r '.. | strings' "$CODEX_HOME/auth.json" 2>/dev/null; } | awk 'length > 16' > "$secrets"
+          if [ -s "$secrets" ] && grep -rqFf "$secrets" "$dir" "$RUNNER_TEMP/pr-body.md" 2>/dev/null; then
+            echo "::error::The note or PR body contains a credential. Refusing to push."
+            exit 1
+          fi
+
+          git add -A -- "$dir"
+          git commit -m "Changelog for $PRODUCTION_BRANCH @ $short" -- "$dir"
+          note_commit=$(git rev-parse HEAD)
+
+          # The branch is built on the PR's base, not on the production commit,
+          # so a production branch that is ahead of the base does not leak its
+          # commits into the PR.
+          git checkout -f -B "$branch" "origin/$CHANGELOG_BASE_BRANCH"
+          git cherry-pick "$note_commit"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json number --jq length)
+          if [ "$existing" -gt 0 ]; then
+            echo "::notice::A PR for $branch is already open. Updated its branch."
+            exit 0
+          fi
+          {
+            cat "$RUNNER_TEMP/pr-body.md" 2>/dev/null || true
+            printf '\n\nPush: %s/%s/commit/%s\nRun log: %s/%s/actions/runs/%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } > "$RUNNER_TEMP/pr-body-final.md"
+          gh pr create \
+            --base "$CHANGELOG_BASE_BRANCH" \
+            --head "$branch" \
+            --title "Changelog for $PRODUCTION_BRANCH @ $short" \
+            --body-file "$RUNNER_TEMP/pr-body-final.md"
+
+      # Codex may have rotated the refresh token. Persist it even when an
+      # earlier step failed, or the next run starts with a dead token.
+      - name: Write back rotated auth.json
+        if: always() && env.CODEX_AUTH_MODE == 'auth-json'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_SECRET_WRITE }}
+        run: |
+          [ -f "$RUNNER_TEMP/auth.sha256" ] || exit 0
+          after=$(sha256sum "$CODEX_HOME/auth.json" | cut -d' ' -f1)
+          [ "$after" != "$(cat "$RUNNER_TEMP/auth.sha256")" ] || exit 0
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::auth.json changed but GH_PAT_FOR_SECRET_WRITE is not set. Update CODEX_AUTH_JSON by hand or the next run may fail."
+            exit 0
+          fi
+          gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"

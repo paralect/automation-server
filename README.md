@@ -72,6 +72,7 @@ Ready-made GitHub Actions workflows live in [`github-actions/`](github-actions/R
 | --- | --- |
 | [`codex-issue-fix.yml`](github-actions/codex-issue-fix.yml) | Opens a draft PR with a Codex-written fix for each new issue. Pairs with the Sentry integration: issues labelled `sentry` can trigger it. |
 | [`codex-seo-autopilot.yml`](github-actions/codex-seo-autopilot.yml) | Runs the [seo-autopilot](https://il.ly/skills/seo-autopilot) skill with Codex every day and opens a PR with the changes. |
+| [`codex-changelog.yml`](github-actions/codex-changelog.yml) | On every push to your production branch, Codex writes a changelog note from the pushed commits and opens a PR. |
 
 Setup, secrets and caveats for each workflow are in [github-actions/README.md](github-actions/README.md).
 

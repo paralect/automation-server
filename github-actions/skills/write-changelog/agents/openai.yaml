@@ -1,0 +1,5 @@
+interface:
+  display_name: "Write Changelog"
+  short_description: "Write a release note from the commits of a release window"
+policy:
+  allow_implicit_invocation: true
