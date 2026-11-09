@@ -66,6 +66,10 @@ Server-wide settings:
 
 Each integration documents its own variables in its page under [docs/integrations](docs/integrations).
 
+## Admin dashboard
+
+`apps/admin` is a read-only dashboard for what the server did: webhooks received, automation runs, failures and logs. It runs as its own app on port 3001 and needs `ADMIN_API_TOKEN` set on the server. Setup and the security model are in [apps/admin/README.md](apps/admin/README.md).
+
 ## GitHub Actions workflows
 
 Ready-made GitHub Actions workflows live in [`github-actions/`](github-actions/README.md). They are stored there, not active in this repository. Copy the one you need into the `.github/workflows/` directory of the target repository.
@@ -92,7 +96,8 @@ bun run build         # apps/server/dist/index.mjs
 ```
 automation-server/
 ├── apps/
-│   └── server/          # Hono app: webhook routes, config, wiring, Bun.serve entry
+│   ├── server/          # Hono app: webhook routes, config, wiring, Bun.serve entry
+│   └── admin/           # TanStack Start admin dashboard (logs, runs, system)
 ├── packages/
 │   ├── core/            # Event, Source, Automation, dispatcher, sqlite claim store, logger
 │   ├── sources/         # One folder per service that sends webhooks (sentry/)
