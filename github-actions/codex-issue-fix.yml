@@ -1,7 +1,9 @@
 name: Codex issue fix
 
-# Opens a draft PR with a Codex-written fix for each new issue. See
-# docs/codex-issue-fix.md for setup.
+# Opens a draft PR with a Codex-written fix for each new issue. Codex runs the
+# fix-issue skill, which must exist in the repo at .agents/skills/fix-issue/
+# (copy it from github-actions/skills/fix-issue). See github-actions/README.md
+# for setup.
 on:
   issues:
     types: [opened]

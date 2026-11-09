@@ -9,9 +9,16 @@ Workflow files kept here for reuse. They are **not active** in this repository: 
 
 ## Notes on `codex-issue-fix.yml`
 
-Taken from another project and stored as-is. Before using it, adapt the project-specific parts: the install and build steps (`npm ci`, `npm run generate-routes`), the `$fix-issue` skill it invokes, and the docs reference in the header comment. It needs the `CODEX_AUTH_JSON` secret and refuses to run in public repositories.
+Taken from another project. Codex runs the `$fix-issue` skill, which is stored in [`skills/fix-issue`](skills/fix-issue). Copy that folder to `.agents/skills/fix-issue/` in the target repository, next to the workflow in `.github/workflows/`. The workflow does not install it, Codex finds it in the checkout.
 
-Pairs with the [Sentry integration](../docs/integrations/sentry.md): issues created with the `sentry` label can trigger it.
+The skill classifies the issue (bug, Sentry error, or too vague), finds the root cause, makes a minimal fix with a regression test, runs the checks and writes the PR body as its final message. Issues created by the [Sentry integration](../docs/integrations/sentry.md) carry the `sentry` label, so they take the Sentry path in `references/sentry.md`.
+
+The skill and the workflow are still specific to the project they came from. Before using them elsewhere, adapt:
+
+- The skill: the `CLAUDE.md` rules it names, the check commands (`npx tsc --noEmit`, `npx vitest run`, `npm run lint`), and `references/sentry.md`, which describes that project's frameworks and layout.
+- The workflow: the install and build steps (`npm ci`, `npm run generate-routes`).
+
+It needs the `CODEX_AUTH_JSON` secret and refuses to run in public repositories.
 
 ## Notes on `codex-seo-autopilot.yml`
 

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Fix Issue"
+  short_description: "Fix a GitHub issue or Sentry error with a minimal, tested change"
+policy:
+  allow_implicit_invocation: true
