@@ -59,10 +59,16 @@ Server-wide settings:
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `PORT` | no | `3000` | HTTP port. |
-| `DATABASE_PATH` | no | `./data/automation.db` | sqlite file for claims. Keep it on persistent storage. |
+| `DATABASE_PATH` | no | `./data/automation.db` | sqlite file for claims, run history and logs. Keep it on persistent storage. |
 | `CORS_ORIGIN` | no | | Origin allowed on the browser-facing oRPC routes. Not used by webhooks. |
+| `ADMIN_API_TOKEN` | no | | Bearer token for the admin API under `/rpc`. Use at least 32 random characters. The admin API is disabled when empty. |
+| `LOG_RETENTION_DAYS` | no | `30` | Days to keep stored logs and finished runs. |
 
 Each integration documents its own variables in its page under [docs/integrations](docs/integrations).
+
+## Admin dashboard
+
+`apps/admin` is a read-only dashboard for what the server did: webhooks received, automation runs, failures and logs. It runs as its own app on port 3001 and needs `ADMIN_API_TOKEN` set on the server. Setup and the security model are in [apps/admin/README.md](apps/admin/README.md).
 
 ## GitHub Actions workflows
 
@@ -90,7 +96,8 @@ bun run build         # apps/server/dist/index.mjs
 ```
 automation-server/
 ├── apps/
-│   └── server/          # Hono app: webhook routes, config, wiring, Bun.serve entry
+│   ├── server/          # Hono app: webhook routes, config, wiring, Bun.serve entry
+│   └── admin/           # TanStack Start admin dashboard (logs, runs, system)
 ├── packages/
 │   ├── core/            # Event, Source, Automation, dispatcher, sqlite claim store, logger
 │   ├── sources/         # One folder per service that sends webhooks (sentry/)

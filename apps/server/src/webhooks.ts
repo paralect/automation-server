@@ -73,6 +73,8 @@ export function createWebhookRoutes({ sources, dispatcher, log, maxBodyBytes = 1
       return c.json({ ok: true });
     }
 
+    const { kind, externalId } = result.event;
+    log.info("webhook received", { source: name, kind, externalId });
     dispatcher.enqueue(result.event);
     return c.json({ ok: true });
   });

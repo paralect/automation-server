@@ -12,3 +12,17 @@ test("createLogger writes JSON lines and merges base and call fields", () => {
   expect(Number.isNaN(Date.parse(first.time))).toBe(false);
   expect(JSON.parse(lines[1]!)).toMatchObject({ level: "error", message: "bad", service: "svc", shared: "base" });
 });
+
+test("createLogger passes every emitted line to record with merged fields and leaves stdout output unchanged", () => {
+  const lines: string[] = [];
+  const recorded: unknown[] = [];
+  const log = createLogger({ service: "svc" }, (l) => lines.push(l), (e) => recorded.push(e));
+  log.warn("careful", { runId: "r1" });
+  log.error("bad");
+  expect(recorded).toMatchObject([
+    { level: "warn", message: "careful", fields: { service: "svc", runId: "r1" } },
+    { level: "error", message: "bad", fields: { service: "svc" } },
+  ]);
+  expect(JSON.parse(lines[0]!)).toMatchObject({ level: "warn", message: "careful", service: "svc", runId: "r1" });
+  expect((recorded[0] as { time: string }).time).toBe(JSON.parse(lines[0]!).time);
+});
