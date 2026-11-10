@@ -4,6 +4,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh | sudo bash
 #   sudo ./scripts/deploy-vps.sh            # from a checkout
 #
+# While the repository is private, raw.githubusercontent.com needs a token too, and so does the clone:
+#   curl -fsSL -H "Authorization: Bearer $TOKEN" https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh \
+#     | sudo REPO_TOKEN="$TOKEN" GHCR_USER=<github-user> bash
+#
 # First run asks for the settings and writes .env. Later runs update and restart, keeping .env.
 # Every prompt can be answered ahead with an environment variable of the same name, for example
 # GITHUB_TOKEN=... SENTRY_CLIENT_SECRET=... sudo -E ./scripts/deploy-vps.sh
@@ -15,6 +19,10 @@
 # run to switch an existing install. IMAGE and IMAGE_TAG choose which image to pull, for example
 # IMAGE_TAG=sha-1a2b3c4 to pin or roll back. GHCR_USER and GHCR_TOKEN (a classic token with
 # read:packages) log in to the registry when the package is private.
+#
+# REPO_TOKEN clones and updates a private repository. It falls back to GHCR_TOKEN, so one classic
+# token with the repo and read:packages scopes covers both. It is sent in a request header and is
+# not stored in .git/config.
 #
 # Overrides: INSTALL_DIR (default /opt/automation-server), REPO_URL, BRANCH (default main),
 # SKIP_DOCKER_INSTALL=1, SKIP_FIREWALL=1.
@@ -73,6 +81,32 @@ confirm() {
 secret() { openssl rand -hex 32; }
 
 DEFAULT_IMAGE=ghcr.io/prlct/automation-server
+
+# Runs git with the token for github.com when there is one. The header travels in the environment,
+# so the token appears neither in the process list nor in .git/config. Never prompts for a password.
+git_run() {
+  local token="${REPO_TOKEN:-${GHCR_TOKEN:-}}" auth
+  export GIT_TERMINAL_PROMPT=0
+  if [ -n "$token" ]; then
+    auth="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraHeader" \
+      GIT_CONFIG_VALUE_0="Authorization: Basic $auth" git "$@"
+  else
+    git "$@"
+  fi
+}
+
+# A private repository cannot be cloned anonymously. Ask for a token once on a terminal and retry.
+clone_repo() {
+  if git_run clone --quiet --branch "$BRANCH" "$REPO_URL" "$APP_DIR" 2>/dev/null; then return 0; fi
+  if [ -z "${REPO_TOKEN:-${GHCR_TOKEN:-}}" ] && have_tty; then
+    warn "Could not clone $REPO_URL. If the repository is private, a token is needed."
+    warn "Use a classic token with the repo scope (add read:packages to reuse it for the image) from https://github.com/settings/tokens."
+    ask REPO_TOKEN "GitHub token" "" 1
+    git_run clone --quiet --branch "$BRANCH" "$REPO_URL" "$APP_DIR" && return 0
+  fi
+  die "could not clone $REPO_URL. For a private repository pass REPO_TOKEN, a token that can read its contents."
+}
 
 compose_files() {
   local files=docker-compose.yml
@@ -188,7 +222,7 @@ locate_checkout() {
     APP_DIR="$(cd "$here/.." && pwd)"
     say "Using the checkout at $APP_DIR"
     if git -C "$APP_DIR" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
-      git -C "$APP_DIR" pull --quiet --ff-only || warn "git pull failed, deploying the code as it is."
+      git_run -C "$APP_DIR" pull --quiet --ff-only || warn "git pull failed, deploying the code as it is."
     fi
     return
   fi
@@ -196,12 +230,12 @@ locate_checkout() {
   command -v git >/dev/null 2>&1 || { [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null 2>&1 && apt-get update -qq && apt-get install -y -qq git >/dev/null; } || die "git is required."
   if [ -d "$APP_DIR/.git" ]; then
     say "Updating $APP_DIR"
-    git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
-    git -C "$APP_DIR" checkout --quiet "$BRANCH"
-    git -C "$APP_DIR" pull --quiet --ff-only origin "$BRANCH"
+    git_run -C "$APP_DIR" fetch --quiet origin "$BRANCH"
+    git_run -C "$APP_DIR" checkout --quiet "$BRANCH"
+    git_run -C "$APP_DIR" pull --quiet --ff-only origin "$BRANCH"
   else
     say "Cloning $REPO_URL into $APP_DIR"
-    git clone --quiet --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+    clone_repo
   fi
 }
 

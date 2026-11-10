@@ -73,7 +73,16 @@ sudo /opt/automation-server/scripts/deploy-vps.sh
 - Every question can be answered ahead with an environment variable of the same name, for unattended installs. Without a terminal and without `DEPLOY_MODE` the script builds on the server.
 - `DEPLOY_MODE=image` or `DEPLOY_MODE=build` on any run switches an existing install between the two.
 - `IMAGE_TAG=sha-<commit>` pins the prebuilt image to one build, which is also how you roll back. The default is `latest`.
-- A private repository publishes a private package, and the server must log in to pull it. The script asks for a GitHub username and a classic token with `read:packages` the first time, or take `GHCR_USER` and `GHCR_TOKEN`. Making the package public in its settings skips this.
+- **While the repository is private** the one-liner needs a token, because `raw.githubusercontent.com` answers 404 without one, and so does `git clone`. Create a classic token with the `repo` and `read:packages` scopes at https://github.com/settings/tokens and run:
+
+  ```bash
+  export TOKEN=ghp_...
+  curl -fsSL -H "Authorization: Bearer $TOKEN" https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh \
+    | sudo REPO_TOKEN="$TOKEN" GHCR_USER=<github-user> GHCR_TOKEN="$TOKEN" bash
+  ```
+
+  `REPO_TOKEN` clones and updates the repository, `GHCR_USER` and `GHCR_TOKEN` log in to the registry for the image. The script also asks for them on a terminal if you leave them out. The token is sent in a request header and is not stored in `.git/config`. `docker login` keeps the registry credentials in `~/.docker/config.json` of root, so later updates need no token for the image, but a repository update does, so keep `REPO_TOKEN` handy or run the update with it.
+- A private repository publishes a private package, and the server must log in to pull it. Making the package public in its settings skips the login. A public package and a private repository can coexist, but the script still needs `REPO_TOKEN` to clone.
 
 ### Docker Compose by hand
 
