@@ -41,7 +41,7 @@ describe("buildConfig", () => {
       sentry: { clientSecret: "secret", authToken: undefined, apiBaseUrl: "https://sentry.io" },
       adminToken: undefined,
       retentionDays: 30,
-      github: { token: "token", repo: { owner: "acme", name: "widgets" } },
+      github: { token: "token", repo: { owner: "acme", name: "widgets" }, actionsRepos: ["acme/widgets"] },
       filters: { levels: ["error", "fatal"], environments: [], minEventCount: 1 },
     });
   });
@@ -61,6 +61,15 @@ describe("buildConfig", () => {
   test("empty admin token counts as absent", () => {
     expect(buildConfig({ ...base, ADMIN_API_TOKEN: "" }).adminToken).toBeUndefined();
     expect(buildConfig({ ...base, ADMIN_API_TOKEN: "x".repeat(32) }).adminToken).toBe("x".repeat(32));
+  });
+
+  test("actions repos default to GITHUB_REPO and dedupe", () => {
+    expect(buildConfig({ ...base, GITHUB_ACTIONS_REPOS: "" }).github.actionsRepos).toEqual(["acme/widgets"]);
+    expect(buildConfig({ ...base, GITHUB_ACTIONS_REPOS: " acme/site, acme/widgets ,acme/site" }).github.actionsRepos).toEqual([
+      "acme/site",
+      "acme/widgets",
+    ]);
+    expect(() => buildConfig({ ...base, GITHUB_ACTIONS_REPOS: "acme" })).toThrow("owner/name");
   });
 
   test("empty auth token counts as absent", () => {

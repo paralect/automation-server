@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { adminProcedure, o } from "../index";
 import type { SystemInfo } from "../context";
+import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
 
 const level = z.enum(["info", "warn", "error"]);
 const status = z.enum(["running", "succeeded", "failed", "duplicate"]);
@@ -45,6 +46,33 @@ export const appRouter = {
       .output(type<{ run: RunRecord; logs: StoredLog[] }>())
       .handler(({ input, context }) => {
         const found = context.activity.getRun(input.id);
+        if (!found) throw new ORPCError("NOT_FOUND");
+        return found;
+      }),
+  },
+
+  actions: {
+    list: adminProcedure
+      .input(
+        z.object({
+          repo: text,
+          workflow: text,
+          state: z.enum(ACTION_STATES).optional(),
+          page: z.number().int().min(1).max(50).default(1),
+        }),
+      )
+      .output(type<ActionsRunList>())
+      .handler(({ input, context }) => context.actions.listRuns(input)),
+    get: adminProcedure
+      .input(z.object({ repo: z.string().min(3).max(200), id: z.number().int().positive() }))
+      .output(type<{ run: WorkflowRun; jobs: WorkflowJob[] }>())
+      .handler(async ({ input, context }) => {
+        let found: Awaited<ReturnType<typeof context.actions.getRun>>;
+        try {
+          found = await context.actions.getRun(input.repo, input.id);
+        } catch (err) {
+          throw new ORPCError("BAD_GATEWAY", { message: err instanceof Error ? err.message : "GitHub API failed" });
+        }
         if (!found) throw new ORPCError("NOT_FOUND");
         return found;
       }),

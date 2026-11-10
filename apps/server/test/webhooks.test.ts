@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+import { createGithubActionsReader } from "@automation-server/api/githubActions";
+
 import { createApp } from "../src/app";
 
 const SECRET = "test-client-secret";
@@ -59,6 +61,7 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
   const sentry = createSentrySource({ clientSecret: SECRET });
   const admin = {
     activity: createSqliteActivityStore({ path: ":memory:" }),
+    actions: createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
     adminToken: undefined,
     system: { startedAt: new Date().toISOString(), sources: [sentry.name], automations: [], retentionDays: 30 },
   };

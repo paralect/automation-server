@@ -14,6 +14,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthedLogsRouteImport } from './routes/_authed/logs'
 import { Route as AuthedSystemRouteImport } from './routes/_authed/system'
+import { Route as AuthedActionsIndexRouteImport } from './routes/_authed/actions/index'
+import { Route as AuthedActionsIdRouteImport } from './routes/_authed/actions/$id'
 import { Route as AuthedRunsIndexRouteImport } from './routes/_authed/runs/index'
 import { Route as AuthedRunsIdRouteImport } from './routes/_authed/runs/$id'
 
@@ -41,6 +43,16 @@ const AuthedSystemRoute = AuthedSystemRouteImport.update({
   path: '/system',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedActionsIndexRoute = AuthedActionsIndexRouteImport.update({
+  id: '/actions/',
+  path: '/actions/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedActionsIdRoute = AuthedActionsIdRouteImport.update({
+  id: '/actions/$id',
+  path: '/actions/$id',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedRunsIndexRoute = AuthedRunsIndexRouteImport.update({
   id: '/runs/',
   path: '/runs/',
@@ -57,7 +69,9 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/logs': typeof AuthedLogsRoute
   '/system': typeof AuthedSystemRoute
+  '/actions/$id': typeof AuthedActionsIdRoute
   '/runs/$id': typeof AuthedRunsIdRoute
+  '/actions/': typeof AuthedActionsIndexRoute
   '/runs/': typeof AuthedRunsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -65,7 +79,9 @@ export interface FileRoutesByTo {
   '/logs': typeof AuthedLogsRoute
   '/system': typeof AuthedSystemRoute
   '/': typeof AuthedIndexRoute
+  '/actions/$id': typeof AuthedActionsIdRoute
   '/runs/$id': typeof AuthedRunsIdRoute
+  '/actions': typeof AuthedActionsIndexRoute
   '/runs': typeof AuthedRunsIndexRoute
 }
 export interface FileRoutesById {
@@ -75,14 +91,32 @@ export interface FileRoutesById {
   '/_authed/logs': typeof AuthedLogsRoute
   '/_authed/system': typeof AuthedSystemRoute
   '/_authed/': typeof AuthedIndexRoute
+  '/_authed/actions/$id': typeof AuthedActionsIdRoute
   '/_authed/runs/$id': typeof AuthedRunsIdRoute
+  '/_authed/actions/': typeof AuthedActionsIndexRoute
   '/_authed/runs/': typeof AuthedRunsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/logs' | '/system' | '/runs/$id' | '/runs/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/logs'
+    | '/system'
+    | '/actions/$id'
+    | '/runs/$id'
+    | '/actions/'
+    | '/runs/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/logs' | '/system' | '/' | '/runs/$id' | '/runs'
+  to:
+    | '/login'
+    | '/logs'
+    | '/system'
+    | '/'
+    | '/actions/$id'
+    | '/runs/$id'
+    | '/actions'
+    | '/runs'
   id:
     | '__root__'
     | '/_authed'
@@ -90,7 +124,9 @@ export interface FileRouteTypes {
     | '/_authed/logs'
     | '/_authed/system'
     | '/_authed/'
+    | '/_authed/actions/$id'
     | '/_authed/runs/$id'
+    | '/_authed/actions/'
     | '/_authed/runs/'
   fileRoutesById: FileRoutesById
 }
@@ -136,6 +172,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSystemRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/actions/': {
+      id: '/_authed/actions/'
+      path: '/actions'
+      fullPath: '/actions/'
+      preLoaderRoute: typeof AuthedActionsIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/actions/$id': {
+      id: '/_authed/actions/$id'
+      path: '/actions/$id'
+      fullPath: '/actions/$id'
+      preLoaderRoute: typeof AuthedActionsIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/runs/': {
       id: '/_authed/runs/'
       path: '/runs'
@@ -157,7 +207,9 @@ interface AuthedRouteChildren {
   AuthedLogsRoute: typeof AuthedLogsRoute
   AuthedSystemRoute: typeof AuthedSystemRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
+  AuthedActionsIdRoute: typeof AuthedActionsIdRoute
   AuthedRunsIdRoute: typeof AuthedRunsIdRoute
+  AuthedActionsIndexRoute: typeof AuthedActionsIndexRoute
   AuthedRunsIndexRoute: typeof AuthedRunsIndexRoute
 }
 
@@ -165,7 +217,9 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedLogsRoute: AuthedLogsRoute,
   AuthedSystemRoute: AuthedSystemRoute,
   AuthedIndexRoute: AuthedIndexRoute,
+  AuthedActionsIdRoute: AuthedActionsIdRoute,
   AuthedRunsIdRoute: AuthedRunsIdRoute,
+  AuthedActionsIndexRoute: AuthedActionsIndexRoute,
   AuthedRunsIndexRoute: AuthedRunsIndexRoute,
 }
 

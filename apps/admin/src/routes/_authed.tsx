@@ -27,6 +27,7 @@ const TITLES: Record<string, string> = {
   "/": "Overview",
   "/logs": "Logs",
   "/runs": "Runs",
+  "/actions": "GitHub Actions",
   "/system": "System",
 }
 
@@ -40,7 +41,7 @@ function Crumbs() {
       <BreadcrumbList>
         <BreadcrumbItem>
           {id ? (
-            <BreadcrumbLink render={<Link to="/runs" />}>{root}</BreadcrumbLink>
+            <BreadcrumbLink render={<Link to={section === "actions" ? "/actions" : "/runs"} />}>{root}</BreadcrumbLink>
           ) : (
             <BreadcrumbPage>{root}</BreadcrumbPage>
           )}

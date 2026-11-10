@@ -1,7 +1,7 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 
-import { getOverview, getRun, getSystem, listLogs, listRuns } from "./api.functions"
-import type { LogsSearch, RunsSearch, WindowKey } from "./filters"
+import { getActionRun, getOverview, getRun, getSystem, listActionRuns, listLogs, listRuns } from "./api.functions"
+import type { ActionState, ActionsSearch, LogsSearch, RunsSearch, WindowKey } from "./filters"
 
 const retryServerErrorOnce = (count: number, error: unknown) =>
   count < 1 && error instanceof Error && error.message === "SERVER_ERROR"
@@ -43,5 +43,30 @@ export const systemQuery = () =>
   queryOptions({
     queryKey: ["system"],
     queryFn: () => getSystem(),
+    retry: retryServerErrorOnce,
+  })
+
+export const isActiveState = (state: ActionState) => state === "queued" || state === "waiting" || state === "running"
+
+// Poll fast while something is moving so a run's progress shows up within seconds, slowly otherwise.
+const ACTIVE_POLL_MS = 5_000
+const IDLE_POLL_MS = 30_000
+
+export const actionRunsQuery = (filters: ActionsSearch) =>
+  infiniteQueryOptions({
+    queryKey: ["actions", filters],
+    queryFn: ({ pageParam }) => listActionRuns({ data: { ...filters, page: pageParam } }),
+    initialPageParam: 1,
+    getNextPageParam: (page) => page.nextPage ?? undefined,
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((p) => p.runs.some((r) => isActiveState(r.state))) ? ACTIVE_POLL_MS : IDLE_POLL_MS,
+    retry: retryServerErrorOnce,
+  })
+
+export const actionRunQuery = (repo: string, id: number) =>
+  queryOptions({
+    queryKey: ["action", repo, id],
+    queryFn: () => getActionRun({ data: { repo, id } }),
+    refetchInterval: (query) => (query.state.data && isActiveState(query.state.data.run.state) ? ACTIVE_POLL_MS : false),
     retry: retryServerErrorOnce,
   })

@@ -34,3 +34,16 @@ export const runsInput = runsSearch.extend({ before: cursor, limit })
 export const WINDOWS = { "24h": 24, "7d": 168 } as const
 export type WindowKey = keyof typeof WINDOWS
 export const windowInput = z.object({ window: z.enum(["24h", "7d"]) })
+
+export const ACTION_STATES = ["queued", "waiting", "running", "success", "failure", "cancelled", "skipped"] as const
+export type ActionState = (typeof ACTION_STATES)[number]
+
+export const actionsSearch = z.object({
+  repo: text,
+  workflow: text,
+  state: z.enum(ACTION_STATES).optional().catch(undefined),
+})
+export type ActionsSearch = z.infer<typeof actionsSearch>
+
+export const actionsInput = actionsSearch.extend({ page: z.number().int().min(1).max(50).default(1) })
+export const actionRunInput = z.object({ repo: z.string().min(3).max(200), id: z.number().int().positive() })

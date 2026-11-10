@@ -9,6 +9,7 @@ export type ServerConfig = {
   github: {
     token: string;
     repo: { owner: string; name: string };
+    actionsRepos: string[];
   };
   adminToken?: string;
   retentionDays: number;
@@ -30,6 +31,7 @@ export type RawEnv = {
   SENTRY_MIN_EVENT_COUNT: number;
   GITHUB_TOKEN: string;
   GITHUB_REPO: string;
+  GITHUB_ACTIONS_REPOS?: string;
   ADMIN_API_TOKEN?: string;
   LOG_RETENTION_DAYS: number;
 };
@@ -49,6 +51,14 @@ export function parseRepo(value: string): { owner: string; name: string } {
   return { owner, name };
 }
 
+export function parseActionsRepos(value: string | undefined, fallback: string): string[] {
+  const listed = parseCsv(value);
+  return [...new Set((listed.length > 0 ? listed : [fallback]).map((repo) => {
+    const { owner, name } = parseRepo(repo);
+    return `${owner}/${name}`;
+  }))];
+}
+
 export function buildConfig(env: RawEnv): ServerConfig {
   return {
     port: env.PORT,
@@ -60,7 +70,11 @@ export function buildConfig(env: RawEnv): ServerConfig {
     },
     adminToken: env.ADMIN_API_TOKEN || undefined,
     retentionDays: env.LOG_RETENTION_DAYS,
-    github: { token: env.GITHUB_TOKEN, repo: parseRepo(env.GITHUB_REPO) },
+    github: {
+      token: env.GITHUB_TOKEN,
+      repo: parseRepo(env.GITHUB_REPO),
+      actionsRepos: parseActionsRepos(env.GITHUB_ACTIONS_REPOS, env.GITHUB_REPO),
+    },
     filters: {
       levels: parseCsv(env.SENTRY_LEVELS),
       environments: parseCsv(env.SENTRY_ENVIRONMENTS),

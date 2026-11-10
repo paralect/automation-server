@@ -1,6 +1,8 @@
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
 import { describe, expect, test } from "bun:test";
 
+import { createGithubActionsReader } from "@automation-server/api/githubActions";
+
 import { createApp } from "../src/app";
 
 const TOKEN = "t".repeat(40);
@@ -16,6 +18,16 @@ function setup(options: { adminToken?: string } = { adminToken: TOKEN }) {
     log: quiet,
     admin: {
       activity,
+      actions: createGithubActionsReader({
+        repos: ["acme/widgets"],
+        token: "gh",
+        fetch: (async (url: string | URL | Request) => {
+          const path = new URL(String(url)).pathname;
+          if (path.endsWith("/actions/workflows")) return Response.json({ workflows: [{ id: 1, name: "CI" }] });
+          if (path.endsWith("/actions/runs")) return Response.json({ workflow_runs: [] });
+          return new Response("{}", { status: 404 });
+        }) as typeof fetch,
+      }),
       adminToken,
       system: { startedAt: new Date().toISOString(), sources: ["sentry"], automations: ["a"], retentionDays: 30 },
     },
@@ -66,5 +78,18 @@ describe("admin API auth", () => {
     const body = (await res.json()) as { json: { run: { id: string }; logs: { message: string }[] } };
     expect(body.json.run.id).toBe(id);
     expect(body.json.logs.map((l) => l.message)).toEqual(["hello"]);
+  });
+
+  test("actions.list needs the token and lists configured repos", async () => {
+    const t = setup();
+    expect((await t.call("actions/list", {})).status).toBe(401);
+    const res = await t.call("actions/list", {}, TOKEN);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { json: { repos: string[]; workflows: string[] } };
+    expect(body.json).toMatchObject({ repos: ["acme/widgets"], workflows: ["CI"] });
+  });
+
+  test("actions.get refuses a repository that is not configured", async () => {
+    expect((await setup().call("actions/get", { repo: "evil/repo", id: 1 }, TOKEN)).status).toBe(404);
   });
 });

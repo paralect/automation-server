@@ -3,7 +3,7 @@ import { z } from "zod"
 
 import { callAutomation } from "@/server/automation-client.server"
 import { requireAuth } from "./auth.middleware"
-import { logsInput, runsInput, WINDOWS, windowInput } from "./filters"
+import { actionRunInput, actionsInput, logsInput, runsInput, WINDOWS, windowInput } from "./filters"
 
 const authed = createServerFn({ method: "GET", strict: { input: true, output: false } }).middleware([requireAuth])
 
@@ -28,3 +28,11 @@ export const getRun = authed
   )
 
 export const getSystem = authed.handler(() => callAutomation((api) => api.system()))
+
+export const listActionRuns = authed.validator(actionsInput).handler(({ data }) =>
+  callAutomation((api) => api.actions.list(data))
+)
+
+export const getActionRun = authed.validator(actionRunInput).handler(({ data }) =>
+  callAutomation((api) => api.actions.get(data), { notFoundIsExpected: true })
+)
