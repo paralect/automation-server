@@ -1,0 +1,56 @@
+# Runs the automation server and the admin from one image.
+# Copy .env.example to .env next to this file, fill it in, then `docker compose up -d`.
+# For HTTPS on a VPS add the Traefik overlay, see docs/deployment.md.
+
+x-image: &image
+  image: automation-server:${IMAGE_TAG:-latest}
+  # Both services share the image. The second build is a cache hit.
+  build: .
+  restart: unless-stopped
+  init: true
+
+services:
+  server:
+    <<: *image
+    environment:
+      PORT: 3000
+      DATABASE_PATH: /data/automation.db
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?set ADMIN_API_TOKEN in .env}
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-30}
+      SENTRY_CLIENT_SECRET: ${SENTRY_CLIENT_SECRET:?set SENTRY_CLIENT_SECRET in .env}
+      SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
+      SENTRY_API_BASE_URL: ${SENTRY_API_BASE_URL:-https://sentry.io}
+      SENTRY_LEVELS: ${SENTRY_LEVELS:-error,fatal}
+      SENTRY_ENVIRONMENTS: ${SENTRY_ENVIRONMENTS:-}
+      SENTRY_MIN_EVENT_COUNT: ${SENTRY_MIN_EVENT_COUNT:-1}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:?set GITHUB_TOKEN in .env}
+      GITHUB_REPO: ${GITHUB_REPO:?set GITHUB_REPO in .env}
+      GITHUB_ACTIONS_REPOS: ${GITHUB_ACTIONS_REPOS:-}
+    volumes:
+      - data:/data
+    ports:
+      # Sentry must reach /webhooks/sentry, so this port is public.
+      - "${SERVER_PORT:-3000}:3000"
+
+  admin:
+    <<: *image
+    working_dir: /app/apps/admin
+    command: ["bun", "run", "serve.ts"]
+    environment:
+      PORT: 3001
+      AUTOMATION_SERVER_URL: http://server:3000
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?set ADMIN_API_TOKEN in .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      # Loopback only. The session cookie is Secure and the login rate limit trusts
+      # X-Forwarded-For, so the admin must not face the internet without a proxy.
+      # Reach it with `ssh -L 3001:127.0.0.1:3001 <vps>`, or use the Traefik overlay.
+      - "127.0.0.1:${ADMIN_PORT:-3001}:3001"
+
+volumes:
+  data:
