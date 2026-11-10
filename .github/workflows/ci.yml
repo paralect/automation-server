@@ -19,3 +19,58 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run check-types
       - run: bun run test
+      - name: Compose files stay in sync
+        env:
+          ADMIN_API_TOKEN: ci-token
+          SENTRY_CLIENT_SECRET: ci-secret
+          GITHUB_TOKEN: ci-token
+          GITHUB_REPO: acme/widgets
+          ADMIN_EMAIL: ci@example.com
+          ADMIN_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret
+          SERVER_DOMAIN: hooks.example.com
+          ADMIN_DOMAIN: admin.example.com
+          ACME_EMAIL: ci@example.com
+        run: |
+          # The image variant differs from the build variant only in where the image comes from.
+          norm() { docker compose -f "$1" config --format json | jq -S '.services | map_values(del(.image, .build))'; }
+          diff <(norm docker-compose.yml) <(norm docker-compose.ghcr.yml)
+          for base in docker-compose.yml docker-compose.ghcr.yml; do
+            docker compose -f "$base" -f docker-compose.traefik.yml config -q
+          done
+
+  # Builds the image on every run, so a broken Dockerfile shows up in the PR. Only pushes to main
+  # publish it, as ghcr.io/<owner>/<repo>:latest and :sha-<commit>.
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to the GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

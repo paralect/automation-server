@@ -4,9 +4,17 @@
 #   curl -fsSL https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh | sudo bash
 #   sudo ./scripts/deploy-vps.sh            # from a checkout
 #
-# First run asks for the settings and writes .env. Later runs pull, rebuild and restart, keeping .env.
+# First run asks for the settings and writes .env. Later runs update and restart, keeping .env.
 # Every prompt can be answered ahead with an environment variable of the same name, for example
 # GITHUB_TOKEN=... SENTRY_CLIENT_SECRET=... sudo -E ./scripts/deploy-vps.sh
+#
+# How to deploy, DEPLOY_MODE:
+#   image  pull the prebuilt image that CI publishes to ghcr.io (fast, runs on 512 MB RAM)
+#   build  build the image on this server (needs about 1 GB RAM)
+# It is asked on the first run, defaults to build without a terminal, and can be set on a later
+# run to switch an existing install. IMAGE and IMAGE_TAG choose which image to pull, for example
+# IMAGE_TAG=sha-1a2b3c4 to pin or roll back. GHCR_USER and GHCR_TOKEN (a classic token with
+# read:packages) log in to the registry when the package is private.
 #
 # Overrides: INSTALL_DIR (default /opt/automation-server), REPO_URL, BRANCH (default main),
 # SKIP_DOCKER_INSTALL=1, SKIP_FIREWALL=1.
@@ -21,10 +29,13 @@ say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# /dev/tty exists without a terminal behind it (containers, CI), so opening it is the only real test.
+have_tty() { { : </dev/tty; } 2>/dev/null; }
+
 # Prompts read the terminal, so they also work when the script itself arrives on stdin through curl.
 tty_read() {
   local secret="$1" prompt="$2" reply
-  [ -r /dev/tty ] || die "no terminal to ask \"$prompt\". Pass the value as an environment variable."
+  have_tty || die "no terminal to ask \"$prompt\". Pass the value as an environment variable."
   if [ "$secret" = 1 ]; then
     read -r -s -p "$prompt" reply </dev/tty
     printf '\n' >/dev/tty
@@ -60,6 +71,96 @@ confirm() {
 }
 
 secret() { openssl rand -hex 32; }
+
+DEFAULT_IMAGE=ghcr.io/prlct/automation-server
+
+compose_files() {
+  local files=docker-compose.yml
+  if [ "$1" = image ]; then files=docker-compose.ghcr.yml; fi
+  if [ "$2" = 1 ]; then files="$files:docker-compose.traefik.yml"; fi
+  printf '%s' "$files"
+}
+
+# CI publishes ghcr.io/<owner>/<repo>, so a fork clones and pulls its own image.
+default_image() {
+  local url path
+  url="$(git -C "$APP_DIR" remote get-url origin 2>/dev/null || true)"
+  path="$(printf '%s' "$url" | sed -nE 's#^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)([^/]+/[^/]+)$#\2#p')"
+  path="${path%.git}"
+  if [ -n "$path" ]; then
+    printf 'ghcr.io/%s' "$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+  else
+    printf '%s' "$DEFAULT_IMAGE"
+  fi
+}
+
+choose_mode() {
+  local reply
+  if [ -n "${DEPLOY_MODE:-}" ]; then
+    case "$DEPLOY_MODE" in image | build) MODE="$DEPLOY_MODE" ;; *) die "DEPLOY_MODE must be image or build, got \"$DEPLOY_MODE\"." ;; esac
+  elif have_tty; then
+    reply="$(tty_read 0 $'How do you want to deploy?\n  1) Pull the prebuilt image from the GitHub Container Registry (fast, runs on 512 MB RAM)\n  2) Build the image on this server (needs about 1 GB RAM, takes a few minutes)\nChoose [1]: ')"
+    case "${reply:-1}" in 2 | b* | B*) MODE=build ;; *) MODE=image ;; esac
+  else
+    MODE=build
+  fi
+}
+
+# Writes KEY=value to .env, replacing an earlier line. Values here never need quoting.
+set_env() {
+  local file="$APP_DIR/.env" tmp
+  tmp="$(mktemp "$APP_DIR/.env.XXXXXX")"
+  chmod 600 "$tmp"
+  grep -v "^$1=" "$file" >"$tmp" || true
+  printf '%s=%s\n' "$1" "$2" >>"$tmp"
+  mv "$tmp" "$file"
+}
+
+current_mode() {
+  case "$(env_value COMPOSE_FILE)" in *docker-compose.ghcr.yml*) printf image ;; *) printf build ;; esac
+}
+
+# Applies DEPLOY_MODE, IMAGE and IMAGE_TAG to an existing .env, so one script both installs and switches.
+apply_overrides() {
+  local current traefik=0 image
+  current="$(current_mode)"
+  if [[ "$(env_value COMPOSE_FILE)" == *traefik* ]]; then traefik=1; fi
+  MODE="$current"
+  if [ -n "${DEPLOY_MODE:-}" ]; then
+    choose_mode
+  fi
+  if [ "$MODE" != "$current" ] || [ -z "$(env_value COMPOSE_FILE)" ]; then
+    say "Deploy mode: $MODE"
+    set_env COMPOSE_FILE "$(compose_files "$MODE" "$traefik")"
+  fi
+  if [ "$MODE" = image ]; then
+    image="${IMAGE:-$(env_value IMAGE)}"
+    image="${image:-$(default_image)}"
+    if [ "$image" != "$(env_value IMAGE)" ]; then set_env IMAGE "$image"; fi
+    if [ -n "${IMAGE_TAG:-}" ] && [ "$IMAGE_TAG" != "$(env_value IMAGE_TAG)" ]; then set_env IMAGE_TAG "$IMAGE_TAG"; fi
+  fi
+}
+
+# The package is private while the repository is, and a new package is private by default, so a
+# refused pull is the normal first-run case. Log in once, docker keeps the credentials.
+pull_image() {
+  local out image registry
+  if out="$(docker compose pull 2>&1)"; then return 0; fi
+  printf '%s\n' "$out" >&2
+  image="$(env_value IMAGE)"
+  image="${image:-$DEFAULT_IMAGE}"
+  registry="${image%%/*}"
+  if ! grep -qiE 'denied|unauthorized|forbidden|requires authentication|authentication required' <<<"$out"; then
+    die "pulling $image failed, see above. Use DEPLOY_MODE=build to build on this server instead."
+  fi
+  warn "$registry refused the pull. The package is private until it is made public in its settings."
+  warn "Create a classic token with the read:packages scope at https://github.com/settings/tokens and log in with it."
+  ask GHCR_USER "GitHub username for $registry"
+  ask GHCR_TOKEN "Token with read:packages" "" 1
+  printf '%s' "$GHCR_TOKEN" | docker login "$registry" -u "$GHCR_USER" --password-stdin >/dev/null \
+    || die "login to $registry failed."
+  docker compose pull || die "pulling $image failed after logging in. Has CI published it yet? Use DEPLOY_MODE=build to build on this server instead."
+}
 
 install_docker() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then return; fi
@@ -108,11 +209,14 @@ write_env() {
   local env_file="$APP_DIR/.env" use_traefik=y
   say "No .env yet, configuring"
 
+  choose_mode
   if [ -n "${USE_TRAEFIK:-}" ]; then
     use_traefik="$USE_TRAEFIK"
   elif ! confirm "Serve over HTTPS with Traefik and Let's Encrypt (needs two domains pointing here)?" y; then
     use_traefik=n
   fi
+  local traefik_flag=0
+  if [[ "$use_traefik" =~ ^[Yy1] ]]; then traefik_flag=1; fi
 
   if [[ "$use_traefik" =~ ^[Yy1] ]]; then
     ask SERVER_DOMAIN "Domain for webhooks, e.g. hooks.example.com"
@@ -139,7 +243,7 @@ write_env() {
   chmod 600 "$tmp"
   {
     echo "# Written by scripts/deploy-vps.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ). See .env.example for every option."
-    if [[ "$use_traefik" =~ ^[Yy1] ]]; then echo "COMPOSE_FILE=docker-compose.yml:docker-compose.traefik.yml"; fi
+    echo "COMPOSE_FILE=$(compose_files "$MODE" "$traefik_flag")"
     echo "ADMIN_API_TOKEN='$ADMIN_API_TOKEN'"
     echo "SENTRY_CLIENT_SECRET='$SENTRY_CLIENT_SECRET'"
     if [ -n "$SENTRY_AUTH_TOKEN" ]; then echo "SENTRY_AUTH_TOKEN='$SENTRY_AUTH_TOKEN'"; fi
@@ -206,6 +310,7 @@ main() {
   else
     write_env
   fi
+  apply_overrides
 
   local traefik server_domain admin_domain
   traefik="$(env_value COMPOSE_FILE)"
@@ -220,13 +325,22 @@ main() {
     open_firewall "${port:-3000}"
   fi
 
-  say "Building and starting, the first build takes a few minutes"
-  docker compose up -d --build --remove-orphans --wait --wait-timeout 180 \
+  local up=(up -d --remove-orphans --wait --wait-timeout 180)
+  if [ "$MODE" = image ]; then
+    local tag
+    tag="$(env_value IMAGE_TAG)"
+    say "Pulling $(env_value IMAGE):${tag:-latest}"
+    pull_image
+  else
+    say "Building and starting, the first build takes a few minutes"
+    up+=(--build)
+  fi
+  docker compose "${up[@]}" \
     || { docker compose ps; docker compose logs --tail 40; die "a service did not become healthy, see the logs above."; }
   docker image prune -f >/dev/null 2>&1 || true
 
   echo
-  say "automation-server is running in $APP_DIR"
+  say "automation-server is running in $APP_DIR ($MODE mode)"
   if [[ "$traefik" == *traefik* ]]; then
     echo "  Admin:              https://$admin_domain"
     echo "  Sentry webhook URL: https://$server_domain/webhooks/sentry"
