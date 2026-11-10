@@ -58,6 +58,8 @@ echo "$TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
 
 `TOKEN` is a classic personal access token with only `read:packages`. GitHub Container Registry does not accept fine-grained tokens. Docker stores the credentials in `~/.docker/config.json` of the user that ran the login, unencrypted unless a credential helper is configured. Use a token of an account that can read nothing else that matters.
 
+**Private repository.** `git clone` and `raw.githubusercontent.com` both need a token. `scripts/deploy-vps.sh` reads it from `REPO_TOKEN` (or `GHCR_TOKEN`) and sends it in an HTTP header, so it is not stored in `.git/config`. One classic token with the `repo` and `read:packages` scopes covers the clone and the image pull. Fine-grained tokens work for the clone but not for the registry. The README has the full one-line command.
+
 ## Docker Compose with Traefik (VPS)
 
 `scripts/deploy-vps.sh` does the steps below on Ubuntu or Debian, including installing Docker and writing `.env`, and updates an existing install when run again. See the README for the one-line command. The manual steps:
