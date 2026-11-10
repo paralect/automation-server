@@ -26,10 +26,15 @@ export function formatRelative(iso: string, now = Date.now()) {
 
 export function formatDuration(startIso: string, endIso: string | null) {
   if (!endIso) return "running"
-  const ms = Date.parse(endIso) - Date.parse(startIso)
+  return formatElapsed(Date.parse(endIso) - Date.parse(startIso))
+}
+
+export function formatElapsed(ms: number) {
+  if (ms < 0) return "0 s"
   if (ms < 1000) return `${ms} ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
-  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`
+  return `${Math.floor(ms / 3_600_000)}h ${Math.floor((ms % 3_600_000) / 60_000)}m`
 }
 
 export function formatUptime(totalSeconds: number) {

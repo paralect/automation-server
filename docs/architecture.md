@@ -28,6 +28,7 @@ Every log line is written to stdout and also recorded in the `logs` table. Every
 - Logs and finished runs older than `LOG_RETENTION_DAYS` are pruned at startup and every hour.
 - Recording is best effort. A failing activity store is logged to stdout and never blocks dispatching.
 - The admin API (`overview`, `logs.list`, `runs.list`, `runs.get`, `system`) is served by oRPC under `/rpc` and requires `Authorization: Bearer <ADMIN_API_TOKEN>`. It answers 401 to every request while `ADMIN_API_TOKEN` is unset.
+- `actions.list` and `actions.get` read GitHub Actions workflow runs, with their jobs and steps, from the GitHub REST API using `GITHUB_TOKEN`. The repositories come from `GITHUB_ACTIONS_REPOS` (default `GITHUB_REPO`), and the token needs Actions: Read on each. Nothing is stored: GitHub stays the source of truth. Responses are cached for 4 seconds and the workflow list for 5 minutes, so several open admin tabs share one GitHub request. A repository the token cannot read is reported next to the runs of the others, not as a failure of the whole list. `actions.get` answers 404 for a repository outside the list.
 - To fill the dashboard with sample data, start a local server and run `bun apps/server/scripts/demo-traffic.ts` with the same `SENTRY_CLIENT_SECRET` (optional `SERVER_URL`, default `http://localhost:3000`).
 
 The admin UI lives in `apps/admin`.

@@ -1,3 +1,4 @@
+import { createGithubActionsReader } from "@automation-server/api/githubActions";
 import { createAutomations } from "@automation-server/automations";
 import { createDispatcher, createLogger, createSqliteActivityStore, createSqliteStore } from "@automation-server/core";
 import { createSentrySource } from "@automation-server/sources";
@@ -65,6 +66,7 @@ const app = createApp({
   corsOrigin: ENV.CORS_ORIGIN,
   admin: {
     activity,
+    actions: createGithubActionsReader({ repos: config.github.actionsRepos, token: config.github.token }),
     adminToken: config.adminToken,
     system: {
       startedAt,

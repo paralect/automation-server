@@ -2,6 +2,7 @@ import * as React from "react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import {
   GaugeIcon,
+  GithubLogoIcon,
   HeartbeatIcon,
   LightningIcon,
   ScrollIcon,
@@ -24,6 +25,7 @@ const NAV = [
   { title: "Overview", to: "/", icon: GaugeIcon },
   { title: "Logs", to: "/logs", icon: ScrollIcon },
   { title: "Runs", to: "/runs", icon: LightningIcon },
+  { title: "GitHub Actions", to: "/actions", icon: GithubLogoIcon },
   { title: "System", to: "/system", icon: HeartbeatIcon },
 ] as const
 
