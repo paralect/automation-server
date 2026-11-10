@@ -40,13 +40,18 @@ bun run dev                                          # http://localhost:3000
 
 ## Deployment
 
-The server and the admin ship as one Docker image. Pick one of three setups:
+The server and the admin ship as one Docker image. Pick one of three setups, and for the first two choose where the image comes from:
 
 | Setup | When | HTTPS | History survives restarts |
 | --- | --- | --- | --- |
 | Docker Compose | A machine that already has a reverse proxy | Your proxy | Yes |
 | Docker Compose with Traefik | A plain VPS | Let's Encrypt, automatic | Yes |
 | DigitalOcean App Platform | No server to manage | Managed | No, the disk is ephemeral |
+
+| Image | How | Server needs |
+| --- | --- | --- |
+| Prebuilt | Pull `ghcr.io/<owner>/<repo>`, built by CI on every push to `main` (`linux/amd64` and `linux/arm64`) | 512 MB RAM, updates take seconds |
+| Built on the server | `docker build` from the checkout | About 1 GB RAM, a few minutes per update |
 
 ### VPS in one command
 
@@ -56,15 +61,19 @@ On a fresh Ubuntu or Debian VPS, with two DNS A records pointing at it (one for 
 curl -fsSL https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh | sudo bash
 ```
 
-The script installs Docker if it is missing, clones the repository to `/opt/automation-server`, asks for the GitHub and Sentry settings, generates the admin password and secrets into `.env` (mode 600), opens ports 80 and 443 in `ufw` if it is active, and starts everything behind Traefik. At the end it prints the admin URL, the admin password and the webhook URL to paste into Sentry.
+The script installs Docker if it is missing, clones the repository to `/opt/automation-server`, asks whether to pull the prebuilt image or build on the server, asks for the GitHub and Sentry settings, generates the admin password and secrets into `.env` (mode 600), opens ports 80 and 443 in `ufw` if it is active, and starts everything behind Traefik. At the end it prints the admin URL, the admin password and the webhook URL to paste into Sentry.
 
-Run it again to update: it pulls, rebuilds and restarts, and keeps `.env`.
+Run it again to update: it pulls the new image (or rebuilds) and restarts, and keeps `.env`.
 
 ```bash
 sudo /opt/automation-server/scripts/deploy-vps.sh
 ```
 
-Answer "no" to the Traefik question to publish the server on port 3000 and keep the admin on `127.0.0.1:3001`. Every question can be answered ahead with an environment variable of the same name, for unattended installs.
+- Answer "no" to the Traefik question to publish the server on port 3000 and keep the admin on `127.0.0.1:3001`.
+- Every question can be answered ahead with an environment variable of the same name, for unattended installs. Without a terminal and without `DEPLOY_MODE` the script builds on the server.
+- `DEPLOY_MODE=image` or `DEPLOY_MODE=build` on any run switches an existing install between the two.
+- `IMAGE_TAG=sha-<commit>` pins the prebuilt image to one build, which is also how you roll back. The default is `latest`.
+- A private repository publishes a private package, and the server must log in to pull it. The script asks for a GitHub username and a classic token with `read:packages` the first time, or take `GHCR_USER` and `GHCR_TOKEN`. Making the package public in its settings skips this.
 
 ### Docker Compose by hand
 
@@ -73,7 +82,7 @@ cp .env.example .env    # fill in the secrets
 docker compose up -d --build
 ```
 
-For Traefik, set the domains in `.env` and uncomment the `COMPOSE_FILE` line. For DigitalOcean, `doctl apps create --spec .do/app.yaml`. Details, routing and the App Platform storage caveat are in [docs/deployment.md](docs/deployment.md).
+To pull the prebuilt image instead, use `docker-compose.ghcr.yml`: `docker compose -f docker-compose.ghcr.yml pull && docker compose -f docker-compose.ghcr.yml up -d`, or set `COMPOSE_FILE` in `.env`. For Traefik, set the domains in `.env` and uncomment the `COMPOSE_FILE` line. For DigitalOcean, `doctl apps create --spec .do/app.yaml`. Details, routing and the App Platform storage caveat are in [docs/deployment.md](docs/deployment.md).
 
 ## Configuration
 
@@ -135,8 +144,9 @@ automation-server/
 ├── .do/                 # DigitalOcean App Platform spec
 ├── github-actions/      # Reusable GitHub Actions workflows (stored, not active)
 ├── Dockerfile           # One image for the server and the admin
-├── docker-compose.yml
-└── docker-compose.traefik.yml
+├── docker-compose.yml          # builds the image on the server
+├── docker-compose.ghcr.yml     # pulls the image CI publishes
+└── docker-compose.traefik.yml  # optional HTTPS overlay for either
 ```
 
 ## Documentation

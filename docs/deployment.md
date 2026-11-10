@@ -4,9 +4,11 @@ The server and the admin ship as one Docker image built from the root `Dockerfil
 
 | Option | HTTPS | Keeps history across restarts | Files |
 | --- | --- | --- | --- |
-| Docker Compose | No, put your own proxy in front | Yes, volume `data` | `docker-compose.yml` |
-| Docker Compose with Traefik | Yes, Let's Encrypt | Yes | `docker-compose.yml` + `docker-compose.traefik.yml` |
+| Docker Compose | No, put your own proxy in front | Yes, volume `data` | `docker-compose.yml` or `docker-compose.ghcr.yml` |
+| Docker Compose with Traefik | Yes, Let's Encrypt | Yes | one of the above + `docker-compose.traefik.yml` |
 | DigitalOcean App Platform | Yes, managed | No, see below | `.do/app.yaml` |
+
+The first two options come in two flavours, which differ only in where the image comes from: `docker-compose.yml` builds it on the server, `docker-compose.ghcr.yml` pulls the one CI published. See [Prebuilt image](#prebuilt-image).
 
 What has to be reachable from where:
 
@@ -29,6 +31,32 @@ docker compose up -d --build
 - Update with `git pull && docker compose up -d --build`.
 
 Use this option on a machine that already has a reverse proxy. Route `/webhooks/` and `/health` to the server, the admin's domain to the admin, and never route `/rpc` publicly.
+
+## Prebuilt image
+
+The `image` job in `.github/workflows/ci.yml` builds the image for `linux/amd64` and `linux/arm64` after the tests pass. A push to `main` publishes it to the GitHub Container Registry as `ghcr.io/<owner>/<repo>` with two tags: `latest` (the last build of `main`) and `sha-<commit>`. Pull requests build the image too, without publishing it, so a broken Dockerfile shows up in review.
+
+Use it instead of building on the server:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Or put `COMPOSE_FILE=docker-compose.ghcr.yml` in `.env`, with `:docker-compose.traefik.yml` appended for HTTPS, and use plain `docker compose pull` and `docker compose up -d`. `scripts/deploy-vps.sh` does this for you, see its header for `DEPLOY_MODE`, `IMAGE` and `IMAGE_TAG`.
+
+- A server that only pulls needs about 512 MB of RAM, since the stack idles around 80 MB. Building needs about 1 GB.
+- `IMAGE_TAG=sha-<commit>` in `.env` pins one build. Set it back to `latest` to follow `main`. To roll back, pin the previous commit's tag.
+- `IMAGE` in `.env` points to another registry or a fork. The default is `ghcr.io/prlct/automation-server`, and the script derives it from the repository's `origin`.
+- The two compose files must keep the same service settings. CI compares them, apart from `image` and `build`.
+
+**Access to the package.** A new package is private by default. Either make the package public (Package settings, Danger zone, Change visibility), or log the server in once:
+
+```bash
+echo "$TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
+```
+
+`TOKEN` is a classic personal access token with only `read:packages`. GitHub Container Registry does not accept fine-grained tokens. Docker stores the credentials in `~/.docker/config.json` of the user that ran the login, unencrypted unless a credential helper is configured. Use a token of an account that can read nothing else that matters.
 
 ## Docker Compose with Traefik (VPS)
 
