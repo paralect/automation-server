@@ -38,17 +38,42 @@ bun run dev                                          # http://localhost:3000
 
 `GET /health` returns `{"status":"ok"}`. On SIGTERM or SIGINT the server stops accepting connections, waits up to 10 seconds for in-flight work, closes the store and exits.
 
-### Docker
+## Deployment
+
+The server and the admin ship as one Docker image. Pick one of three setups:
+
+| Setup | When | HTTPS | History survives restarts |
+| --- | --- | --- | --- |
+| Docker Compose | A machine that already has a reverse proxy | Your proxy | Yes |
+| Docker Compose with Traefik | A plain VPS | Let's Encrypt, automatic | Yes |
+| DigitalOcean App Platform | No server to manage | Managed | No, the disk is ephemeral |
+
+### VPS in one command
+
+On a fresh Ubuntu or Debian VPS, with two DNS A records pointing at it (one for webhooks, one for the admin):
 
 ```bash
-docker build -t automation-server .
-docker run -d --name automation-server -p 3000:3000 \
-  -v automation-data:/data \
-  --env-file apps/server/.env.local \
-  automation-server
+curl -fsSL https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh | sudo bash
 ```
 
-The image runs as a non-root user and keeps its state in `/data/automation.db`. Mount a volume on `/data` so claims survive restarts.
+The script installs Docker if it is missing, clones the repository to `/opt/automation-server`, asks for the GitHub and Sentry settings, generates the admin password and secrets into `.env` (mode 600), opens ports 80 and 443 in `ufw` if it is active, and starts everything behind Traefik. At the end it prints the admin URL, the admin password and the webhook URL to paste into Sentry.
+
+Run it again to update: it pulls, rebuilds and restarts, and keeps `.env`.
+
+```bash
+sudo /opt/automation-server/scripts/deploy-vps.sh
+```
+
+Answer "no" to the Traefik question to publish the server on port 3000 and keep the admin on `127.0.0.1:3001`. Every question can be answered ahead with an environment variable of the same name, for unattended installs.
+
+### Docker Compose by hand
+
+```bash
+cp .env.example .env    # fill in the secrets
+docker compose up -d --build
+```
+
+For Traefik, set the domains in `.env` and uncomment the `COMPOSE_FILE` line. For DigitalOcean, `doctl apps create --spec .do/app.yaml`. Details, routing and the App Platform storage caveat are in [docs/deployment.md](docs/deployment.md).
 
 ## Configuration
 
@@ -63,12 +88,13 @@ Server-wide settings:
 | `CORS_ORIGIN` | no | | Origin allowed on the browser-facing oRPC routes. Not used by webhooks. |
 | `ADMIN_API_TOKEN` | no | | Bearer token for the admin API under `/rpc`. Use at least 32 random characters. The admin API is disabled when empty. |
 | `LOG_RETENTION_DAYS` | no | `30` | Days to keep stored logs and finished runs. |
+| `GITHUB_ACTIONS_REPOS` | no | `GITHUB_REPO` | Comma-separated `owner/name` repositories whose GitHub Actions runs the admin shows. `GITHUB_TOKEN` needs Actions: Read on each. |
 
 Each integration documents its own variables in its page under [docs/integrations](docs/integrations).
 
 ## Admin dashboard
 
-`apps/admin` is a read-only dashboard for what the server did: webhooks received, automation runs, failures and logs. It runs as its own app on port 3001 and needs `ADMIN_API_TOKEN` set on the server. Setup and the security model are in [apps/admin/README.md](apps/admin/README.md).
+`apps/admin` is a read-only dashboard for what the server did: webhooks received, automation runs, failures and logs. It also tracks GitHub Actions runs, such as the Codex workflows below, with live status, jobs and steps. It runs as its own app on port 3001 and needs `ADMIN_API_TOKEN` set on the server. Setup and the security model are in [apps/admin/README.md](apps/admin/README.md).
 
 ## GitHub Actions workflows
 
@@ -97,20 +123,26 @@ bun run build         # apps/server/dist/index.mjs
 automation-server/
 ├── apps/
 │   ├── server/          # Hono app: webhook routes, config, wiring, Bun.serve entry
-│   └── admin/           # TanStack Start admin dashboard (logs, runs, system)
+│   └── admin/           # TanStack Start admin dashboard (logs, runs, GitHub Actions, system)
 ├── packages/
 │   ├── core/            # Event, Source, Automation, dispatcher, sqlite claim store, logger
 │   ├── sources/         # One folder per service that sends webhooks (sentry/)
 │   ├── automations/     # One folder per automation, plus the registry
 │   ├── api/             # oRPC routers
 │   └── config/          # Shared tsconfig
-├── docs/                # Architecture, integration guides
-└── github-actions/      # Reusable GitHub Actions workflows (stored, not active)
+├── docs/                # Architecture, deployment, integration guides
+├── scripts/             # deploy-vps.sh
+├── .do/                 # DigitalOcean App Platform spec
+├── github-actions/      # Reusable GitHub Actions workflows (stored, not active)
+├── Dockerfile           # One image for the server and the admin
+├── docker-compose.yml
+└── docker-compose.traefik.yml
 ```
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Deployment](docs/deployment.md)
 - [Adding an integration](docs/adding-an-integration.md)
 - [Sentry integration](docs/integrations/sentry.md)
 - [GitHub Actions workflows](github-actions/README.md)

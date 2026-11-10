@@ -1,0 +1,74 @@
+# DigitalOcean App Platform spec. Create the app with
+#   doctl apps create --spec .do/app.yaml
+# then set the empty SECRET values in the control panel (Settings, then each component's
+# Environment Variables) and redeploy. Empty secrets keep both services from starting.
+#
+# App Platform has no persistent disk. The sqlite file is lost on every deploy and restart,
+# see docs/deployment.md for what that means.
+
+name: automation-server
+region: fra
+
+ingress:
+  rules:
+    # Only the webhook endpoint is public on the server. The admin reaches /rpc privately.
+    - match:
+        path:
+          prefix: /webhooks
+      component:
+        name: server
+        preserve_path_prefix: true
+    - match:
+        path:
+          prefix: /
+      component:
+        name: admin
+
+services:
+  - name: server
+    github:
+      repo: prlct/automation-server
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    dockerfile_path: Dockerfile
+    http_port: 3000
+    # sqlite and the in-memory claim flow need exactly one instance.
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /health
+    envs:
+      - { key: PORT, value: "3000", scope: RUN_TIME }
+      - { key: DATABASE_PATH, value: /data/automation.db, scope: RUN_TIME }
+      - { key: LOG_RETENTION_DAYS, value: "30", scope: RUN_TIME }
+      - { key: SENTRY_API_BASE_URL, value: https://sentry.io, scope: RUN_TIME }
+      - { key: SENTRY_LEVELS, value: "error,fatal", scope: RUN_TIME }
+      - { key: SENTRY_MIN_EVENT_COUNT, value: "1", scope: RUN_TIME }
+      - { key: GITHUB_REPO, value: your-org/your-repo, scope: RUN_TIME }
+      - { key: GITHUB_ACTIONS_REPOS, value: "", scope: RUN_TIME }
+      - { key: ADMIN_API_TOKEN, value: "", scope: RUN_TIME, type: SECRET }
+      - { key: SENTRY_CLIENT_SECRET, value: "", scope: RUN_TIME, type: SECRET }
+      - { key: SENTRY_AUTH_TOKEN, value: "", scope: RUN_TIME, type: SECRET }
+      - { key: GITHUB_TOKEN, value: "", scope: RUN_TIME, type: SECRET }
+
+  - name: admin
+    github:
+      repo: prlct/automation-server
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    dockerfile_path: Dockerfile
+    run_command: bun run /app/apps/admin/serve.ts
+    http_port: 3001
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /health
+    envs:
+      - { key: PORT, value: "3001", scope: RUN_TIME }
+      - { key: AUTOMATION_SERVER_URL, value: "${server.PRIVATE_URL}", scope: RUN_TIME }
+      - { key: ADMIN_EMAIL, value: admin@example.com, scope: RUN_TIME }
+      - { key: ADMIN_API_TOKEN, value: "", scope: RUN_TIME, type: SECRET }
+      - { key: ADMIN_PASSWORD, value: "", scope: RUN_TIME, type: SECRET }
+      - { key: SESSION_SECRET, value: "", scope: RUN_TIME, type: SECRET }
