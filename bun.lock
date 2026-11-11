@@ -110,6 +110,17 @@
         "typescript": "catalog:",
       },
     },
+    "packages/settings": {
+      "name": "@automation-server/settings",
+      "dependencies": {
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@automation-server/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/sources": {
       "name": "@automation-server/sources",
       "dependencies": {
@@ -140,6 +151,8 @@
     "@automation-server/config": ["@automation-server/config@workspace:packages/config"],
 
     "@automation-server/core": ["@automation-server/core@workspace:packages/core"],
+
+    "@automation-server/settings": ["@automation-server/settings@workspace:packages/settings"],
 
     "@automation-server/sources": ["@automation-server/sources@workspace:packages/sources"],
 
