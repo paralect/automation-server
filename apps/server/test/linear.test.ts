@@ -58,6 +58,10 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
       actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
       adminToken: undefined,
       settings: { store: settings, env: {}, reload: runtime.rebuild, test: runtime.test },
+      posthog: {
+        preview: async () => ({ ok: false as const, message: "unused" }),
+        runNow: async () => ({ status: "busy" as const, message: "unused" }),
+      },
       system: () => ({ startedAt: "", sources: [], automations: [], jobs: [], retentionDays: 30, webhookUrls: {} }),
     },
   });

@@ -50,7 +50,7 @@ Integrations are configured through settings, not only environment variables.
 
 ## Scheduler
 
-`Job { name, due(now) => claimKey | null, run(ctx) }` in `packages/core`. The server ticks every 60 seconds. For each job whose `due` returns a key, the scheduler claims `(job name, key)` in the claim store, so an occurrence runs at most once, also across restarts. A run is recorded in the activity store with source `schedule`, so it shows on the Runs and Logs pages like an automation run. A failed occurrence is recorded as failed and not retried by the ticker, to avoid one failing call per minute. `Scheduler.runNow(jobName, key)` runs a job under an explicit key (for example `manual:<timestamp>`) through the same recording. Shutdown stops the ticker and drains running jobs.
+`Job { name, due(now) => claimKey | null, run(ctx) }` in `packages/core`. The server ticks every 60 seconds. For each job whose `due` returns a key, the scheduler claims `(job name, key)` in the claim store, so an occurrence runs at most once, also across restarts. A run is recorded in the activity store with source `schedule`, so it shows on the Runs and Logs pages like an automation run. A failed occurrence is recorded as failed and not retried by the ticker, to avoid one failing call per minute. `Scheduler.runNow(jobOrName, key)` runs a job under an explicit key (for example `manual:<timestamp>`) through the same recording. It also accepts a job object that is not on the schedule, so the admin can run a disabled job. Shutdown stops the ticker and drains running jobs.
 
 ## Principles
 

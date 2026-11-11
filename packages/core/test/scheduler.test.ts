@@ -121,12 +121,22 @@ describe("scheduler", () => {
   test("runNow bypasses due, dedupes by key and reports unknown jobs", async () => {
     let count = 0;
     const { scheduler, runs } = setup([weekly("report", () => null, async () => void count++)]);
-    expect(await scheduler.runNow("report", "manual:1")).toBe("ran");
-    expect(await scheduler.runNow("report", "manual:1")).toBe("duplicate");
-    expect(await scheduler.runNow("report", "manual:2")).toBe("ran");
-    expect(await scheduler.runNow("nope", "manual:1")).toBe("unknown-job");
+    expect(await scheduler.runNow("report", "manual:1")).toMatchObject({ status: "succeeded" });
+    expect(await scheduler.runNow("report", "manual:1")).toEqual({ status: "duplicate" });
+    expect(await scheduler.runNow("report", "manual:2")).toMatchObject({ status: "succeeded" });
+    expect(await scheduler.runNow("nope", "manual:1")).toEqual({ status: "unknown-job" });
     expect(count).toBe(2);
     expect(runs()).toHaveLength(2);
+  });
+
+  test("runNow runs an unregistered job object and reports its run id and failure", async () => {
+    const { scheduler, runs } = setup([]);
+    const failing = weekly("off-schedule", () => null, async () => {
+      throw new Error("upstream down");
+    });
+    const result = await scheduler.runNow(failing, "manual:1");
+    expect(result).toMatchObject({ status: "failed", error: "upstream down" });
+    expect(runs()[0]).toMatchObject({ id: "runId" in result ? result.runId : "", automation: "off-schedule", status: "failed" });
   });
 
   test("the job list is read on every tick so a reload takes effect", async () => {

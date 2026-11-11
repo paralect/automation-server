@@ -1,4 +1,4 @@
-import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
+import { createDispatcher, createScheduler, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 
@@ -6,6 +6,7 @@ import { createGithubActionsReader } from "@automation-server/api/githubActions"
 
 import { createApp } from "../src/app";
 import { webhookUrls } from "../src/config";
+import { createPosthogAdmin } from "../src/integrations/posthog";
 import { INTEGRATION_MODULES } from "../src/integrations/registry";
 import { createRuntime } from "../src/runtime";
 
@@ -15,13 +16,12 @@ const quiet: Logger = { info() {}, warn() {}, error() {} };
 function setup(options: { adminToken?: string; encryptionKey?: string; env?: Record<string, string>; githubFetch?: typeof fetch } = { adminToken: TOKEN }) {
   const { adminToken, encryptionKey, env = {}, githubFetch } = options;
   const settings = createSqliteSettingsStore({ path: ":memory:", encryptionKey });
-  const runtime = createRuntime({
-    modules: INTEGRATION_MODULES,
-    resolve: () => resolveConfig(settings, env),
-    deps: { log: quiet, fetch: githubFetch },
-  });
+  const resolve = () => resolveConfig(settings, env);
+  const runtime = createRuntime({ modules: INTEGRATION_MODULES, resolve, deps: { log: quiet, fetch: githubFetch } });
   const activity = createSqliteActivityStore({ path: ":memory:" });
-  const dispatcher = createDispatcher({ automations: runtime.automations, store: createSqliteStore({ path: ":memory:" }), log: quiet });
+  const store = createSqliteStore({ path: ":memory:" });
+  const dispatcher = createDispatcher({ automations: runtime.automations, store, log: quiet });
+  const scheduler = createScheduler({ jobs: runtime.jobs, store, log: quiet, activity });
   const app = createApp({
     sources: runtime.sources,
     dispatcher,
@@ -40,6 +40,7 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
       }),
       adminToken,
       settings: { store: settings, env, reload: runtime.rebuild, test: runtime.test },
+      posthog: createPosthogAdmin({ resolve, scheduler, fetch: githubFetch }),
       system: () => ({
         startedAt: new Date().toISOString(),
         sources: Object.keys(runtime.sources()),
@@ -56,7 +57,7 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
       headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
       body: JSON.stringify({ json: input }),
     });
-  return { activity, call, app, settings };
+  return { activity, call, app, settings, runtime };
 }
 
 describe("admin API auth", () => {
@@ -216,11 +217,102 @@ describe("settings API", () => {
     expect((await rpc(bad, "settings/testConnection", { integrationId: "github" })).body).toMatchObject({ ok: false, available: true });
 
     const none = setup({ adminToken: TOKEN });
-    for (const integrationId of ["github", "linear"]) {
+    for (const integrationId of ["github", "linear", "posthog"]) {
       expect((await rpc(none, "settings/testConnection", { integrationId })).body).toMatchObject({ ok: false, message: expect.stringContaining("not configured") });
     }
-    for (const integrationId of ["posthog", "sentry"]) {
+    for (const integrationId of ["sentry"]) {
       expect((await rpc(none, "settings/testConnection", { integrationId })).body).toMatchObject({ ok: false, available: false });
     }
+  });
+});
+
+describe("posthog API", () => {
+  const API_KEY = "phx_AdminTestKey0987654321";
+  const SLACK_URL = "https://hooks.slack.com/services/T1/B1/adminTestWebhookSecret";
+
+  const rpc = async (t: ReturnType<typeof setup>, path: string, input?: unknown) => {
+    const res = await t.call(path, input, TOKEN);
+    const body = (await res.json()) as { json: any };
+    return { status: res.status, body: body.json, raw: JSON.stringify(body) };
+  };
+
+  function posthogSetup(slack: (url: string) => Response = () => new Response("ok")) {
+    const calls: string[] = [];
+    const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const target = String(url);
+      calls.push(target);
+      if (target === SLACK_URL) return slack(target);
+      const query = (JSON.parse(String(init?.body)) as { query: { query: string } }).query.query;
+      if (query.includes("uniqIf")) return Response.json({ results: [[10, 5, 100, 50, 20, 10]] });
+      if (query.startsWith("SELECT count()")) return Response.json({ results: [[1234]] });
+      return Response.json({ results: [["/", 7, 3]] });
+    }) as typeof globalThis.fetch;
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", githubFetch: fetch });
+    const configure = (values: Record<string, unknown> = {}) =>
+      rpc(t, "settings/update", { integrationId: "posthog", values: { projectId: "77", personalApiKey: API_KEY, slackWebhookUrl: SLACK_URL, ...values } });
+    const slackPosts = () => calls.filter((c) => c === SLACK_URL).length;
+    return { t, configure, calls, slackPosts };
+  }
+
+  test("needs the admin token", async () => {
+    const { t } = posthogSetup();
+    expect((await t.call("posthog/preview", undefined)).status).toBe(401);
+    expect((await t.call("posthog/runNow", undefined)).status).toBe(401);
+  });
+
+  test("an unconfigured integration is reported, not thrown", async () => {
+    const { t } = posthogSetup();
+    expect((await rpc(t, "posthog/preview")).body).toEqual({ ok: false, message: expect.stringContaining("Missing: projectId, personalApiKey, slackWebhookUrl") });
+    expect((await rpc(t, "posthog/runNow")).body).toMatchObject({ status: "not-configured" });
+  });
+
+  test("preview returns the report and does not send it or record a run", async () => {
+    const { t, configure, calls, slackPosts } = posthogSetup();
+    await configure();
+    const res = await rpc(t, "posthog/preview");
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, text: expect.stringContaining("Unique users: *10* (+100.0%, was 5)") });
+    expect(calls).toHaveLength(3);
+    expect(slackPosts()).toBe(0);
+    expect(t.activity.queryRuns({ limit: 10 }).items).toEqual([]);
+    expect(res.raw).not.toContain(API_KEY);
+  });
+
+  test("runNow sends while the schedule is disabled and records a schedule run", async () => {
+    const { t, configure, slackPosts } = posthogSetup();
+    await configure();
+    expect((await rpc(t, "system")).body.jobs).toEqual([]);
+
+    const res = await rpc(t, "posthog/runNow");
+    expect(res.body).toMatchObject({ status: "succeeded", key: expect.stringMatching(/^manual:/), message: "Report sent to Slack" });
+    expect(slackPosts()).toBe(1);
+    const run = t.activity.queryRuns({ limit: 1 }).items[0];
+    expect(run).toMatchObject({ id: res.body.runId, automation: "posthog-weekly-report", source: "schedule", externalId: res.body.key, status: "succeeded" });
+  });
+
+  test("a Slack failure comes back as a failed run without the webhook URL", async () => {
+    const { t, configure } = posthogSetup((url) => new Response(`no_service ${url}`, { status: 404 }));
+    await configure();
+    const res = await rpc(t, "posthog/runNow");
+    expect(res.body).toMatchObject({ status: "failed", message: expect.stringContaining("Slack delivery failed: HTTP 404") });
+    expect(res.raw).not.toContain("adminTestWebhookSecret");
+    expect(t.activity.queryRuns({ limit: 1 }).items[0]?.error).not.toContain("adminTestWebhookSecret");
+  });
+
+  test("the weekly job is registered only once enabled", async () => {
+    const { t, configure } = posthogSetup();
+    await configure({ enabled: true, dayOfWeek: 3, hourUtc: 7 });
+    expect((await rpc(t, "system")).body.jobs).toEqual(["posthog-weekly-report"]);
+    await configure({ enabled: false });
+    expect((await rpc(t, "system")).body.jobs).toEqual([]);
+  });
+
+  test("testConnection runs a trivial query", async () => {
+    const { t, configure, slackPosts } = posthogSetup();
+    await configure();
+    const res = await rpc(t, "settings/testConnection", { integrationId: "posthog" });
+    expect(res.body).toMatchObject({ ok: true, details: { projectId: "77", eventsLastDay: "1234" } });
+    expect(slackPosts()).toBe(0);
+    expect(res.raw).not.toContain(API_KEY);
   });
 });

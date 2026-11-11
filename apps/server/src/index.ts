@@ -16,6 +16,7 @@ import {
 import { createApp } from "./app";
 import { buildConfig, webhookUrls } from "./config";
 import { ENV } from "./env.server";
+import { createPosthogAdmin } from "./integrations/posthog";
 import { INTEGRATION_MODULES } from "./integrations/registry";
 import { createRuntime } from "./runtime";
 
@@ -82,6 +83,7 @@ const app = createApp({
     actions,
     adminToken: config.adminToken,
     settings: { store: settings, env: process.env, reload: runtime.rebuild, test: runtime.test },
+    posthog: createPosthogAdmin({ resolve, scheduler }),
     system: () => ({
       startedAt,
       sources: Object.keys(runtime.sources()),
