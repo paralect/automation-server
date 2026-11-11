@@ -126,7 +126,7 @@ export function IntegrationCard({
               </Field>
             ))}
           </FieldGroup>
-          {id === "posthog" && <PosthogActions configured={integration.configured} />}
+          {id === "posthog" && <PosthogActions />}
         </CardContent>
         <CardFooter className="flex flex-col items-stretch gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -343,7 +343,7 @@ function TestResult({ result }: { result: ConnectionTestResult }) {
   )
 }
 
-function PosthogActions({ configured }: { configured: boolean }) {
+function PosthogActions() {
   const preview = useMutation({ mutationFn: () => previewPosthogReport() })
   const send = useMutation({ mutationFn: () => runPosthogNow() })
 
@@ -356,7 +356,7 @@ function PosthogActions({ configured }: { configured: boolean }) {
           variant="outline"
           size="sm"
           onClick={() => preview.mutate()}
-          disabled={!configured || preview.isPending}
+          disabled={preview.isPending}
         >
           {preview.isPending ? "Building..." : "Preview report"}
         </Button>
@@ -367,12 +367,11 @@ function PosthogActions({ configured }: { configured: boolean }) {
           onClick={() => {
             if (window.confirm("Send the PostHog report to Slack now?")) send.mutate()
           }}
-          disabled={!configured || send.isPending}
+          disabled={send.isPending}
         >
           {send.isPending ? "Sending..." : "Send now"}
         </Button>
       </div>
-      {!configured && <p className="text-xs text-muted-foreground">Save the required fields to preview or send.</p>}
       {preview.error && <FieldError>{errorText(preview.error)}</FieldError>}
       {preview.data &&
         (preview.data.ok ? (

@@ -216,7 +216,7 @@ function TemplateRow({
           <Button size="sm" variant="outline" onClick={() => install.mutate()} disabled={install.isPending}>
             {install.isPending ? "Installing..." : status?.state === "differs" ? "Update" : "Install"}
           </Button>
-          {install.error && <FieldError className="max-w-56 text-right">{errorText(install.error)}</FieldError>}
+          {install.error && <FieldError className="max-w-56 text-right whitespace-normal">{errorText(install.error)}</FieldError>}
           {install.data && (
             <p role="status" className="text-xs whitespace-nowrap">
               {OUTCOME_COPY[install.data.outcome]}
