@@ -31,6 +31,6 @@ export function buildConfig(env: RawEnv): ServerConfig {
   };
 }
 
-export function webhookUrls(sources: readonly string[], publicUrl: string | undefined): Record<string, string> {
-  return Object.fromEntries(sources.map((name) => [name, `${publicUrl ?? ""}/webhooks/${name}`]));
+export function webhookUrls(project: string, sources: readonly string[], publicUrl: string | undefined): Record<string, string> {
+  return Object.fromEntries(sources.map((name) => [name, `${publicUrl ?? ""}/webhooks/${project}/${name}`]));
 }

@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton"
 import { errorKind } from "@/lib/errors"
 import { actionRunQuery, isActiveState } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 
 export const Route = createFileRoute("/_authed/actions/$id")({
   validateSearch: z.object({ repo: z.string().min(3).max(200).catch("") }),
@@ -22,7 +23,8 @@ export const Route = createFileRoute("/_authed/actions/$id")({
 type Detail = NonNullable<ReturnType<typeof useActionRun>["data"]>
 type Job = Detail["jobs"][number]
 
-const useActionRun = (repo: string, id: number) => useQuery({ ...actionRunQuery(repo, id), enabled: repo !== "" && id > 0 })
+const useActionRun = (repo: string, id: number) =>
+  useQuery({ ...actionRunQuery(useProjectId(), repo, id), enabled: repo !== "" && id > 0 })
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

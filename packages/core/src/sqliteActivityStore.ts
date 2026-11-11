@@ -18,10 +18,13 @@ import type {
 export type SqliteActivityStoreOptions = {
   path: string;
   now?: () => number;
+  /** Project given to the runs and logs recorded before projects existed, when the column is first added. */
+  legacyProject?: string;
 };
 
 type LogRow = {
   id: number;
+  project: string | null;
   time: string;
   level: LogLevel;
   message: string;
@@ -35,6 +38,7 @@ type LogRow = {
 type RunRow = {
   seq: number;
   id: string;
+  project: string | null;
   automation: string;
   source: string;
   kind: string;
@@ -58,6 +62,7 @@ const toLog = (row: LogRow): StoredLog => {
     level,
     message,
     fields: JSON.parse(row.fields),
+    project: row.project,
     source: row.source,
     automation: row.automation,
     externalId: row.external_id,
@@ -68,6 +73,7 @@ const toLog = (row: LogRow): StoredLog => {
 const toRun = (row: RunRow): StoredRun => ({
   seq: row.seq,
   id: row.id,
+  project: row.project,
   automation: row.automation,
   source: row.source,
   kind: row.kind,
@@ -88,9 +94,10 @@ function buildFilter(
   search: string | undefined,
   before: number | undefined,
   cursorColumn: string,
+  extra?: Filter,
 ): Filter {
-  const clauses: string[] = [];
-  const params: Params = {};
+  const clauses: string[] = extra?.where ? [extra.where] : [];
+  const params: Params = { ...extra?.params };
   for (const [column, value] of Object.entries(equals)) {
     if (value === undefined) continue;
     clauses.push(`${column} = $${column}`);
@@ -107,7 +114,14 @@ function buildFilter(
   return { where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-export function createSqliteActivityStore({ path, now = Date.now }: SqliteActivityStoreOptions): ActivityStore {
+// Server-wide lines (startup, reloads) carry no project and show in every project.
+const logProject = (project: string | undefined): Filter | undefined =>
+  project === undefined ? undefined : { where: "(project = $project OR project IS NULL)", params: { $project: project } };
+
+const hasColumn = (db: Database, table: string, column: string) =>
+  (db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
+
+export function createSqliteActivityStore({ path, now = Date.now, legacyProject }: SqliteActivityStoreOptions): ActivityStore {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.run("PRAGMA busy_timeout = 5000");
@@ -141,14 +155,23 @@ export function createSqliteActivityStore({ path, now = Date.now }: SqliteActivi
   db.run("CREATE INDEX IF NOT EXISTS runs_status_seq ON runs (status, seq)");
   db.run("CREATE INDEX IF NOT EXISTS runs_automation ON runs (automation)");
   db.run("CREATE INDEX IF NOT EXISTS runs_external_id ON runs (external_id)");
+  db.transaction(() => {
+    for (const table of ["logs", "runs"]) {
+      if (hasColumn(db, table, "project")) continue;
+      db.run(`ALTER TABLE ${table} ADD COLUMN project TEXT`);
+      if (legacyProject) db.query(`UPDATE ${table} SET project = $project`).run({ $project: legacyProject });
+    }
+  })();
+  db.run("CREATE INDEX IF NOT EXISTS logs_project_id ON logs (project, id)");
+  db.run("CREATE INDEX IF NOT EXISTS runs_project_seq ON runs (project, seq)");
 
   const insertLog = db.query(
-    `INSERT INTO logs (time, level, message, source, automation, external_id, run_id, fields)
-     VALUES ($time, $level, $message, $source, $automation, $externalId, $runId, $fields)`,
+    `INSERT INTO logs (time, level, message, project, source, automation, external_id, run_id, fields)
+     VALUES ($time, $level, $message, $project, $source, $automation, $externalId, $runId, $fields)`,
   );
   const insertRun = db.query(
-    `INSERT INTO runs (id, automation, source, kind, external_id, status, started_at, finished_at)
-     VALUES ($id, $automation, $source, $kind, $externalId, $status, $startedAt, $finishedAt)`,
+    `INSERT INTO runs (id, project, automation, source, kind, external_id, status, started_at, finished_at)
+     VALUES ($id, $project, $automation, $source, $kind, $externalId, $status, $startedAt, $finishedAt)`,
   );
   const finishStmt = db.query(
     "UPDATE runs SET status = $status, finished_at = $finishedAt, error = $error WHERE id = $id AND status = 'running'",
@@ -165,6 +188,7 @@ export function createSqliteActivityStore({ path, now = Date.now }: SqliteActivi
     const id = crypto.randomUUID();
     insertRun.run({
       $id: id,
+      $project: run.project ?? null,
       $automation: run.automation,
       $source: run.source,
       $kind: run.kind,
@@ -201,6 +225,7 @@ export function createSqliteActivityStore({ path, now = Date.now }: SqliteActivi
         $time: entry.time,
         $level: entry.level,
         $message: entry.message,
+        $project: asString(fields.project),
         $source: asString(fields.source),
         $automation: asString(fields.automation),
         $externalId: asString(fields.externalId),
@@ -220,12 +245,13 @@ export function createSqliteActivityStore({ path, now = Date.now }: SqliteActivi
         q.search,
         q.before,
         "id",
+        logProject(q.project),
       );
       return paginate<LogRow, StoredLog>("logs", "id", filter, q.limit, toLog, (l) => l.id);
     },
     queryRuns(q) {
       const filter = buildFilter(
-        { status: q.status, automation: q.automation, source: q.source },
+        { project: q.project, status: q.status, automation: q.automation, source: q.source },
         ["automation", "external_id", "error"],
         q.search,
         q.before,
@@ -239,32 +265,37 @@ export function createSqliteActivityStore({ path, now = Date.now }: SqliteActivi
       const { seq: _seq, ...run } = toRun(row);
       return { run: run satisfies RunRecord, logs: logsByRun.all({ $id: id }).map(toLog) };
     },
-    stats(sinceIso, bucketMs): ActivityStats {
+    stats(sinceIso, bucketMs, project): ActivityStats {
+      const scoped = project !== undefined;
+      const runScope = scoped ? "AND project = $project" : "";
+      const logScope = scoped ? "AND (project = $project OR project IS NULL)" : "";
+      const params = (extra: Params = {}): Params => ({ ...extra, ...(scoped ? { $project: project } : {}) });
+
       const runs = Object.fromEntries(RUN_STATUSES.map((s) => [s, 0])) as Record<RunStatus, number>;
       for (const r of db
-        .query<{ status: RunStatus; n: number }, { $since: string }>(
-          "SELECT status, COUNT(*) AS n FROM runs WHERE started_at >= $since GROUP BY status",
+        .query<{ status: RunStatus; n: number }, Params>(
+          `SELECT status, COUNT(*) AS n FROM runs WHERE started_at >= $since ${runScope} GROUP BY status`,
         )
-        .all({ $since: sinceIso })) {
+        .all(params({ $since: sinceIso }))) {
         runs[r.status] = r.n;
       }
       const logs = Object.fromEntries(LOG_LEVELS.map((l) => [l, 0])) as Record<LogLevel, number>;
       for (const r of db
-        .query<{ level: LogLevel; n: number }, { $since: string }>(
-          "SELECT level, COUNT(*) AS n FROM logs WHERE time >= $since GROUP BY level",
+        .query<{ level: LogLevel; n: number }, Params>(
+          `SELECT level, COUNT(*) AS n FROM logs WHERE time >= $since ${logScope} GROUP BY level`,
         )
-        .all({ $since: sinceIso })) {
+        .all(params({ $since: sinceIso }))) {
         logs[r.level] = r.n;
       }
 
       const counted = new Map<number, ActivityBucket>();
       for (const r of db
-        .query<{ bucket: number; status: RunStatus; n: number }, { $since: string; $bucketMs: number }>(
+        .query<{ bucket: number; status: RunStatus; n: number }, Params>(
           `SELECT (CAST(strftime('%s', started_at) AS INTEGER) * 1000) / $bucketMs AS bucket, status, COUNT(*) AS n
-           FROM runs WHERE started_at >= $since AND status IN ('succeeded','failed','duplicate')
+           FROM runs WHERE started_at >= $since AND status IN ('succeeded','failed','duplicate') ${runScope}
            GROUP BY bucket, status`,
         )
-        .all({ $since: sinceIso, $bucketMs: bucketMs })) {
+        .all(params({ $since: sinceIso, $bucketMs: bucketMs }))) {
         const prev = counted.get(r.bucket) ?? { start: "", succeeded: 0, failed: 0, duplicate: 0 };
         counted.set(r.bucket, { ...prev, [r.status]: r.n });
       }
@@ -282,8 +313,8 @@ export function createSqliteActivityStore({ path, now = Date.now }: SqliteActivi
       }
 
       const recentFailures = db
-        .query<RunRow, []>("SELECT * FROM runs WHERE status = 'failed' ORDER BY seq DESC LIMIT 5")
-        .all()
+        .query<RunRow, Params>(`SELECT * FROM runs WHERE status = 'failed' ${runScope} ORDER BY seq DESC LIMIT 5`)
+        .all(params())
         .map((row) => {
           const { seq: _seq, ...run } = toRun(row);
           return run;

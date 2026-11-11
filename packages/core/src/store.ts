@@ -5,6 +5,6 @@ export interface ClaimStore {
   close(): void;
 }
 
-export function claimKey(automation: string, externalId: string): string {
-  return `${automation}:${externalId}`;
+export function claimKey(automation: string, externalId: string, project?: string): string {
+  return `${project ? `${project}/` : ""}${automation}:${externalId}`;
 }

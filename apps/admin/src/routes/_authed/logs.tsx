@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { LEVEL_ROW } from "@/lib/badge-styles"
 import { LOG_LEVELS, logsSearch, type LogsSearch } from "@/lib/filters"
 import { logsQuery as logsQueryOptions, systemQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 
 export const Route = createFileRoute("/_authed/logs")({
   validateSearch: logsSearch,
@@ -35,8 +36,9 @@ function Logs() {
   const setRunId = useCallback((runId: string | undefined) => update({ runId }), [update])
   const setQ = useCallback((q: string | undefined) => update({ q }), [update])
 
-  const system = useQuery(systemQuery())
-  const query = useInfiniteQuery(logsQueryOptions(filters, live))
+  const project = useProjectId()
+  const system = useQuery(systemQuery(project))
+  const query = useInfiniteQuery(logsQueryOptions(project, filters, live))
   const logs = query.data?.pages.flatMap((page) => page.items) ?? []
 
   return (

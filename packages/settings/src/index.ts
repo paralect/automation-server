@@ -1,4 +1,5 @@
 export * from "./crypto";
+export * from "./projects";
 export * from "./resolve";
 export * from "./spec";
 export * from "./store";

@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react"
 
 import { NavUser } from "@/components/nav-user"
+import { ProjectSwitcher, ProjectSwitcherSkeleton } from "@/components/project-switcher"
 import {
   Sidebar,
   SidebarContent,
@@ -35,8 +36,9 @@ const NAV = [
 
 export function AppSidebar({
   user,
+  projectsReady,
   ...props
-}: React.ComponentProps<typeof Sidebar> & { user: { email: string } }) {
+}: React.ComponentProps<typeof Sidebar> & { user: { email: string }; projectsReady: boolean }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
 
   return (
@@ -55,6 +57,7 @@ export function AppSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        {projectsReady ? <ProjectSwitcher /> : <ProjectSwitcherSkeleton />}
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

@@ -1,25 +1,27 @@
 import type { ActivityStore } from "@automation-server/core";
-import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsStore } from "@automation-server/settings";
+import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsDb } from "@automation-server/settings";
 
 import type { ActionsReader } from "./githubActions";
 import type { WorkflowInstaller } from "./workflowInstaller";
 
+/** Server state, with the sources, automations, jobs and webhook URLs of one project. */
 export type SystemInfo = {
   startedAt: string;
   sources: string[];
   automations: string[];
   jobs: string[];
   retentionDays: number;
-  /** Webhook URL per source name. Absolute when PUBLIC_URL is set, otherwise a path such as `/webhooks/sentry`. */
+  /** Webhook URL per source name. Absolute when PUBLIC_URL is set, otherwise a path such as `/webhooks/<project>/sentry`. */
   webhookUrls: Record<string, string>;
 };
 
 export type SettingsAdmin = {
-  store: SettingsStore;
+  db: SettingsDb;
+  /** Process environment. Only the default project falls back to it. */
   env: EnvSource;
-  /** Called after every successful settings write. Rebuilds the runtime from the new settings. */
+  /** Called after every successful settings or project write. Rebuilds the runtime from the new settings. */
   reload(): void;
-  test(id: IntegrationId): Promise<ConnectionTestResult>;
+  test(project: string, id: IntegrationId): Promise<ConnectionTestResult>;
 };
 
 export type PosthogPreview =
@@ -32,17 +34,17 @@ export type PosthogRunResult =
 
 export type PosthogAdmin = {
   /** Builds the report text from live PostHog data without sending it. */
-  preview(): Promise<PosthogPreview>;
+  preview(project: string): Promise<PosthogPreview>;
   /** Builds and sends the report now under a `manual:<timestamp>` key, recorded as a run. */
-  runNow(): Promise<PosthogRunResult>;
+  runNow(project: string): Promise<PosthogRunResult>;
 };
 
 export type Context = {
   activity: ActivityStore;
-  actions: () => ActionsReader;
-  /** Built from the current GitHub settings on every call, so a saved token applies at once. */
-  workflows: () => WorkflowInstaller;
-  system: () => SystemInfo;
+  actions: (project: string) => ActionsReader;
+  /** Built from the project's current GitHub settings on every call, so a saved token applies at once. */
+  workflows: (project: string) => WorkflowInstaller;
+  system: (project: string) => SystemInfo;
   settings: SettingsAdmin;
   posthog: PosthogAdmin;
   adminToken: string | undefined;

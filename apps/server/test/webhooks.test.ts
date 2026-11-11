@@ -1,5 +1,5 @@
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
-import { createSqliteSettingsStore, resolveConfig } from "@automation-server/settings";
+import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -57,7 +57,7 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
   };
   const runtime = createRuntime({
     modules: INTEGRATION_MODULES,
-    resolve: () => resolveConfig(settings, env),
+    projects: () => settings.projects().map((p) => p.id), resolve: (p) => resolveConfig(settings.project(p), envFor(p, env)),
     deps: { log, fetch: fakeGithub },
   });
   const dispatcher = createDispatcher({ automations: runtime.automations, store, log });
@@ -66,21 +66,21 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
     actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
     workflows: () => createWorkflowInstaller({ token: undefined }),
     adminToken: undefined,
-    settings: { store: settings, env, reload: runtime.rebuild, test: runtime.test },
+    settings: { db: settings, env, reload: runtime.rebuild, test: runtime.test },
     posthog: {
       preview: async () => ({ ok: false as const, message: "unused" }),
       runNow: async () => ({ status: "busy" as const, message: "unused" }),
     },
     system: () => ({
       startedAt: new Date().toISOString(),
-      sources: Object.keys(runtime.sources()),
+      sources: Object.keys(runtime.sources("default")),
       automations: [],
       jobs: [],
       retentionDays: 30,
       webhookUrls: {},
     }),
   };
-  const app = createApp({ sources: runtime.sources, dispatcher, log, maxBodyBytes, admin });
+  const app = createApp({ source: runtime.source, defaultProject: "default", dispatcher, log, maxBodyBytes, admin });
 
   const post = (path: string, body: Uint8Array, headers: Record<string, string> = {}) =>
     app.request(path, { method: "POST", body, headers });
@@ -92,7 +92,7 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
     });
   const issueCreates = () => calls.filter((c) => c.method === "POST" && c.path.endsWith("/issues")).length;
 
-  return { app, dispatcher, calls, logs, deliver, post, issueCreates, failNextIssueCreate, gate };
+  return { app, dispatcher, calls, logs, deliver, post, issueCreates, failNextIssueCreate, gate, settings, runtime };
 }
 
 let t: ReturnType<typeof setup>;
@@ -207,8 +207,8 @@ describe("POST /webhooks/:source", () => {
     await t.deliver();
     await t.dispatcher.drain(2000);
     const received = t.logs.map((l) => JSON.parse(l)).find((l) => l.m === "webhook received");
-    expect(received.f).toMatchObject({ source: "sentry", kind: "issue_alert", externalId: "1117540176" });
-    expect(Object.keys(received.f).sort()).toEqual(["externalId", "kind", "source"]);
+    expect(received.f).toMatchObject({ project: "default", source: "sentry", kind: "issue_alert", externalId: "1117540176" });
+    expect(Object.keys(received.f).sort()).toEqual(["externalId", "kind", "project", "source"]);
   });
 
   test("logs never contain the GitHub token", async () => {
@@ -223,5 +223,48 @@ describe("GET /health", () => {
     const res = await t.app.request("/health");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: "ok" });
+  });
+});
+
+describe("POST /webhooks/:project/:source", () => {
+  const deliverTo = (path: string, secret: string) =>
+    t.post(path, fixture, { "sentry-hook-resource": "event_alert", "sentry-hook-signature": sign(fixture, secret) });
+
+  test("the legacy URL and the project URL both reach the default project", async () => {
+    expect((await deliverTo("/webhooks/default/sentry", SECRET)).status).toBe(200);
+    await t.dispatcher.drain(2000);
+    expect(t.issueCreates()).toBe(1);
+    expect((await deliverTo("/webhooks/sentry", SECRET)).status).toBe(200);
+    await t.dispatcher.drain(2000);
+    expect(t.issueCreates()).toBe(1);
+  });
+
+  test("another project verifies with its own secret and does not share claims with the default project", async () => {
+    const acme = t.settings.createProject({ name: "Acme" });
+    t.settings.project(acme.id).apply({
+      set: [
+        { key: "sentry.clientSecret", json: JSON.stringify("acme-secret"), secret: false },
+        { key: "github.token", json: JSON.stringify("acme-token"), secret: false },
+        { key: "github.repo", json: JSON.stringify("acme/app"), secret: false },
+      ],
+    });
+    t.runtime.rebuild();
+
+    expect((await deliverTo("/webhooks/acme/sentry", SECRET)).status).toBe(401);
+    expect((await deliverTo("/webhooks/acme/sentry", "acme-secret")).status).toBe(200);
+    await t.dispatcher.drain(2000);
+    expect((await deliverTo("/webhooks/sentry", SECRET)).status).toBe(200);
+    await t.dispatcher.drain(2000);
+    expect(t.calls.filter((c) => c.method === "POST" && c.path.endsWith("/issues")).map((c) => c.path)).toEqual([
+      "/repos/acme/app/issues",
+      "/repos/acme/widgets/issues",
+    ]);
+  });
+
+  test("an unknown project or a project without the source answers 404", async () => {
+    expect((await deliverTo("/webhooks/nope/sentry", SECRET)).status).toBe(404);
+    t.settings.createProject({ name: "Empty" });
+    t.runtime.rebuild();
+    expect((await deliverTo("/webhooks/empty/sentry", SECRET)).status).toBe(404);
   });
 });

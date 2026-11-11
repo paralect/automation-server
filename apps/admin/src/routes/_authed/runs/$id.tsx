@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { LEVEL_ROW } from "@/lib/badge-styles"
 import { errorKind } from "@/lib/errors"
 import { runQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 import { formatDuration } from "@/lib/time"
 
 export const Route = createFileRoute("/_authed/runs/$id")({ component: RunDetail })
@@ -26,7 +27,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function RunDetail() {
   const { id } = Route.useParams()
-  const { data, error, refetch } = useQuery(runQuery(id))
+  const { data, error, refetch } = useQuery(runQuery(useProjectId(), id))
 
   if (error && errorKind(error) === "not-found") {
     return (

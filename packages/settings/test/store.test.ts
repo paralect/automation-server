@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createSecretBox } from "../src/crypto";
+import { DEFAULT_PROJECT_ID, ProjectInputError } from "../src/projects";
 import { createSqliteSettingsStore, SecretsUnavailableError } from "../src/store";
 
 const dirs: string[] = [];
@@ -81,5 +82,67 @@ describe("settings store", () => {
     store.apply({ set: [{ key: "a", json: "1", secret: false }, { key: "b", json: "2", secret: false }] });
     store.apply({ set: [{ key: "a", json: "3", secret: false }], remove: ["b"] });
     expect(store.all()).toEqual({ a: { secret: false, json: "3" } });
+  });
+});
+
+describe("projects", () => {
+  test("a fresh database has only the default project", () => {
+    const db = createSqliteSettingsStore({ path: ":memory:" });
+    expect(db.projects()).toMatchObject([{ id: DEFAULT_PROJECT_ID, name: "Default", domain: null }]);
+  });
+
+  test("settings and claims from before projects move into the default project, once", () => {
+    const path = tempDb();
+    const legacy = new Database(path);
+    legacy.run("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, secret INTEGER NOT NULL, updated_at TEXT NOT NULL)");
+    legacy.run("INSERT INTO settings VALUES ('sentry.levels', '[\"error\"]', 0, 'x')");
+    legacy.run("CREATE TABLE claims (key TEXT PRIMARY KEY, status TEXT NOT NULL, claimed_at INTEGER NOT NULL)");
+    legacy.run("INSERT INTO claims VALUES ('posthog-weekly-report:2026-W45', 'done', 1)");
+    legacy.close();
+
+    createSqliteSettingsStore({ path }).close();
+    const db = createSqliteSettingsStore({ path });
+    expect(db.all()).toEqual({ "sentry.levels": { secret: false, json: '["error"]' } });
+    expect(db.project(DEFAULT_PROJECT_ID).all()).toEqual(db.all());
+    const claims = new Database(path, { readonly: true }).query("SELECT key FROM claims").all();
+    expect(claims).toEqual([{ key: "default/posthog-weekly-report:2026-W45" }]);
+  });
+
+  test("each project has its own settings", () => {
+    const db = createSqliteSettingsStore({ path: ":memory:", encryptionKey: "k" });
+    const acme = db.createProject({ name: "Acme" });
+    db.project(acme.id).apply({ set: [{ key: "github.token", json: '"acme"', secret: true }] });
+    db.apply({ set: [{ key: "github.token", json: '"default"', secret: true }] });
+    expect(db.project(acme.id).all()["github.token"]?.json).toBe('"acme"');
+    expect(db.all()["github.token"]?.json).toBe('"default"');
+  });
+
+  test("ids are unique slugs of the name and domains are normalized", () => {
+    const db = createSqliteSettingsStore({ path: ":memory:" });
+    expect(db.createProject({ name: "  Fire Prompts!  ", domain: "https://www.FirePrompts.com/app" })).toMatchObject({
+      id: "fire-prompts",
+      name: "Fire Prompts!",
+      domain: "fireprompts.com",
+    });
+    expect(db.createProject({ name: "Fire prompts" }).id).toBe("fire-prompts-2");
+    expect(db.createProject({ name: "Default" }).id).toBe("default-2");
+    expect(db.createProject({ name: "Проект" }).id).toBe("project");
+    expect(() => db.createProject({ name: " " })).toThrow(ProjectInputError);
+    expect(() => db.createProject({ name: "x", domain: "not a domain" })).toThrow(ProjectInputError);
+  });
+
+  test("update keeps the id, delete removes the project and its settings, and the default stays", () => {
+    const db = createSqliteSettingsStore({ path: ":memory:" });
+    const p = db.createProject({ name: "Acme" });
+    expect(db.updateProject(p.id, { name: "Acme Inc", domain: "acme.com" })).toMatchObject({ id: "acme", name: "Acme Inc", domain: "acme.com" });
+    expect(db.updateProject(p.id, { domain: "" })?.domain).toBeNull();
+    expect(db.updateProject("nope", { name: "x" })).toBeNull();
+
+    db.project(p.id).apply({ set: [{ key: "sentry.levels", json: "[]", secret: false }] });
+    expect(db.deleteProject(p.id)).toBe(true);
+    expect(db.getProject(p.id)).toBeNull();
+    expect(db.project(p.id).all()).toEqual({});
+    expect(db.deleteProject(p.id)).toBe(false);
+    expect(() => db.deleteProject(DEFAULT_PROJECT_ID)).toThrow(ProjectInputError);
   });
 });

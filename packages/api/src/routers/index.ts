@@ -7,13 +7,17 @@ import type {
 } from "@automation-server/core";
 import {
   describeSettings,
+  envFor,
   INTEGRATION_IDS,
   planUpdate,
+  PROJECT_ID_PATTERN,
+  ProjectInputError,
   REPO_PATTERN,
   resolveConfig,
   SecretsUnavailableError,
   SettingsInputError,
   type ConnectionTestResult,
+  type Project,
   type SettingsView,
 } from "@automation-server/settings";
 import { ORPCError, type, type RouterClient } from "@orpc/server";
@@ -30,6 +34,23 @@ const status = z.enum(["running", "succeeded", "failed", "duplicate"]);
 const page = { before: z.number().int().optional(), limit: z.number().int().min(1).max(200).default(50) };
 const text = z.string().trim().min(1).max(200).optional();
 const repo = z.string().trim().regex(new RegExp(REPO_PATTERN), "Repository must be in owner/name form").max(200);
+const project = z.string().regex(new RegExp(PROJECT_ID_PATTERN), "Unknown project");
+const projectFields = { name: z.string().max(200), domain: z.string().max(300).nullable().optional() };
+
+/** Every project-scoped procedure answers NOT_FOUND for a project that does not exist (or was just deleted). */
+function inProject(context: Context, id: string): string {
+  if (!context.settings.db.getProject(id)) throw new ORPCError("NOT_FOUND", { message: `Project ${id} does not exist` });
+  return id;
+}
+
+function projectCall<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (err) {
+    if (err instanceof ProjectInputError) throw new ORPCError("BAD_REQUEST", { message: err.message });
+    throw err;
+  }
+}
 
 export type WorkflowTemplateInfo = {
   id: string;
@@ -55,33 +76,62 @@ async function workflowCall<T>(run: () => Promise<T>): Promise<T> {
 export const appRouter = {
   healthCheck: o.handler(() => "OK"),
 
+  projects: {
+    list: adminProcedure.output(type<Project[]>()).handler(({ context }) => context.settings.db.projects()),
+    create: adminProcedure
+      .input(z.object(projectFields))
+      .output(type<Project>())
+      .handler(({ input, context }) => {
+        const created = projectCall(() => context.settings.db.createProject(input));
+        context.settings.reload();
+        return created;
+      }),
+    update: adminProcedure
+      .input(z.object({ id: project, ...projectFields, name: projectFields.name.optional() }))
+      .output(type<Project>())
+      .handler(({ input: { id, ...changes }, context }) => {
+        const updated = projectCall(() => context.settings.db.updateProject(id, changes));
+        if (!updated) throw new ORPCError("NOT_FOUND", { message: `Project ${id} does not exist` });
+        return updated;
+      }),
+    delete: adminProcedure
+      .input(z.object({ id: project }))
+      .output(type<{ deleted: boolean }>())
+      .handler(({ input, context }) => {
+        const deleted = projectCall(() => context.settings.db.deleteProject(input.id));
+        if (!deleted) throw new ORPCError("NOT_FOUND", { message: `Project ${input.id} does not exist` });
+        context.settings.reload();
+        return { deleted };
+      }),
+  },
+
   overview: adminProcedure
-    .input(z.object({ windowHours: z.number().int().min(1).max(168).default(24) }))
+    .input(z.object({ project, windowHours: z.number().int().min(1).max(168).default(24) }))
     .output(type<ActivityStats>())
     .handler(({ input, context }) => {
       const windowMs = input.windowHours * 3_600_000;
       const bucketMs = input.windowHours <= 24 ? 3_600_000 : 6 * 3_600_000;
-      return context.activity.stats(new Date(Date.now() - windowMs).toISOString(), bucketMs);
+      return context.activity.stats(new Date(Date.now() - windowMs).toISOString(), bucketMs, inProject(context, input.project));
     }),
 
   logs: {
     list: adminProcedure
-      .input(z.object({ level: level.optional(), source: text, automation: text, runId: text, search: text, ...page }))
+      .input(z.object({ project, level: level.optional(), source: text, automation: text, runId: text, search: text, ...page }))
       .output(type<Page<StoredLog>>())
-      .handler(({ input, context }) => context.activity.queryLogs(input)),
+      .handler(({ input, context }) => context.activity.queryLogs({ ...input, project: inProject(context, input.project) })),
   },
 
   runs: {
     list: adminProcedure
-      .input(z.object({ status: status.optional(), automation: text, source: text, search: text, ...page }))
+      .input(z.object({ project, status: status.optional(), automation: text, source: text, search: text, ...page }))
       .output(type<Page<StoredRun>>())
-      .handler(({ input, context }) => context.activity.queryRuns(input)),
+      .handler(({ input, context }) => context.activity.queryRuns({ ...input, project: inProject(context, input.project) })),
     get: adminProcedure
-      .input(z.object({ id: z.string().min(1) }))
+      .input(z.object({ project, id: z.string().min(1) }))
       .output(type<{ run: RunRecord; logs: StoredLog[] }>())
       .handler(({ input, context }) => {
         const found = context.activity.getRun(input.id);
-        if (!found) throw new ORPCError("NOT_FOUND");
+        if (!found || found.run.project !== inProject(context, input.project)) throw new ORPCError("NOT_FOUND");
         return found;
       }),
   },
@@ -90,6 +140,7 @@ export const appRouter = {
     list: adminProcedure
       .input(
         z.object({
+          project,
           repo: text,
           workflow: text,
           state: z.enum(ACTION_STATES).optional(),
@@ -97,14 +148,15 @@ export const appRouter = {
         }),
       )
       .output(type<ActionsRunList>())
-      .handler(({ input, context }) => context.actions().listRuns(input)),
+      .handler(({ input: { project, ...query }, context }) => context.actions(inProject(context, project)).listRuns(query)),
     get: adminProcedure
-      .input(z.object({ repo: z.string().min(3).max(200), id: z.number().int().positive() }))
+      .input(z.object({ project, repo: z.string().min(3).max(200), id: z.number().int().positive() }))
       .output(type<{ run: WorkflowRun; jobs: WorkflowJob[] }>())
       .handler(async ({ input, context }) => {
-        let found: Awaited<ReturnType<ReturnType<typeof context.actions>["getRun"]>>;
+        const reader = context.actions(inProject(context, input.project));
+        let found: Awaited<ReturnType<typeof reader.getRun>>;
         try {
-          found = await context.actions().getRun(input.repo, input.id);
+          found = await reader.getRun(input.repo, input.id);
         } catch (err) {
           throw new ORPCError("BAD_GATEWAY", { message: err instanceof Error ? err.message : "GitHub API failed" });
         }
@@ -126,27 +178,34 @@ export const appRouter = {
       })),
     ),
     status: adminProcedure
-      .input(z.object({ repo }))
+      .input(z.object({ project, repo }))
       .output(type<WorkflowStatus>())
-      .handler(({ input, context }) => workflowCall(() => context.workflows().status(input.repo))),
+      .handler(({ input, context }) => workflowCall(() => context.workflows(inProject(context, input.project)).status(input.repo))),
     install: adminProcedure
-      .input(z.object({ repo, templateId: z.string().min(1).max(100), mode: z.enum(["pr", "direct"]).default("pr") }))
+      .input(z.object({ project, repo, templateId: z.string().min(1).max(100), mode: z.enum(["pr", "direct"]).default("pr") }))
       .output(type<InstallResult>())
-      .handler(({ input, context }) => workflowCall(() => context.workflows().install(input))),
+      .handler(({ input: { project, ...install }, context }) =>
+        workflowCall(() => context.workflows(inProject(context, project)).install(install)),
+      ),
   },
 
   system: adminProcedure
+    .input(z.object({ project }))
     .output(type<SystemInfo & { uptimeSeconds: number }>())
-    .handler(({ context }) => {
-      const system = context.system();
+    .handler(({ input, context }) => {
+      const system = context.system(inProject(context, input.project));
       return { ...system, uptimeSeconds: Math.floor((Date.now() - Date.parse(system.startedAt)) / 1000) };
     }),
 
   settings: {
-    get: adminProcedure.output(type<SettingsView>()).handler(({ context }) => currentView(context.settings)),
+    get: adminProcedure
+      .input(z.object({ project }))
+      .output(type<SettingsView>())
+      .handler(({ input, context }) => currentView(context.settings, inProject(context, input.project))),
     update: adminProcedure
       .input(
         z.object({
+          project,
           integrationId: z.enum(INTEGRATION_IDS),
           values: z.record(z.string(), z.unknown()).default({}),
           clear: z.array(z.string()).optional(),
@@ -154,8 +213,9 @@ export const appRouter = {
       )
       .output(type<SettingsView>())
       .handler(({ input, context }) => {
+        const id = inProject(context, input.project);
         try {
-          context.settings.store.apply(planUpdate(input.integrationId, input));
+          context.settings.db.project(id).apply(planUpdate(input.integrationId, input));
         } catch (err) {
           if (err instanceof SettingsInputError || err instanceof SecretsUnavailableError) {
             throw new ORPCError("BAD_REQUEST", { message: err.message });
@@ -163,25 +223,34 @@ export const appRouter = {
           throw err;
         }
         context.settings.reload();
-        return currentView(context.settings);
+        return currentView(context.settings, id);
       }),
     testConnection: adminProcedure
-      .input(z.object({ integrationId: z.enum(INTEGRATION_IDS) }))
+      .input(z.object({ project, integrationId: z.enum(INTEGRATION_IDS) }))
       .output(type<ConnectionTestResult>())
-      .handler(({ input, context }) => context.settings.test(input.integrationId)),
+      .handler(({ input, context }) => context.settings.test(inProject(context, input.project), input.integrationId)),
   },
 
   posthog: {
-    preview: adminProcedure.output(type<PosthogPreview>()).handler(({ context }) => context.posthog.preview()),
-    runNow: adminProcedure.output(type<PosthogRunResult>()).handler(({ context }) => context.posthog.runNow()),
+    preview: adminProcedure
+      .input(z.object({ project }))
+      .output(type<PosthogPreview>())
+      .handler(({ input, context }) => context.posthog.preview(inProject(context, input.project))),
+    runNow: adminProcedure
+      .input(z.object({ project }))
+      .output(type<PosthogRunResult>())
+      .handler(({ input, context }) => context.posthog.runNow(inProject(context, input.project))),
   },
 };
 
-const currentView = ({ store, env }: Context["settings"]): SettingsView =>
-  describeSettings(store, env, resolveConfig(store, env));
+const currentView = ({ db, env }: Context["settings"], project: string): SettingsView => {
+  const store = db.project(project);
+  const scopedEnv = envFor(project, env);
+  return describeSettings(store, scopedEnv, resolveConfig(store, scopedEnv));
+};
 
 export type AppRouter = typeof appRouter;
 export type AppRouterClient = RouterClient<typeof appRouter>;
 export type { PosthogPreview, PosthogRunResult } from "../context";
-export type { ConnectionTestResult, FieldView, IntegrationView, SettingsView } from "@automation-server/settings";
+export type { ConnectionTestResult, FieldView, IntegrationView, Project, SettingsView } from "@automation-server/settings";
 export type { InstallMode, InstallOutcome, InstallResult, PullRequestRef, TemplateState, TemplateStatus, WorkflowStatus } from "../workflowInstaller";

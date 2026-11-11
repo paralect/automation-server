@@ -2,6 +2,7 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 
 import {
   getActionRun,
+  listProjects,
   getOverview,
   getRun,
   getSettings,
@@ -17,43 +18,52 @@ import type { ActionState, ActionsSearch, LogsSearch, RunsSearch, WindowKey } fr
 const retryServerErrorOnce = (count: number, error: unknown) =>
   count < 1 && error instanceof Error && error.message === "SERVER_ERROR"
 
-export const overviewQuery = (window: WindowKey) =>
+export const projectsQuery = () =>
   queryOptions({
-    queryKey: ["overview", window],
-    queryFn: () => getOverview({ data: { window } }),
+    queryKey: ["projects"],
+    queryFn: () => listProjects(),
     retry: retryServerErrorOnce,
   })
 
-export const logsQuery = (filters: LogsSearch, live: boolean) =>
+// Every project-scoped key starts with the project, so switching projects never shows another project's data.
+
+export const overviewQuery = (project: string, window: WindowKey) =>
+  queryOptions({
+    queryKey: [project, "overview", window],
+    queryFn: () => getOverview({ data: { project, window } }),
+    retry: retryServerErrorOnce,
+  })
+
+export const logsQuery = (project: string, filters: LogsSearch, live: boolean) =>
   infiniteQueryOptions({
-    queryKey: ["logs", filters],
-    queryFn: ({ pageParam }) => listLogs({ data: { ...filters, before: pageParam, limit: 50 } }),
+    queryKey: [project, "logs", filters],
+    queryFn: ({ pageParam }) => listLogs({ data: { ...filters, project, before: pageParam, limit: 50 } }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: live ? 5000 : false,
     retry: retryServerErrorOnce,
   })
 
-export const runsQuery = (filters: RunsSearch) =>
+export const runsQuery = (project: string, filters: RunsSearch) =>
   infiniteQueryOptions({
-    queryKey: ["runs", filters],
-    queryFn: ({ pageParam }) => listRuns({ data: { ...filters, before: pageParam, limit: 50 } }),
+    queryKey: [project, "runs", filters],
+    queryFn: ({ pageParam }) => listRuns({ data: { ...filters, project, before: pageParam, limit: 50 } }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     retry: retryServerErrorOnce,
   })
 
-export const runQuery = (id: string) =>
+export const runQuery = (project: string, id: string) =>
   queryOptions({
-    queryKey: ["run", id],
-    queryFn: () => getRun({ data: { id } }),
+    queryKey: [project, "run", id],
+    queryFn: () => getRun({ data: { project, id } }),
     retry: retryServerErrorOnce,
   })
 
-export const systemQuery = () =>
+export const systemQuery = (project: string) =>
   queryOptions({
-    queryKey: ["system"],
-    queryFn: () => getSystem(),
+    queryKey: [project, "system"],
+    queryFn: () => getSystem({ data: { project } }),
     retry: retryServerErrorOnce,
   })
 
@@ -63,10 +73,10 @@ export const isActiveState = (state: ActionState) => state === "queued" || state
 const ACTIVE_POLL_MS = 5_000
 const IDLE_POLL_MS = 30_000
 
-export const actionRunsQuery = (filters: ActionsSearch) =>
+export const actionRunsQuery = (project: string, filters: ActionsSearch) =>
   infiniteQueryOptions({
-    queryKey: ["actions", filters],
-    queryFn: ({ pageParam }) => listActionRuns({ data: { ...filters, page: pageParam } }),
+    queryKey: [project, "actions", filters],
+    queryFn: ({ pageParam }) => listActionRuns({ data: { ...filters, project, page: pageParam } }),
     initialPageParam: 1,
     getNextPageParam: (page) => page.nextPage ?? undefined,
     refetchInterval: (query) =>
@@ -74,18 +84,18 @@ export const actionRunsQuery = (filters: ActionsSearch) =>
     retry: retryServerErrorOnce,
   })
 
-export const actionRunQuery = (repo: string, id: number) =>
+export const actionRunQuery = (project: string, repo: string, id: number) =>
   queryOptions({
-    queryKey: ["action", repo, id],
-    queryFn: () => getActionRun({ data: { repo, id } }),
+    queryKey: [project, "action", repo, id],
+    queryFn: () => getActionRun({ data: { project, repo, id } }),
     refetchInterval: (query) => (query.state.data && isActiveState(query.state.data.run.state) ? ACTIVE_POLL_MS : false),
     retry: retryServerErrorOnce,
   })
 
-export const settingsQuery = () =>
+export const settingsQuery = (project: string) =>
   queryOptions({
-    queryKey: ["settings"],
-    queryFn: () => getSettings(),
+    queryKey: [project, "settings"],
+    queryFn: () => getSettings({ data: { project } }),
     retry: retryServerErrorOnce,
   })
 
@@ -97,9 +107,9 @@ export const workflowTemplatesQuery = () =>
     retry: retryServerErrorOnce,
   })
 
-export const workflowStatusQuery = (repo: string) =>
+export const workflowStatusQuery = (project: string, repo: string) =>
   queryOptions({
-    queryKey: ["workflow-status", repo],
-    queryFn: () => getWorkflowStatus({ data: { repo } }),
+    queryKey: [project, "workflow-status", repo],
+    queryFn: () => getWorkflowStatus({ data: { project, repo } }),
     retry: retryServerErrorOnce,
   })

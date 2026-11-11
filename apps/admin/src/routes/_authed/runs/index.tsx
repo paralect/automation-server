@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { RUN_STATUSES, runsSearch, type RunsSearch } from "@/lib/filters"
 import { runsQuery, systemQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 import { formatDuration } from "@/lib/time"
 
 export const Route = createFileRoute("/_authed/runs/")({
@@ -30,8 +31,9 @@ function Runs() {
   const setAutomation = useCallback((automation: string | undefined) => update({ automation }), [update])
   const setQ = useCallback((q: string | undefined) => update({ q }), [update])
 
-  const system = useQuery(systemQuery())
-  const query = useInfiniteQuery(runsQuery(filters))
+  const project = useProjectId()
+  const system = useQuery(systemQuery(project))
+  const query = useInfiniteQuery(runsQuery(project, filters))
   const runs = query.data?.pages.flatMap((page) => page.items) ?? []
 
   return (

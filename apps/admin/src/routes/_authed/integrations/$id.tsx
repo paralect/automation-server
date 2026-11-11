@@ -7,13 +7,15 @@ import { EmptyState, QueryError } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { settingsQuery, systemQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 
 export const Route = createFileRoute("/_authed/integrations/$id")({ component: IntegrationPage })
 
 function IntegrationPage() {
   const { id } = Route.useParams()
-  const settings = useQuery(settingsQuery())
-  const system = useQuery(systemQuery())
+  const project = useProjectId()
+  const settings = useQuery(settingsQuery(project))
+  const system = useQuery(systemQuery(project))
 
   const back = (
     <Button variant="ghost" size="sm" className="self-start" nativeButton={false} render={<Link to="/integrations" />}>

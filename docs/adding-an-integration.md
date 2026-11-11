@@ -10,7 +10,7 @@ Create `packages/sources/src/<service>/` with the same shape as `sentry/`:
 - `event.ts` exports type guards such as `isSentryIssueAlert` for automations to match on.
 - Test fixtures go in `packages/sources/test/fixtures/`.
 
-Add its settings to `INTEGRATIONS` in `packages/settings/src/spec.ts` (one entry per field, with an `env` name only if it keeps a legacy variable). Then create `apps/server/src/integrations/<id>/index.ts` with `defineModule({ id, build, test? })`, where `build` returns `{ sources, automations, jobs }`, and add the module to `apps/server/src/integrations/registry.ts`. A source is served at `POST /webhooks/<name>` once the integration is configured, and appears or disappears when settings change, without a restart.
+Add its settings to `INTEGRATIONS` in `packages/settings/src/spec.ts` (one entry per field, with an `env` name only if it keeps a legacy variable). Then create `apps/server/src/integrations/<id>/index.ts` with `defineModule({ id, build, test? })`, where `build` returns `{ sources, automations, jobs }`, and add the module to `apps/server/src/integrations/registry.ts`. A source is served at `POST /webhooks/<project>/<name>` once the integration is configured in that project, and appears or disappears when settings change, without a restart.
 
 ## 2. A new automation
 

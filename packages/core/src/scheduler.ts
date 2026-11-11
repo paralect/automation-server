@@ -54,8 +54,10 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
    * so a failed occurrence is not retried automatically. `runNow` with a fresh key is the retry.
    */
   const execute = async (job: Job, key: string, at: Date): Promise<RunNowResult> => {
-    const claim = claimKey(job.name, key);
-    const scoped = { automation: job.name, externalId: key };
+    const claim = claimKey(job.name, key, job.project);
+    const scoped: Record<string, string> = job.project
+      ? { project: job.project, automation: job.name, externalId: key }
+      : { automation: job.name, externalId: key };
     try {
       if (!store.claim(claim)) return { status: "duplicate" };
     } catch (err) {
@@ -63,7 +65,14 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
       return { status: "duplicate" };
     }
     const runId = record("startRun", scoped, (a) =>
-      a.startRun({ automation: job.name, source: SCHEDULE_SOURCE, kind: "job", externalId: key, startedAt: at.toISOString() }),
+      a.startRun({
+        ...(job.project ? { project: job.project } : {}),
+        automation: job.name,
+        source: SCHEDULE_SOURCE,
+        kind: "job",
+        externalId: key,
+        startedAt: at.toISOString(),
+      }),
     );
     const tagged = runId ? { ...scoped, source: SCHEDULE_SOURCE, runId } : { ...scoped, source: SCHEDULE_SOURCE };
     const child: Logger = {
@@ -88,14 +97,15 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
   };
 
   const guarded = async (job: Job, key: string, at: Date): Promise<RunNowResult> => {
-    if (running.has(job.name)) return { status: "busy" };
-    running.add(job.name);
+    const slot = claimKey(job.name, "", job.project);
+    if (running.has(slot)) return { status: "busy" };
+    running.add(slot);
     const work = execute(job, key, at);
     inFlight.add(work);
     try {
       return await work;
     } finally {
-      running.delete(job.name);
+      running.delete(slot);
       inFlight.delete(work);
     }
   };
@@ -108,7 +118,7 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
       try {
         key = job.due(at);
       } catch (err) {
-        log.error("job due check failed", { automation: job.name, error: errorMessage(err) });
+        log.error("job due check failed", { project: job.project, automation: job.name, error: errorMessage(err) });
         continue;
       }
       if (key !== null) started.push(guarded(job, key, at));

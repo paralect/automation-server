@@ -19,6 +19,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Time } from "@/components/time"
 import { WINDOWS, type WindowKey } from "@/lib/filters"
 import { overviewQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 
 export const Route = createFileRoute("/_authed/")({ component: Overview })
 
@@ -38,7 +39,7 @@ const STATS = [
 
 type Stats = NonNullable<ReturnType<typeof useOverview>["data"]>
 
-const useOverview = (window: WindowKey) => useQuery(overviewQuery(window))
+const useOverview = (window: WindowKey) => useQuery(overviewQuery(useProjectId(), window))
 
 function Overview() {
   const [window, setWindow] = useState<WindowKey>("24h")

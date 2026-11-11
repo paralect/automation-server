@@ -9,6 +9,8 @@ export type JobContext = {
 
 export type Job = {
   readonly name: string;
+  /** Scopes the job's claims and runs, so the same job can run once per project. */
+  readonly project?: string;
   /**
    * Called on every tick. Returns the claim key of the occurrence that is due now, or null.
    * The key must be stable for the whole occurrence (for example `2026-W07`), because the

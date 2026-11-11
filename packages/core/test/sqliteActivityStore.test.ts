@@ -1,5 +1,10 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ActivityStore, LogEntry, RunStart } from "../src/activity";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { createSqliteActivityStore } from "../src/sqliteActivityStore";
 
 const open: ActivityStore[] = [];
@@ -232,5 +237,40 @@ describe("stats", () => {
     const { recentFailures } = s.stats("2025-01-01T00:00:00.000Z", HOUR * 24 * 365);
     expect(recentFailures.map((r) => r.externalId)).toEqual(["f7", "f6", "f5", "f4", "f3"]);
     expect(recentFailures[0]!.error).toBe("err7");
+  });
+});
+
+describe("projects", () => {
+  test("runs are filtered by project and logs include server-wide lines", () => {
+    const s = make();
+    s.startRun(runStart({ project: "acme" }));
+    s.startRun(runStart({ project: "globex" }));
+    s.recordLog(entry("acme line", { project: "acme" }));
+    s.recordLog(entry("globex line", { project: "globex" }));
+    s.recordLog(entry("server started"));
+    expect(s.queryRuns({ project: "acme", limit: 10 }).items.map((r) => r.project)).toEqual(["acme"]);
+    expect(s.queryLogs({ project: "acme", limit: 10 }).items.map((l) => l.message)).toEqual(["server started", "acme line"]);
+    expect(s.queryLogs({ limit: 10 }).items).toHaveLength(3);
+    expect(s.stats("2025-12-31T00:00:00.000Z", 3_600_000, "globex").runs.running).toBe(1);
+    expect(s.stats("2025-12-31T00:00:00.000Z", 3_600_000, "globex").logs.info).toBe(2);
+  });
+
+  test("rows recorded before projects existed get the legacy project when the column is added", () => {
+    const dir = mkdtempSync(join(tmpdir(), "activity-"));
+    const path = join(dir, "db.sqlite");
+    const legacy = new Database(path);
+    legacy.run("CREATE TABLE runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, automation TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL, external_id TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error TEXT)");
+    legacy.run("INSERT INTO runs (id, automation, source, kind, external_id, status, started_at) VALUES ('r1', 'a', 's', 'k', 'e', 'succeeded', '2026-01-01T00:00:00.000Z')");
+    legacy.close();
+    try {
+      const s = createSqliteActivityStore({ path, legacyProject: "default" });
+      s.startRun(runStart());
+      s.close();
+      const again = createSqliteActivityStore({ path, legacyProject: "default" });
+      expect(again.queryRuns({ limit: 10 }).items.map((r) => r.project)).toEqual([null, "default"]);
+      again.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
