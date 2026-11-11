@@ -1,4 +1,5 @@
 import { createGithubActionsReader, type ActionsReader } from "@automation-server/api/githubActions";
+import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
 import {
   createDispatcher,
   createLogger,
@@ -80,6 +81,7 @@ const app = createApp({
   admin: {
     activity,
     actions,
+    workflows: () => createWorkflowInstaller({ token: resolve().github.values.token }),
     adminToken: config.adminToken,
     settings: { store: settings, env: process.env, reload: runtime.rebuild, test: runtime.test },
     system: () => ({

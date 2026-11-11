@@ -5,6 +5,7 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { createGithubActionsReader } from "@automation-server/api/githubActions";
+import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
 
 import { createApp } from "../src/app";
 import { INTEGRATION_MODULES } from "../src/integrations/registry";
@@ -63,6 +64,7 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
   const admin = {
     activity: createSqliteActivityStore({ path: ":memory:" }),
     actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
+    workflows: () => createWorkflowInstaller({ token: undefined }),
     adminToken: undefined,
     settings: { store: settings, env, reload: runtime.rebuild, test: runtime.test },
     system: () => ({
