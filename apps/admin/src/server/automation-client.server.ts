@@ -23,6 +23,8 @@ function automationClient() {
 function toApiError(error: unknown): Error {
   if (error instanceof ORPCError) {
     if (error.code === "UNAUTHORIZED" || error.code === "FORBIDDEN") return new Error("UNAUTHORIZED")
+    // Other 4xx answers carry a message written for the operator, such as a rejected setting.
+    if (error.status >= 400 && error.status < 500 && error.status !== 404 && error.message) return new Error(error.message)
     if (error.status >= 500 || error.code === "BAD_GATEWAY") {
       console.error("automation server error", error)
       return new Error("SERVER_ERROR")

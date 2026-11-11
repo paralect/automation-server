@@ -1,6 +1,17 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 
-import { getActionRun, getOverview, getRun, getSystem, listActionRuns, listLogs, listRuns } from "./api.functions"
+import {
+  getActionRun,
+  getOverview,
+  getRun,
+  getSettings,
+  getSystem,
+  getWorkflowStatus,
+  listActionRuns,
+  listLogs,
+  listRuns,
+  listWorkflowTemplates,
+} from "./api.functions"
 import type { ActionState, ActionsSearch, LogsSearch, RunsSearch, WindowKey } from "./filters"
 
 const retryServerErrorOnce = (count: number, error: unknown) =>
@@ -68,5 +79,27 @@ export const actionRunQuery = (repo: string, id: number) =>
     queryKey: ["action", repo, id],
     queryFn: () => getActionRun({ data: { repo, id } }),
     refetchInterval: (query) => (query.state.data && isActiveState(query.state.data.run.state) ? ACTIVE_POLL_MS : false),
+    retry: retryServerErrorOnce,
+  })
+
+export const settingsQuery = () =>
+  queryOptions({
+    queryKey: ["settings"],
+    queryFn: () => getSettings(),
+    retry: retryServerErrorOnce,
+  })
+
+export const workflowTemplatesQuery = () =>
+  queryOptions({
+    queryKey: ["workflow-templates"],
+    queryFn: () => listWorkflowTemplates(),
+    staleTime: Infinity,
+    retry: retryServerErrorOnce,
+  })
+
+export const workflowStatusQuery = (repo: string) =>
+  queryOptions({
+    queryKey: ["workflow-status", repo],
+    queryFn: () => getWorkflowStatus({ data: { repo } }),
     retry: retryServerErrorOnce,
   })
