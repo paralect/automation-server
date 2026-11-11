@@ -23,6 +23,7 @@ Automation(s)  ------------ match the event, do the work, release the claim on f
 | --- | --- | --- | --- |
 | Sentry | source | Verifies and parses Sentry issue alerts (`POST /webhooks/sentry`) | [docs/integrations/sentry.md](docs/integrations/sentry.md) |
 | GitHub Issues | action | Creates one labelled GitHub issue per Sentry issue (`sentry-to-github-issue`) | [docs/integrations/sentry.md](docs/integrations/sentry.md) |
+| Linear | source + action | Verifies Linear issue webhooks (`POST /webhooks/linear`) and, when the trigger label is added, dispatches a GitHub workflow where Codex implements the task and opens a PR (`linear-label-to-pr`) | [docs/integrations/linear.md](docs/integrations/linear.md) |
 
 More are planned. See [docs/adding-an-integration.md](docs/adding-an-integration.md) to add your own.
 
