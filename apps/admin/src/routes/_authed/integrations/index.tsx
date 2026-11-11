@@ -1,46 +1,31 @@
 import { useState } from "react"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { PlusIcon, WarningIcon } from "@phosphor-icons/react"
 import type { IntegrationView } from "@automation-server/api/routers/index"
 
-import { IntegrationCard, IntegrationLogo, IntegrationSettings, isAdded } from "@/components/integration-card"
+import { IntegrationCard, IntegrationLogo, isAdded } from "@/components/integration-card"
 import { EmptyState, PageHeader, QueryError } from "@/components/states"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
-import { settingsQuery, systemQuery } from "@/lib/queries"
+import { settingsQuery } from "@/lib/queries"
 
-export const Route = createFileRoute("/_authed/integrations")({ component: Integrations })
+export const Route = createFileRoute("/_authed/integrations/")({ component: Integrations })
 
 function Integrations() {
   const settings = useQuery(settingsQuery())
-  const system = useQuery(systemQuery())
+  const navigate = useNavigate()
   const [picking, setPicking] = useState(false)
-  const [openId, setOpenId] = useState<string>()
-  // An integration picked from the add dialog stays on the page while its first settings are entered.
-  const [pickedIds, setPickedIds] = useState<ReadonlySet<string>>(new Set())
 
   const integrations = settings.data?.integrations ?? []
-  const shown = integrations.filter((i) => isAdded(i) || pickedIds.has(i.id))
-  const available = integrations.filter((i) => !shown.includes(i))
-  const open = integrations.find((i) => i.id === openId)
+  const shown = integrations.filter(isAdded)
+  const available = integrations.filter((i) => !isAdded(i))
 
   const pick = (id: string) => {
-    setPickedIds((prev) => new Set(prev).add(id))
     setPicking(false)
-    setOpenId(id)
-  }
-  const closeSettings = () => {
-    if (open && !isAdded(open)) {
-      setPickedIds((prev) => {
-        const next = new Set(prev)
-        next.delete(open.id)
-        return next
-      })
-    }
-    setOpenId(undefined)
+    void navigate({ to: "/integrations/$id", params: { id } })
   }
 
   return (
@@ -76,7 +61,7 @@ function Integrations() {
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {shown.map((integration) => (
-                <IntegrationCard key={integration.id} integration={integration} onOpen={() => setOpenId(integration.id)} />
+                <IntegrationCard key={integration.id} integration={integration} />
               ))}
             </div>
           )}
@@ -97,19 +82,6 @@ function Integrations() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={open !== undefined} onOpenChange={(next) => !next && closeSettings()}>
-        <DialogContent className="max-w-xl">
-          {open && settings.data && (
-            <IntegrationSettings
-              // Remount when the saved view changes so the form starts from the new values.
-              key={`${open.id}:${JSON.stringify(open.fields)}`}
-              integration={open}
-              secretsWritable={settings.data.secretsWritable}
-              webhookUrl={open.webhookSource ? system.data?.webhookUrls[open.webhookSource] : undefined}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </>
   )
 }

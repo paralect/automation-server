@@ -33,6 +33,14 @@ const TITLES: Record<string, string> = {
   "/system": "System",
 }
 
+const DETAIL_PARENTS: Record<string, "/actions" | "/runs" | "/integrations"> = {
+  actions: "/actions",
+  runs: "/runs",
+  integrations: "/integrations",
+}
+
+const INTEGRATION_TITLES: Record<string, string> = { github: "GitHub", sentry: "Sentry", linear: "Linear", posthog: "PostHog" }
+
 function Crumbs() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const [section, id] = pathname.split("/").filter(Boolean)
@@ -43,7 +51,7 @@ function Crumbs() {
       <BreadcrumbList>
         <BreadcrumbItem>
           {id ? (
-            <BreadcrumbLink render={<Link to={section === "actions" ? "/actions" : "/runs"} />}>{root}</BreadcrumbLink>
+            <BreadcrumbLink render={<Link to={DETAIL_PARENTS[section ?? ""] ?? "/"} />}>{root}</BreadcrumbLink>
           ) : (
             <BreadcrumbPage>{root}</BreadcrumbPage>
           )}
@@ -52,7 +60,11 @@ function Crumbs() {
           <>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
-              <BreadcrumbPage className="font-mono text-xs">{id.slice(0, 12)}</BreadcrumbPage>
+              {section === "integrations" ? (
+                <BreadcrumbPage>{INTEGRATION_TITLES[id] ?? id}</BreadcrumbPage>
+              ) : (
+                <BreadcrumbPage className="font-mono text-xs">{id.slice(0, 12)}</BreadcrumbPage>
+              )}
             </BreadcrumbItem>
           </>
         )}

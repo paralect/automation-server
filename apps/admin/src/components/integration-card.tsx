@@ -8,7 +8,6 @@ import type { ConnectionTestResult, FieldView, IntegrationView } from "@automati
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -60,7 +59,7 @@ export function StatusBadge({ integration }: { integration: IntegrationView }) {
   )
 }
 
-export function IntegrationCard({ integration, onOpen }: { integration: IntegrationView; onOpen: () => void }) {
+export function IntegrationCard({ integration }: { integration: IntegrationView }) {
   const missing = integration.missing.map((key) => integration.fields.find((f) => f.key === key)?.label ?? key)
   return (
     <Card className="transition-shadow hover:ring-foreground/20">
@@ -80,7 +79,12 @@ export function IntegrationCard({ integration, onOpen }: { integration: Integrat
         )}
       </CardContent>
       <CardFooter>
-        <Button variant="outline" size="sm" onClick={onOpen}>
+        <Button
+          variant="outline"
+          size="sm"
+          nativeButton={false}
+          render={<Link to="/integrations/$id" params={{ id: integration.id }} />}
+        >
           <GearSixIcon />
           Configure
         </Button>
@@ -144,85 +148,85 @@ export function IntegrationSettings({
   const missing = integration.missing.map((key) => fields.find((f) => f.key === key)?.label ?? key)
 
   return (
-    <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
-      <DialogHeader>
-        <div className="flex items-center gap-3">
-          <IntegrationLogo id={id} />
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <div className="flex items-center gap-2">
-              <DialogTitle>{integration.title}</DialogTitle>
-              <StatusBadge integration={integration} />
-            </div>
-            <DialogDescription>{integration.description}</DialogDescription>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <IntegrationLogo id={id} className="size-12" />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-medium">{integration.title}</h1>
+            <StatusBadge integration={integration} />
           </div>
+          <p className="text-sm text-muted-foreground">{integration.description}</p>
         </div>
-      </DialogHeader>
-      <DialogBody className="flex flex-col gap-4">
-        {!secretsWritable && (
-          <p className="text-xs text-muted-foreground">
-            Set SETTINGS_ENCRYPTION_KEY on the server to save tokens and secrets here. Other fields still save.
-          </p>
-        )}
-        {!integration.configured && missing.length > 0 && (
-          <p className="text-xs text-muted-foreground">Missing: {missing.join(", ")}.</p>
-        )}
-        {integration.webhookSource && <WebhookUrl url={webhookUrl} title={integration.title} />}
-        <FieldGroup className="gap-4">
-          {fields.map((field) => (
-            <Field key={field.key}>
-              <FieldLabel htmlFor={`${id}-${field.key}`}>
-                {field.label}
-                {field.required && <span className="text-muted-foreground">(required)</span>}
-              </FieldLabel>
-              {field.kind === "secret" ? (
-                <SecretInput
-                  id={`${id}-${field.key}`}
-                  field={field}
-                  value={String(state[field.key] ?? "")}
-                  onChange={(value) => set(field.key, value)}
-                  action={secretActions[field.key] ?? "keep"}
-                  onAction={(action) => setSecretAction(field.key, action)}
-                  replacing={replacing.has(field.key)}
-                  onReplace={(on) => setReplace(field.key, on)}
-                  writable={secretsWritable}
-                />
-              ) : (
-                <PlainInput
-                  id={`${id}-${field.key}`}
-                  field={field}
-                  value={state[field.key] ?? ""}
-                  onChange={(value) => set(field.key, value)}
-                />
-              )}
-              <FieldNote field={field} />
-            </Field>
-          ))}
-        </FieldGroup>
-        {id === "posthog" && <PosthogActions />}
-      </DialogBody>
-      <DialogFooter>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" disabled={!dirty || save.isPending}>
-            {save.isPending ? "Saving..." : "Save"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => test.mutate()}
-            disabled={test.isPending}
-            title="Tests the saved settings"
-          >
-            {test.isPending ? "Testing..." : "Test connection"}
-          </Button>
-          {dirty ? (
-            <span className="text-xs text-muted-foreground">Unsaved changes</span>
-          ) : (
-            save.isSuccess && <span className="text-xs text-muted-foreground">Saved</span>
+      </div>
+      <Card className="max-w-2xl">
+        <CardContent className="flex flex-col gap-4">
+          {!secretsWritable && (
+            <p className="text-xs text-muted-foreground">
+              Set SETTINGS_ENCRYPTION_KEY on the server to save tokens and secrets here. Other fields still save.
+            </p>
           )}
-        </div>
-        <FieldError>{formError ?? (save.error ? errorText(save.error) : undefined)}</FieldError>
-        {test.error ? <FieldError>{errorText(test.error)}</FieldError> : test.data && <TestResult result={test.data} />}
-      </DialogFooter>
+          {!integration.configured && missing.length > 0 && (
+            <p className="text-xs text-muted-foreground">Missing: {missing.join(", ")}.</p>
+          )}
+          {integration.webhookSource && <WebhookUrl url={webhookUrl} title={integration.title} />}
+          <FieldGroup className="gap-4">
+            {fields.map((field) => (
+              <Field key={field.key}>
+                <FieldLabel htmlFor={`${id}-${field.key}`}>
+                  {field.label}
+                  {field.required && <span className="text-muted-foreground">(required)</span>}
+                </FieldLabel>
+                {field.kind === "secret" ? (
+                  <SecretInput
+                    id={`${id}-${field.key}`}
+                    field={field}
+                    value={String(state[field.key] ?? "")}
+                    onChange={(value) => set(field.key, value)}
+                    action={secretActions[field.key] ?? "keep"}
+                    onAction={(action) => setSecretAction(field.key, action)}
+                    replacing={replacing.has(field.key)}
+                    onReplace={(on) => setReplace(field.key, on)}
+                    writable={secretsWritable}
+                  />
+                ) : (
+                  <PlainInput
+                    id={`${id}-${field.key}`}
+                    field={field}
+                    value={state[field.key] ?? ""}
+                    onChange={(value) => set(field.key, value)}
+                  />
+                )}
+                <FieldNote field={field} />
+              </Field>
+            ))}
+          </FieldGroup>
+          {id === "posthog" && <PosthogActions />}
+        </CardContent>
+        <CardFooter className="flex flex-col items-stretch gap-3 border-t">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" disabled={!dirty || save.isPending}>
+              {save.isPending ? "Saving..." : "Save"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => test.mutate()}
+              disabled={test.isPending}
+              title="Tests the saved settings"
+            >
+              {test.isPending ? "Testing..." : "Test connection"}
+            </Button>
+            {dirty ? (
+              <span className="text-xs text-muted-foreground">Unsaved changes</span>
+            ) : (
+              save.isSuccess && <span className="text-xs text-muted-foreground">Saved</span>
+            )}
+          </div>
+          <FieldError>{formError ?? (save.error ? errorText(save.error) : undefined)}</FieldError>
+          {test.error ? <FieldError>{errorText(test.error)}</FieldError> : test.data && <TestResult result={test.data} />}
+        </CardFooter>
+      </Card>
     </form>
   )
 }
