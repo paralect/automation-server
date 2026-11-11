@@ -36,11 +36,13 @@ Create a fine-grained personal access token at Settings, Developer settings, Per
 
 ## Configuration
 
+Every value can also be saved from the admin API (`settings.update`), which takes effect without a restart and wins over the variable. A value that is neither saved nor set in the environment falls back to its default. The Sentry source registers once the client secret is set. Issues are created once `GITHUB_TOKEN` and `GITHUB_REPO` are set too.
+
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `SENTRY_CLIENT_SECRET` | yes | | Client Secret of the Sentry integration. Verifies webhook signatures. |
-| `GITHUB_TOKEN` | yes | | GitHub token with Issues: Read and write on the target repo. |
-| `GITHUB_REPO` | yes | | Target repository as `owner/name`. |
+| `SENTRY_CLIENT_SECRET` | one of env or admin | | Client Secret of the Sentry integration. Verifies webhook signatures. |
+| `GITHUB_TOKEN` | one of env or admin | | GitHub token with Issues: Read and write on the target repo. |
+| `GITHUB_REPO` | one of env or admin | | Target repository as `owner/name`. |
 | `SENTRY_AUTH_TOKEN` | no | | Enables issue stats enrichment (count, first and last seen). |
 | `SENTRY_API_BASE_URL` | no | `https://sentry.io` | Sentry host. The token is only sent to this origin. |
 | `SENTRY_LEVELS` | no | `error,fatal` | Comma-separated levels that create an issue. |
