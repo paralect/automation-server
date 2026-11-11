@@ -6,6 +6,7 @@
     "dev": "vite dev --port 3001 --strictPort",
     "build": "vite build",
     "start": "bun run serve.ts",
+    "test": "bun test src",
     "check-types": "tsc -b ../../packages/api && tsc --noEmit"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/bun": "catalog:",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
