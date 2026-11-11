@@ -1,16 +1,31 @@
-import { createGithubActionsReader } from "@automation-server/api/githubActions";
-import { createAutomations } from "@automation-server/automations";
-import { createDispatcher, createLogger, createSqliteActivityStore, createSqliteStore } from "@automation-server/core";
-import { createSentrySource } from "@automation-server/sources";
+import { createGithubActionsReader, type ActionsReader } from "@automation-server/api/githubActions";
+import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
+import {
+  createDispatcher,
+  createLogger,
+  createScheduler,
+  createSqliteActivityStore,
+  createSqliteStore,
+} from "@automation-server/core";
+import {
+  createSqliteSettingsStore,
+  effectiveActionsRepos,
+  INTEGRATIONS,
+  resolveConfig,
+} from "@automation-server/settings";
 
 import { createApp } from "./app";
-import { buildConfig } from "./config";
+import { buildConfig, webhookUrls } from "./config";
 import { ENV } from "./env.server";
+import { createPosthogAdmin } from "./integrations/posthog";
+import { INTEGRATION_MODULES } from "./integrations/registry";
+import { createRuntime } from "./runtime";
 
 const config = buildConfig(ENV);
 
 const store = createSqliteStore({ path: config.databasePath });
 const activity = createSqliteActivityStore({ path: config.databasePath });
+const settings = createSqliteSettingsStore({ path: config.databasePath, encryptionKey: config.encryptionKey });
 const startedAt = new Date().toISOString();
 
 const log = createLogger({}, console.log, (entry) => {
@@ -34,50 +49,61 @@ pruneOld();
 const pruneTimer = setInterval(pruneOld, 3_600_000);
 pruneTimer.unref();
 
-const sentry = createSentrySource({
-  clientSecret: config.sentry.clientSecret,
-  apiBaseUrl: config.sentry.apiBaseUrl,
-  authToken: config.sentry.authToken,
-});
-const sources = { [sentry.name]: sentry };
-
-const automations = createAutomations({
-  sentryToGithubIssue: {
-    repo: config.github.repo,
-    token: config.github.token,
-    levels: config.filters.levels,
-    environments: config.filters.environments,
-    minEventCount: config.filters.minEventCount,
-  },
-});
+const resolve = () => resolveConfig(settings, process.env);
+const runtime = createRuntime({ modules: INTEGRATION_MODULES, resolve, deps: { log } });
 
 const dispatcher = createDispatcher({
-  automations,
+  automations: runtime.automations,
   store,
   log,
   activity,
-  prepare: (event) => sources[event.source]?.enrich?.(event) ?? Promise.resolve(event),
+  prepare: (event) => runtime.sources()[event.source]?.enrich?.(event) ?? Promise.resolve(event),
 });
 
+const scheduler = createScheduler({ jobs: runtime.jobs, store, log, activity });
+
+let actionsReader: { key: string; reader: ActionsReader } | undefined;
+const actions = (): ActionsReader => {
+  const { github } = resolve();
+  const repos = effectiveActionsRepos(github);
+  const token = github.values.token ?? "";
+  const key = JSON.stringify([token, repos]);
+  if (actionsReader?.key !== key) actionsReader = { key, reader: createGithubActionsReader({ repos, token }) };
+  return actionsReader.reader;
+};
+
+const webhookSources = Object.values(INTEGRATIONS).flatMap((spec) => ("webhookSource" in spec ? [spec.webhookSource] : []));
+
 const app = createApp({
-  sources,
+  sources: runtime.sources,
   dispatcher,
   log,
   corsOrigin: ENV.CORS_ORIGIN,
   admin: {
     activity,
-    actions: createGithubActionsReader({ repos: config.github.actionsRepos, token: config.github.token }),
+    actions,
+    workflows: () => createWorkflowInstaller({ token: resolve().github.values.token }),
     adminToken: config.adminToken,
-    system: {
+    settings: { store: settings, env: process.env, reload: runtime.rebuild, test: runtime.test },
+    posthog: createPosthogAdmin({ resolve, scheduler }),
+    system: () => ({
       startedAt,
-      sources: Object.keys(sources),
-      automations: automations.map((a) => a.name),
+      sources: Object.keys(runtime.sources()),
+      automations: runtime.automations().map((a) => a.name),
+      jobs: runtime.jobs().map((j) => j.name),
       retentionDays: config.retentionDays,
-    },
+      webhookUrls: webhookUrls(webhookSources, config.publicUrl),
+    }),
   },
 });
 const server = Bun.serve({ port: config.port, fetch: app.fetch });
-log.info("server started", { port: server.port, repo: `${config.github.repo.owner}/${config.github.repo.name}` });
+log.info("server started", {
+  port: server.port,
+  sources: Object.keys(runtime.sources()),
+  automations: runtime.automations().map((a) => a.name),
+  jobs: runtime.jobs().map((j) => j.name),
+});
+scheduler.start();
 
 let shuttingDown = false;
 async function shutdown(signal: string) {
@@ -85,9 +111,11 @@ async function shutdown(signal: string) {
   shuttingDown = true;
   log.info("shutting down", { signal });
   clearInterval(pruneTimer);
+  scheduler.stop();
   await server.stop();
-  await dispatcher.drain(10_000);
+  await Promise.all([dispatcher.drain(10_000), scheduler.drain(10_000)]);
   store.close();
+  settings.close();
   log.info("shutdown complete");
   activity.close();
   process.exit(0);

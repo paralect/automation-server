@@ -1,0 +1,5 @@
+interface:
+  display_name: "Implement Task"
+  short_description: "Implement a Linear task with a focused, tested change"
+policy:
+  allow_implicit_invocation: true

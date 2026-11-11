@@ -13,13 +13,21 @@ import { createContext, type AdminDeps } from "./context";
 import { createWebhookRoutes } from "./webhooks";
 
 export type AppDeps = {
-  sources: Record<string, Source>;
+  sources: () => Readonly<Record<string, Source>>;
   dispatcher: Dispatcher;
   log: Logger;
   corsOrigin?: string;
   maxBodyBytes?: number;
   admin: AdminDeps;
 };
+
+// These are answers the admin shows to the user, not server faults.
+const EXPECTED_ERRORS = new Set(["UNAUTHORIZED", "NOT_FOUND", "BAD_REQUEST", "PRECONDITION_FAILED"]);
+
+function logUnexpected(error: unknown) {
+  if (error instanceof ORPCError && EXPECTED_ERRORS.has(error.code)) return;
+  console.error(error);
+}
 
 export function createApp({ sources, dispatcher, log, corsOrigin, maxBodyBytes, admin }: AppDeps) {
   const app = new Hono();
@@ -43,19 +51,13 @@ export function createApp({ sources, dispatcher, log, corsOrigin, maxBodyBytes, 
       }),
     ],
     interceptors: [
-      onError((error) => {
-        if (error instanceof ORPCError && (error.code === "UNAUTHORIZED" || error.code === "NOT_FOUND")) return;
-        console.error(error);
-      }),
+      onError(logUnexpected),
     ],
   });
 
   const rpcHandler = new RPCHandler(appRouter, {
     interceptors: [
-      onError((error) => {
-        if (error instanceof ORPCError && (error.code === "UNAUTHORIZED" || error.code === "NOT_FOUND")) return;
-        console.error(error);
-      }),
+      onError(logUnexpected),
     ],
   });
 

@@ -1,12 +1,15 @@
 # GitHub Actions library
 
-Workflow files kept here for reuse. They are **not active** in this repository: GitHub only runs files under `.github/workflows/`. To use one, copy it into the `.github/workflows/` directory of the target repository and adjust it.
+Workflow files kept here for reuse. They are **not active** in this repository: GitHub only runs files under `.github/workflows/`. To use one, install it from the admin's Workflows page, or copy it into the `.github/workflows/` directory of the target repository and adjust it.
+
+The server bundles these files. After changing anything here, run `bun run generate:workflows`, and give a new workflow an entry in `TEMPLATE_META` in `packages/api/src/workflowTemplates.ts`. The tests fail until both are done.
 
 | File | Purpose |
 | --- | --- |
 | [`codex-issue-fix.yml`](codex-issue-fix.yml) | Opens a draft PR with a Codex-written fix for each new issue. |
 | [`codex-seo-autopilot.yml`](codex-seo-autopilot.yml) | Daily run of the [seo-autopilot](https://il.ly/skills/seo-autopilot) skill with Codex. Opens one PR per run. |
 | [`codex-changelog.yml`](codex-changelog.yml) | On every push to the production branch, Codex writes a changelog note from the pushed commits and opens a PR. |
+| [`linear-implement.yml`](linear-implement.yml) | Dispatched by automation-server when a Linear issue gets the trigger label. Codex implements the task and opens a PR. |
 
 ## Notes on `codex-issue-fix.yml`
 
@@ -71,3 +74,24 @@ Copy it into the product's repository, and copy [`skills/write-changelog`](skill
 - Pushes and PRs made with the job token do not start other workflows, so the changelog PR gets no CI. If the base branch requires status checks, merge the PR with a bypass, or change the push and `gh pr create` steps to use a GitHub App or PAT token.
 - The Open PR step fails if the note or the PR body contains the OpenAI key or a value from `auth.json`.
 - Not run end to end yet. The gate and range logic were exercised locally in bash, the rest needs a first real run.
+
+## Notes on `linear-implement.yml`
+
+Copy it to `.github/workflows/linear-implement.yml` in the repository that should receive the PRs, and copy [`skills/implement-task`](skills/implement-task) to `.agents/skills/implement-task/` next to it. The [Linear integration](../docs/integrations/linear.md) dispatches it through the GitHub API, so it only runs once it is on the branch the integration dispatches to (the default branch unless the Linear `ref` setting says otherwise).
+
+**Setup**
+
+- Secret `CODEX_AUTH_JSON`, private repositories only, with optional `GH_PAT_FOR_SECRET_WRITE` to store the rotated token.
+- Optional repository variables `CODEX_MODEL` and `CODEX_REASONING_EFFORT` (default `high`).
+- Allow Actions to create pull requests in the repository settings.
+- The dependency install step detects bun, pnpm, yarn and npm lockfiles. Adapt it for another stack.
+
+**Behavior**
+
+- Inputs: `issue_identifier`, `issue_title`, `issue_url`, `issue_description`. The server truncates a description that would push the inputs past GitHub's 65,535 character limit and appends a note with the issue link.
+- The PR branch is `linear/<identifier>` and the title starts with the identifier, so Linear's GitHub integration links the PR to the issue. A rerun for the same issue updates the branch and does not open a second PR.
+- The PR is opened ready for review, not as a draft, against the branch the workflow ran on.
+- The Codex step has no GitHub token and the checkout does not persist credentials. The push step refuses changes under `.github` or `.agents`, and a change or PR body that contains a value from `auth.json`.
+- If Codex makes no change, the run ends with a warning that quotes the start of its final message.
+- PRs opened with the job token do not start other workflows, so the PR gets no CI. Push an empty commit or reopen the PR to run it, or switch the push and `gh pr create` steps to a GitHub App or PAT token.
+- Not run end to end yet. The scripts pass `bash -n` and the dispatch from the server is covered by tests with a fake GitHub API.

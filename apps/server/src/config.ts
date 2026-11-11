@@ -1,84 +1,36 @@
+/**
+ * Process-level configuration that is not an integration setting. Integration settings (tokens, repos,
+ * filters, schedules) are resolved from the settings store, then env, then defaults. See @automation-server/settings.
+ */
 export type ServerConfig = {
   port: number;
   databasePath: string;
-  sentry: {
-    clientSecret: string;
-    authToken?: string;
-    apiBaseUrl: string;
-  };
-  github: {
-    token: string;
-    repo: { owner: string; name: string };
-    actionsRepos: string[];
-  };
   adminToken?: string;
   retentionDays: number;
-  filters: {
-    levels: string[];
-    environments: string[];
-    minEventCount: number;
-  };
+  encryptionKey?: string;
+  publicUrl?: string;
 };
 
 export type RawEnv = {
   PORT: number;
   DATABASE_PATH: string;
-  SENTRY_CLIENT_SECRET: string;
-  SENTRY_AUTH_TOKEN?: string;
-  SENTRY_API_BASE_URL: string;
-  SENTRY_LEVELS: string;
-  SENTRY_ENVIRONMENTS?: string;
-  SENTRY_MIN_EVENT_COUNT: number;
-  GITHUB_TOKEN: string;
-  GITHUB_REPO: string;
-  GITHUB_ACTIONS_REPOS?: string;
   ADMIN_API_TOKEN?: string;
   LOG_RETENTION_DAYS: number;
+  SETTINGS_ENCRYPTION_KEY?: string;
+  PUBLIC_URL?: string;
 };
-
-export const parseCsv = (value: string | undefined): string[] =>
-  (value ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-
-export function parseRepo(value: string): { owner: string; name: string } {
-  const parts = value.trim().split("/");
-  const [owner, name] = parts;
-  if (parts.length !== 2 || !owner || !name) {
-    throw new Error(`GITHUB_REPO must be in owner/name form, got "${value}"`);
-  }
-  return { owner, name };
-}
-
-export function parseActionsRepos(value: string | undefined, fallback: string): string[] {
-  const listed = parseCsv(value);
-  return [...new Set((listed.length > 0 ? listed : [fallback]).map((repo) => {
-    const { owner, name } = parseRepo(repo);
-    return `${owner}/${name}`;
-  }))];
-}
 
 export function buildConfig(env: RawEnv): ServerConfig {
   return {
     port: env.PORT,
     databasePath: env.DATABASE_PATH,
-    sentry: {
-      clientSecret: env.SENTRY_CLIENT_SECRET,
-      authToken: env.SENTRY_AUTH_TOKEN || undefined,
-      apiBaseUrl: env.SENTRY_API_BASE_URL,
-    },
     adminToken: env.ADMIN_API_TOKEN || undefined,
     retentionDays: env.LOG_RETENTION_DAYS,
-    github: {
-      token: env.GITHUB_TOKEN,
-      repo: parseRepo(env.GITHUB_REPO),
-      actionsRepos: parseActionsRepos(env.GITHUB_ACTIONS_REPOS, env.GITHUB_REPO),
-    },
-    filters: {
-      levels: parseCsv(env.SENTRY_LEVELS),
-      environments: parseCsv(env.SENTRY_ENVIRONMENTS),
-      minEventCount: env.SENTRY_MIN_EVENT_COUNT,
-    },
+    encryptionKey: env.SETTINGS_ENCRYPTION_KEY || undefined,
+    publicUrl: env.PUBLIC_URL ? env.PUBLIC_URL.replace(/\/+$/, "") : undefined,
   };
+}
+
+export function webhookUrls(sources: readonly string[], publicUrl: string | undefined): Record<string, string> {
+  return Object.fromEntries(sources.map((name) => [name, `${publicUrl ?? ""}/webhooks/${name}`]));
 }

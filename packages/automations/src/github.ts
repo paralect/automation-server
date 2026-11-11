@@ -23,6 +23,17 @@ const errorBody = z.object({
   errors: z.array(z.object({ code: z.string().optional(), message: z.string().optional() })).optional(),
 });
 
+const repoInfo = z.object({ default_branch: z.string() });
+
+export class GithubApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "GithubApiError";
+    this.status = status;
+  }
+}
+
 export type GithubClient = ReturnType<typeof createGithubClient>;
 
 export function createGithubClient(config: GithubClientConfig) {
@@ -53,14 +64,15 @@ export function createGithubClient(config: GithubClientConfig) {
   }
 
   // GitHub's own error text (never our request body or token) is what tells a permissions problem from a bad query.
-  async function fail(method: string, path: string, res: Response): Promise<Error> {
+  async function fail(method: string, path: string, res: Response): Promise<GithubApiError> {
     const parsed = errorBody.safeParse(await res.json().catch(() => null));
     const detail = parsed.success
       ? [parsed.data.message, ...(parsed.data.errors ?? []).map((e) => e.message)].filter(Boolean).join("; ")
       : "";
     const safe = redactText(detail.split(config.token).join("[redacted]")).slice(0, 300);
-    return new Error(
+    return new GithubApiError(
       `GitHub API ${method} ${path.split("?")[0]} failed with status ${res.status}${safe ? `: ${safe}` : ""}`,
+      res.status,
     );
   }
 
@@ -103,6 +115,18 @@ export function createGithubClient(config: GithubClientConfig) {
       const res = await request("POST", path, issue);
       if (!res.ok) throw await fail("POST", path, res);
       return createdIssue.parse(await res.json());
+    },
+
+    async defaultBranch(): Promise<string> {
+      const res = await request("GET", repoPath);
+      if (!res.ok) throw await fail("GET", repoPath, res);
+      return repoInfo.parse(await res.json()).default_branch;
+    },
+
+    async dispatchWorkflow(workflowFile: string, ref: string, inputs: Readonly<Record<string, string>>): Promise<void> {
+      const path = `${repoPath}/actions/workflows/${encodeURIComponent(workflowFile)}/dispatches`;
+      const res = await request("POST", path, { ref, inputs });
+      if (!res.ok) throw await fail("POST", path, res);
     },
   };
 }

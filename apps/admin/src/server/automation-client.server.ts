@@ -23,6 +23,8 @@ function automationClient() {
 function toApiError(error: unknown): Error {
   if (error instanceof ORPCError) {
     if (error.code === "UNAUTHORIZED" || error.code === "FORBIDDEN") return new Error("UNAUTHORIZED")
+    // Other 4xx answers carry a message written for the operator, such as a rejected setting.
+    if (error.status >= 400 && error.status < 500 && error.status !== 404 && error.message) return new Error(error.message)
     if (error.status >= 500 || error.code === "BAD_GATEWAY") {
       console.error("automation server error", error)
       return new Error("SERVER_ERROR")
@@ -34,12 +36,15 @@ function toApiError(error: unknown): Error {
 
 export async function callAutomation<T>(
   call: (api: AppRouterClient) => Promise<T>,
-  { notFoundIsExpected = false } = {}
+  { notFoundIsExpected = false, showMessages = false } = {}
 ): Promise<T> {
   const api = automationClient()
   try {
     return await call(api)
   } catch (error) {
+    // Some routes word their NOT_FOUND and BAD_GATEWAY errors for the operator, such as a missing token permission.
+    const shown = showMessages && error instanceof ORPCError && error.message
+    if (shown && error.code === "BAD_GATEWAY") throw new Error(error.message)
     if (error instanceof ORPCError && error.code === "NOT_FOUND") {
       // A wrong AUTOMATION_SERVER_URL also answers 404, so confirm the RPC endpoint is really there.
       try {
@@ -48,6 +53,7 @@ export async function callAutomation<T>(
         throw toApiError(probe)
       }
       if (notFoundIsExpected) throw new Error("NOT_FOUND")
+      if (shown) throw new Error(error.message)
       console.error("automation server lacks this procedure; is it running an older version?", error)
       throw new Error("SERVER_ERROR")
     }

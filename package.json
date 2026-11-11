@@ -34,7 +34,8 @@
     "dev:server": "turbo run dev -F server --",
     "env:generate": "varlock codegen --path ./apps/server/",
     "postinstall": "varlock codegen --path ./apps/server/",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "generate:workflows": "bun scripts/generate-workflow-templates.ts"
   },
   "dependencies": {
     "zod": "catalog:"

@@ -5,6 +5,8 @@ import {
   GithubLogoIcon,
   HeartbeatIcon,
   LightningIcon,
+  PlugsConnectedIcon,
+  TreeStructureIcon,
   ScrollIcon,
 } from "@phosphor-icons/react"
 
@@ -23,9 +25,11 @@ import {
 
 const NAV = [
   { title: "Overview", to: "/", icon: GaugeIcon },
+  { title: "Integrations", to: "/integrations", icon: PlugsConnectedIcon },
   { title: "Logs", to: "/logs", icon: ScrollIcon },
   { title: "Runs", to: "/runs", icon: LightningIcon },
   { title: "GitHub Actions", to: "/actions", icon: GithubLogoIcon },
+  { title: "Workflows", to: "/workflows", icon: TreeStructureIcon },
   { title: "System", to: "/system", icon: HeartbeatIcon },
 ] as const
 

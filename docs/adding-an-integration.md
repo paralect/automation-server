@@ -10,7 +10,7 @@ Create `packages/sources/src/<service>/` with the same shape as `sentry/`:
 - `event.ts` exports type guards such as `isSentryIssueAlert` for automations to match on.
 - Test fixtures go in `packages/sources/test/fixtures/`.
 
-Register it in the `sources` map in `apps/server/src/index.ts`; it is then served at `POST /webhooks/<name>`. Add its environment variables to `apps/server/.env.schema` and `.env.example`, then run `bun run env:generate`.
+Add its settings to `INTEGRATIONS` in `packages/settings/src/spec.ts` (one entry per field, with an `env` name only if it keeps a legacy variable). Then create `apps/server/src/integrations/<id>/index.ts` with `defineModule({ id, build, test? })`, where `build` returns `{ sources, automations, jobs }`, and add the module to `apps/server/src/integrations/registry.ts`. A source is served at `POST /webhooks/<name>` once the integration is configured, and appears or disappears when settings change, without a restart.
 
 ## 2. A new automation
 
@@ -29,7 +29,7 @@ export const notifyOnFatal = defineAutomation({
 });
 ```
 
-Add it to `createAutomations` in `packages/automations/src/registry.ts`. Throwing from `run` releases the claim so the delivery can be retried.
+Return it from your module's `build`. Throwing from `run` releases the claim so the delivery can be retried.
 
 ## 3. Document it
 

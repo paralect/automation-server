@@ -38,6 +38,7 @@
         "zod": "catalog:",
       },
       "devDependencies": {
+        "@types/bun": "catalog:",
         "@types/node": "^22",
         "@types/react": "^19",
         "@types/react-dom": "^19",
@@ -52,6 +53,7 @@
         "@automation-server/api": "workspace:*",
         "@automation-server/automations": "workspace:*",
         "@automation-server/core": "workspace:*",
+        "@automation-server/settings": "workspace:*",
         "@automation-server/sources": "workspace:*",
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",
@@ -71,6 +73,7 @@
       "name": "@automation-server/api",
       "dependencies": {
         "@automation-server/core": "workspace:*",
+        "@automation-server/settings": "workspace:*",
         "@orpc/client": "^1.15.6",
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",
@@ -110,6 +113,17 @@
         "typescript": "catalog:",
       },
     },
+    "packages/settings": {
+      "name": "@automation-server/settings",
+      "dependencies": {
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@automation-server/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/sources": {
       "name": "@automation-server/sources",
       "dependencies": {
@@ -140,6 +154,8 @@
     "@automation-server/config": ["@automation-server/config@workspace:packages/config"],
 
     "@automation-server/core": ["@automation-server/core@workspace:packages/core"],
+
+    "@automation-server/settings": ["@automation-server/settings@workspace:packages/settings"],
 
     "@automation-server/sources": ["@automation-server/sources@workspace:packages/sources"],
 

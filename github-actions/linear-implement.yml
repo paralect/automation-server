@@ -1,0 +1,205 @@
+name: Linear implement
+
+# Implements a Linear issue with Codex and opens a PR. automation-server
+# dispatches it when the trigger label is added to an issue (see
+# docs/integrations/linear.md). Codex runs the implement-task skill, which
+# must exist in the repo at .agents/skills/implement-task/ (copy it from
+# github-actions/skills/implement-task). See github-actions/README.md.
+on:
+  workflow_dispatch:
+    inputs:
+      issue_identifier:
+        description: Linear issue identifier, such as ENG-42
+        required: true
+        type: string
+      issue_title:
+        description: Issue title
+        required: true
+        type: string
+      issue_url:
+        description: Link to the issue in Linear
+        required: true
+        type: string
+      issue_description:
+        description: Issue description in Markdown, possibly truncated
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# auth.json holds a refresh token that rotates on use, so two runs in parallel
+# would invalidate each other. Runs must queue, never cancel.
+concurrency:
+  group: codex-auth
+  cancel-in-progress: false
+
+env:
+  CODEX_VERSION: latest
+
+jobs:
+  implement:
+    name: Implement Linear issue with Codex
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Only callers with write access can dispatch a workflow, so there is no
+    # author check here. The issue text is still untrusted prompt input.
+
+    steps:
+      - name: Require a private repository
+        env:
+          IS_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if [ "$IS_PRIVATE" != "true" ]; then
+            echo "::error::auth.json must never run in a public repository."
+            exit 1
+          fi
+
+      # persist-credentials is off so the job token is not left in .git/config
+      # where the model could read it. The push step passes it explicitly.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Adapt to the repository's stack if it is not a Node project.
+      - name: Install dependencies
+        run: |
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
+            npm install -g bun && bun install --frozen-lockfile
+          elif [ -f pnpm-lock.yaml ]; then
+            corepack enable && pnpm install --frozen-lockfile
+          elif [ -f yarn.lock ]; then
+            corepack enable && yarn install --immutable
+          elif [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "No lockfile found, skipping dependency install."
+          fi
+
+      - name: Install Codex CLI
+        run: npm install -g "@openai/codex@${CODEX_VERSION}"
+
+      - name: Prepare Codex home
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          CODEX_MODEL: ${{ vars.CODEX_MODEL }}
+          CODEX_REASONING_EFFORT: ${{ vars.CODEX_REASONING_EFFORT }}
+        run: |
+          if [ -z "$CODEX_AUTH_JSON" ]; then
+            echo "::error::Secret CODEX_AUTH_JSON is not set."
+            exit 1
+          fi
+          home="$RUNNER_TEMP/codex-home"
+          mkdir -p "$home"
+          chmod 700 "$home"
+          umask 077
+          printf '%s' "$CODEX_AUTH_JSON" > "$home/auth.json"
+          {
+            echo 'cli_auth_credentials_store = "file"'
+            echo 'approval_policy = "never"'
+            printf 'model_reasoning_effort = "%s"\n' "${CODEX_REASONING_EFFORT:-high}"
+            if [ -n "$CODEX_MODEL" ]; then
+              printf 'model = "%s"\n' "$CODEX_MODEL"
+            fi
+          } > "$home/config.toml"
+          echo "CODEX_HOME=$home" >> "$GITHUB_ENV"
+          sha256sum "$home/auth.json" | cut -d' ' -f1 > "$RUNNER_TEMP/auth.sha256"
+
+      # Values arrive through env, never interpolated into the script, so issue
+      # text cannot inject shell.
+      - name: Write task file
+        env:
+          ISSUE_IDENTIFIER: ${{ inputs.issue_identifier }}
+          ISSUE_TITLE: ${{ inputs.issue_title }}
+          ISSUE_URL: ${{ inputs.issue_url }}
+          ISSUE_DESCRIPTION: ${{ inputs.issue_description }}
+        run: |
+          {
+            printf '# %s: %s\n\n' "$ISSUE_IDENTIFIER" "$ISSUE_TITLE"
+            printf 'Linear: %s\n\n' "$ISSUE_URL"
+            printf '%s\n' "$ISSUE_DESCRIPTION"
+          } > "$RUNNER_TEMP/task.md"
+
+      # No GH_TOKEN here on purpose: the model can edit the checkout but cannot
+      # push or open PRs. The step below does that.
+      - name: Run Codex
+        run: |
+          codex exec \
+            --sandbox workspace-write \
+            --output-last-message "$RUNNER_TEMP/pr-body.md" \
+            "Use \$implement-task. The task is at $RUNNER_TEMP/task.md. Do not run git commit, git push or create a PR. The workflow does that. Your final message becomes the PR body."
+
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_IDENTIFIER: ${{ inputs.issue_identifier }}
+          ISSUE_TITLE: ${{ inputs.issue_title }}
+          ISSUE_URL: ${{ inputs.issue_url }}
+          BASE_BRANCH: ${{ github.ref_name }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "::warning::Codex made no change for $ISSUE_IDENTIFIER. Final message: $(head -c 500 "$RUNNER_TEMP/pr-body.md" 2>/dev/null)"
+            exit 0
+          fi
+          if git status --porcelain -- .github .agents | grep -q .; then
+            echo "::error::Codex changed files under .github or .agents, which this workflow refuses to push."
+            exit 1
+          fi
+
+          # Linear links a PR to the issue when the branch or title carries the identifier.
+          slug=$(printf '%s' "$ISSUE_IDENTIFIER" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | sed 's/-*$//')
+          branch="linear/$slug"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+
+          # Refuse a change or PR body that carries a credential the model
+          # could have read from CODEX_HOME.
+          secrets=$(mktemp)
+          jq -r '.. | strings' "$CODEX_HOME/auth.json" 2>/dev/null | awk 'length > 16' > "$secrets"
+          if [ -s "$secrets" ] && { git diff --cached | grep -qFf "$secrets" || grep -qFf "$secrets" "$RUNNER_TEMP/pr-body.md" 2>/dev/null; }; then
+            echo "::error::The change or PR body contains a credential. Refusing to push."
+            exit 1
+          fi
+
+          git commit -m "$ISSUE_IDENTIFIER: $ISSUE_TITLE" -m "Linear: $ISSUE_URL"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json url --jq '.[0].url // ""')
+          if [ -n "$existing" ]; then
+            echo "::notice::A PR for $branch is already open, its branch was updated: $existing"
+            exit 0
+          fi
+          {
+            cat "$RUNNER_TEMP/pr-body.md" 2>/dev/null || true
+            printf '\n\nLinear: %s\nRun log: %s\n' "$ISSUE_URL" "$run_url"
+          } > "$RUNNER_TEMP/pr-body-final.md"
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$branch" \
+            --title "$ISSUE_IDENTIFIER: $ISSUE_TITLE" \
+            --body-file "$RUNNER_TEMP/pr-body-final.md"
+
+      # Codex may have rotated the refresh token. Persist it even when an
+      # earlier step failed, or the next run starts with a dead token.
+      - name: Write back rotated auth.json
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_FOR_SECRET_WRITE }}
+        run: |
+          [ -f "$RUNNER_TEMP/auth.sha256" ] || exit 0
+          after=$(sha256sum "$CODEX_HOME/auth.json" | cut -d' ' -f1)
+          [ "$after" != "$(cat "$RUNNER_TEMP/auth.sha256")" ] || exit 0
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::auth.json changed but GH_PAT_FOR_SECRET_WRITE is not set. Update CODEX_AUTH_JSON by hand or the next run may fail."
+            exit 0
+          fi
+          gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"

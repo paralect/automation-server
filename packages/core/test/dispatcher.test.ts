@@ -28,7 +28,7 @@ const memoryLogger = () => {
 const setup = (automations: Automation[], prepare?: (event: Event) => Promise<Event>, activity?: ActivityStore) => {
   const { log, entries } = memoryLogger();
   const store = createSqliteStore({ path: ":memory:" });
-  return { dispatcher: createDispatcher({ automations, store, log, prepare, activity }), entries };
+  return { dispatcher: createDispatcher({ automations: () => automations, store, log, prepare, activity }), entries };
 };
 
 const auto = (name: string, run: Automation["run"], kind = "thing") =>
