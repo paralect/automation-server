@@ -216,8 +216,10 @@ describe("settings API", () => {
     expect((await rpc(bad, "settings/testConnection", { integrationId: "github" })).body).toMatchObject({ ok: false, available: true });
 
     const none = setup({ adminToken: TOKEN });
-    expect((await rpc(none, "settings/testConnection", { integrationId: "github" })).body).toMatchObject({ ok: false, message: expect.stringContaining("not configured") });
-    for (const integrationId of ["linear", "posthog", "sentry"]) {
+    for (const integrationId of ["github", "linear"]) {
+      expect((await rpc(none, "settings/testConnection", { integrationId })).body).toMatchObject({ ok: false, message: expect.stringContaining("not configured") });
+    }
+    for (const integrationId of ["posthog", "sentry"]) {
       expect((await rpc(none, "settings/testConnection", { integrationId })).body).toMatchObject({ ok: false, available: false });
     }
   });
