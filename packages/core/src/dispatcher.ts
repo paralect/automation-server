@@ -10,7 +10,8 @@ export type Dispatcher = {
 };
 
 export type DispatcherDeps = {
-  automations: readonly Automation[];
+  /** Read once per event, so a live reload takes effect for the next event and never splits one event across two lists. */
+  automations: () => readonly Automation[];
   store: ClaimStore;
   log: Logger;
   prepare?: (event: Event) => Promise<Event>;
@@ -19,7 +20,7 @@ export type DispatcherDeps = {
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-export function createDispatcher({ automations, store, log, prepare, activity }: DispatcherDeps): Dispatcher {
+export function createDispatcher({ automations: getAutomations, store, log, prepare, activity }: DispatcherDeps): Dispatcher {
   const inFlight = new Set<Promise<void>>();
 
   const matchesSafely = (automation: Automation, event: Event): boolean => {
@@ -100,7 +101,7 @@ export function createDispatcher({ automations, store, log, prepare, activity }:
     enqueue(event) {
       const work = prepareSafely(event)
         .then((ready) =>
-          Promise.all(automations.filter((a) => matchesSafely(a, ready)).map((a) => runOne(a, ready))),
+          Promise.all(getAutomations().filter((a) => matchesSafely(a, ready)).map((a) => runOne(a, ready))),
         )
         .then(() => undefined);
       inFlight.add(work);
