@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 
 import type { Event } from "@automation-server/core/event";
 
-import { createAutomations } from "../src/registry";
 import { createSentryToGithubIssue } from "../src/sentryToGithubIssue/automation";
 import { shouldHandle } from "../src/sentryToGithubIssue/config";
 import type { SentryToGithubIssueConfig } from "../src/sentryToGithubIssue/config";
@@ -133,10 +132,5 @@ describe("sentry-to-github-issue automation", () => {
     const other: Event = { source: "github", kind: "issue_alert", externalId: "1", receivedAt: "t", payload: {} };
     expect(automation.matches(other)).toBe(false);
     expect(automation.matches({ ...other, source: "sentry", kind: "metric_alert" })).toBe(false);
-  });
-
-  test("registry lists the automations", () => {
-    const { config } = setup(happy);
-    expect(createAutomations({ sentryToGithubIssue: config }).map((a) => a.name)).toEqual(["sentry-to-github-issue"]);
   });
 });

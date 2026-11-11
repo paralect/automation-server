@@ -5,11 +5,21 @@ import type {
   StoredLog,
   StoredRun,
 } from "@automation-server/core";
+import {
+  describeSettings,
+  INTEGRATION_IDS,
+  planUpdate,
+  resolveConfig,
+  SecretsUnavailableError,
+  SettingsInputError,
+  type ConnectionTestResult,
+  type SettingsView,
+} from "@automation-server/settings";
 import { ORPCError, type, type RouterClient } from "@orpc/server";
 import { z } from "zod";
 
 import { adminProcedure, o } from "../index";
-import type { SystemInfo } from "../context";
+import type { Context, SystemInfo } from "../context";
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
 
 const level = z.enum(["info", "warn", "error"]);
@@ -62,14 +72,14 @@ export const appRouter = {
         }),
       )
       .output(type<ActionsRunList>())
-      .handler(({ input, context }) => context.actions.listRuns(input)),
+      .handler(({ input, context }) => context.actions().listRuns(input)),
     get: adminProcedure
       .input(z.object({ repo: z.string().min(3).max(200), id: z.number().int().positive() }))
       .output(type<{ run: WorkflowRun; jobs: WorkflowJob[] }>())
       .handler(async ({ input, context }) => {
-        let found: Awaited<ReturnType<typeof context.actions.getRun>>;
+        let found: Awaited<ReturnType<ReturnType<typeof context.actions>["getRun"]>>;
         try {
-          found = await context.actions.getRun(input.repo, input.id);
+          found = await context.actions().getRun(input.repo, input.id);
         } catch (err) {
           throw new ORPCError("BAD_GATEWAY", { message: err instanceof Error ? err.message : "GitHub API failed" });
         }
@@ -80,10 +90,44 @@ export const appRouter = {
 
   system: adminProcedure
     .output(type<SystemInfo & { uptimeSeconds: number }>())
-    .handler(({ context }) => ({
-      ...context.system,
-      uptimeSeconds: Math.floor((Date.now() - Date.parse(context.system.startedAt)) / 1000),
-    })),
+    .handler(({ context }) => {
+      const system = context.system();
+      return { ...system, uptimeSeconds: Math.floor((Date.now() - Date.parse(system.startedAt)) / 1000) };
+    }),
+
+  settings: {
+    get: adminProcedure.output(type<SettingsView>()).handler(({ context }) => currentView(context.settings)),
+    update: adminProcedure
+      .input(
+        z.object({
+          integrationId: z.enum(INTEGRATION_IDS),
+          values: z.record(z.string(), z.unknown()).default({}),
+          clear: z.array(z.string()).optional(),
+        }),
+      )
+      .output(type<SettingsView>())
+      .handler(({ input, context }) => {
+        try {
+          context.settings.store.apply(planUpdate(input.integrationId, input));
+        } catch (err) {
+          if (err instanceof SettingsInputError || err instanceof SecretsUnavailableError) {
+            throw new ORPCError("BAD_REQUEST", { message: err.message });
+          }
+          throw err;
+        }
+        context.settings.reload();
+        return currentView(context.settings);
+      }),
+    testConnection: adminProcedure
+      .input(z.object({ integrationId: z.enum(INTEGRATION_IDS) }))
+      .output(type<ConnectionTestResult>())
+      .handler(({ input, context }) => context.settings.test(input.integrationId)),
+  },
 };
+
+const currentView = ({ store, env }: Context["settings"]): SettingsView =>
+  describeSettings(store, env, resolveConfig(store, env));
+
 export type AppRouter = typeof appRouter;
 export type AppRouterClient = RouterClient<typeof appRouter>;
+export type { ConnectionTestResult, FieldView, IntegrationView, SettingsView } from "@automation-server/settings";

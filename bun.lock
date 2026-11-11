@@ -52,6 +52,7 @@
         "@automation-server/api": "workspace:*",
         "@automation-server/automations": "workspace:*",
         "@automation-server/core": "workspace:*",
+        "@automation-server/settings": "workspace:*",
         "@automation-server/sources": "workspace:*",
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",
@@ -71,6 +72,7 @@
       "name": "@automation-server/api",
       "dependencies": {
         "@automation-server/core": "workspace:*",
+        "@automation-server/settings": "workspace:*",
         "@orpc/client": "^1.15.6",
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",

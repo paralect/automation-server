@@ -2,7 +2,7 @@ import type { Dispatcher, Logger, Source } from "@automation-server/core";
 import { Hono } from "hono";
 
 export type WebhookDeps = {
-  sources: Record<string, Source>;
+  sources: () => Readonly<Record<string, Source>>;
   dispatcher: Dispatcher;
   log: Logger;
   maxBodyBytes?: number;
@@ -34,11 +34,12 @@ async function readCapped(request: Request, maxBytes: number): Promise<Uint8Arra
   return body;
 }
 
-export function createWebhookRoutes({ sources, dispatcher, log, maxBodyBytes = 1_000_000 }: WebhookDeps) {
+export function createWebhookRoutes({ sources: getSources, dispatcher, log, maxBodyBytes = 1_000_000 }: WebhookDeps) {
   const app = new Hono();
 
   app.post("/webhooks/:source", async (c) => {
     const name = c.req.param("source");
+    const sources = getSources();
     const source = Object.hasOwn(sources, name) ? sources[name] : undefined;
     if (!source) return c.body(null, 404);
 

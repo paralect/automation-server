@@ -13,7 +13,7 @@ import { createContext, type AdminDeps } from "./context";
 import { createWebhookRoutes } from "./webhooks";
 
 export type AppDeps = {
-  sources: Record<string, Source>;
+  sources: () => Readonly<Record<string, Source>>;
   dispatcher: Dispatcher;
   log: Logger;
   corsOrigin?: string;

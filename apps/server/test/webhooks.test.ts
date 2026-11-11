@@ -1,6 +1,5 @@
-import { createAutomations } from "@automation-server/automations";
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
-import { createSentrySource } from "@automation-server/sources";
+import { createSqliteSettingsStore, resolveConfig } from "@automation-server/settings";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -8,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { createGithubActionsReader } from "@automation-server/api/githubActions";
 
 import { createApp } from "../src/app";
+import { INTEGRATION_MODULES } from "../src/integrations/registry";
+import { createRuntime } from "../src/runtime";
 
 const SECRET = "test-client-secret";
 const fixture = new Uint8Array(
@@ -46,26 +47,34 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
     error: (m, f) => logs.push(JSON.stringify({ m, f })),
   };
   const store = createSqliteStore({ path: ":memory:" });
-  const automations = createAutomations({
-    sentryToGithubIssue: {
-      repo: { owner: "acme", name: "widgets" },
-      token: "gh-token",
-      levels: ["error"],
-      environments: [],
-      minEventCount: 1,
-      apiBaseUrl: "https://github.test",
-      fetch: fakeGithub,
-    },
+  const settings = createSqliteSettingsStore({ path: ":memory:" });
+  const env = {
+    SENTRY_CLIENT_SECRET: SECRET,
+    GITHUB_TOKEN: "gh-token",
+    GITHUB_REPO: "acme/widgets",
+    SENTRY_LEVELS: "error",
+  };
+  const runtime = createRuntime({
+    modules: INTEGRATION_MODULES,
+    resolve: () => resolveConfig(settings, env),
+    deps: { log, fetch: fakeGithub },
   });
-  const dispatcher = createDispatcher({ automations, store, log });
-  const sentry = createSentrySource({ clientSecret: SECRET });
+  const dispatcher = createDispatcher({ automations: runtime.automations, store, log });
   const admin = {
     activity: createSqliteActivityStore({ path: ":memory:" }),
-    actions: createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
+    actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
     adminToken: undefined,
-    system: { startedAt: new Date().toISOString(), sources: [sentry.name], automations: [], retentionDays: 30 },
+    settings: { store: settings, env, reload: runtime.rebuild, test: runtime.test },
+    system: () => ({
+      startedAt: new Date().toISOString(),
+      sources: Object.keys(runtime.sources()),
+      automations: [],
+      jobs: [],
+      retentionDays: 30,
+      webhookUrls: {},
+    }),
   };
-  const app = createApp({ sources: { [sentry.name]: sentry }, dispatcher, log, maxBodyBytes, admin });
+  const app = createApp({ sources: runtime.sources, dispatcher, log, maxBodyBytes, admin });
 
   const post = (path: string, body: Uint8Array, headers: Record<string, string> = {}) =>
     app.request(path, { method: "POST", body, headers });

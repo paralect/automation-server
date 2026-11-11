@@ -125,8 +125,14 @@ export function envNames(): string[] {
 export function effectiveActionsRepos(github: ResolvedConfig["github"]): string[] {
   const listed = github.values.actionsRepos ?? [];
   const repos = listed.length > 0 ? listed : github.values.repo ? [github.values.repo] : [];
-  return [...new Set(repos.map((r) => {
-    const { owner, name } = parseRepo(r);
-    return `${owner}/${name}`;
-  }))];
+  const valid: string[] = [];
+  for (const repo of repos) {
+    try {
+      const { owner, name } = parseRepo(repo);
+      valid.push(`${owner}/${name}`);
+    } catch {
+      continue;
+    }
+  }
+  return [...new Set(valid)];
 }
