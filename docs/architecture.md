@@ -34,6 +34,7 @@ Every log line is written to stdout and also recorded in the `logs` table. Every
 
 - `settings.get` returns every integration with its fields, the effective value of non-secret fields, where each value comes from and whether the integration is configured. `settings.update({ integrationId, values, clear? })` validates against the spec, stores a secret only for a non-empty string, removes the keys in `clear` and rebuilds the runtime. `settings.testConnection({ integrationId })` calls the module's `test` hook (implemented for `github`, answering `available: false` for the rest).
 - `system` also returns the registered jobs and `webhookUrls`, built from the optional `PUBLIC_URL` (relative paths when it is unset).
+- `workflows.templates`, `workflows.status({ repo })` and `workflows.install({ repo, templateId, mode })` install the workflows from `github-actions/` into a repository with the GitHub token from settings, which needs Contents, Pull requests and Workflows write access there. See [Workflow install](#workflow-install).
 
 The admin UI lives in `apps/admin`.
 
@@ -58,3 +59,12 @@ Integrations are configured through settings, not only environment variables.
 - Respond to the sender fast; do slow work in the background and drain it on shutdown.
 - Secrets and raw payloads are never logged.
 - Core stays service-agnostic. Service-specific code lives in `sources/<service>` and `automations/<name>`.
+
+## Workflow install
+
+The admin can add a workflow from `github-actions/` to any repository the GitHub token can write to.
+
+- The templates are bundled into the server as TypeScript strings in `packages/api/src/workflowTemplates.generated.ts`, so the image does not need the `github-actions/` folder. `bun run generate:workflows` rewrites that file from every top-level `.yml` and everything under `skills/`, and a test fails when it is out of date.
+- `TEMPLATE_META` in `packages/api/src/workflowTemplates.ts` gives each workflow file its title, description, skill folder and required secrets and variables. A workflow file without an entry fails the tests. A template installs its workflow to `.github/workflows/` and its skill to `.agents/skills/<name>/`.
+- `workflows.status` compares each template file with the default branch by git blob sha and reports `installed`, `differs` or `missing`, plus an open install PR.
+- `workflows.install` with `mode: "pr"` (the default) writes the files that differ to the branch `automation-server/install-<templateId>` through the contents API and opens a PR. Running it again reuses the open PR and only rewrites files that changed. `mode: "direct"` commits to the default branch. When the default branch already has every file, nothing is written.

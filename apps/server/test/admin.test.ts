@@ -3,6 +3,7 @@ import { createSqliteSettingsStore, resolveConfig } from "@automation-server/set
 import { describe, expect, test } from "bun:test";
 
 import { createGithubActionsReader } from "@automation-server/api/githubActions";
+import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
 
 import { createApp } from "../src/app";
 import { webhookUrls } from "../src/config";
@@ -13,8 +14,8 @@ import { createRuntime } from "../src/runtime";
 const TOKEN = "t".repeat(40);
 const quiet: Logger = { info() {}, warn() {}, error() {} };
 
-function setup(options: { adminToken?: string; encryptionKey?: string; env?: Record<string, string>; githubFetch?: typeof fetch } = { adminToken: TOKEN }) {
-  const { adminToken, encryptionKey, env = {}, githubFetch } = options;
+function setup(options: { adminToken?: string; encryptionKey?: string; env?: Record<string, string>; githubFetch?: typeof fetch; workflowsFetch?: typeof fetch } = { adminToken: TOKEN }) {
+  const { adminToken, encryptionKey, env = {}, githubFetch, workflowsFetch } = options;
   const settings = createSqliteSettingsStore({ path: ":memory:", encryptionKey });
   const resolve = () => resolveConfig(settings, env);
   const runtime = createRuntime({ modules: INTEGRATION_MODULES, resolve, deps: { log: quiet, fetch: githubFetch } });
@@ -38,6 +39,7 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
           return new Response("{}", { status: 404 });
         }) as typeof fetch,
       }),
+      workflows: () => createWorkflowInstaller({ token: resolveConfig(settings, env).github.values.token, fetch: workflowsFetch }),
       adminToken,
       settings: { store: settings, env, reload: runtime.rebuild, test: runtime.test },
       posthog: createPosthogAdmin({ resolve, scheduler, fetch: githubFetch }),
@@ -314,5 +316,56 @@ describe("posthog API", () => {
     expect(res.body).toMatchObject({ ok: true, details: { projectId: "77", eventsLastDay: "1234" } });
     expect(slackPosts()).toBe(0);
     expect(res.raw).not.toContain(API_KEY);
+  });
+});
+
+describe("workflows API", () => {
+  const rpc = async (t: ReturnType<typeof setup>, path: string, input: unknown) => {
+    const res = await t.call(path, input, TOKEN);
+    const body = (await res.json()) as { json: any };
+    return { status: res.status, body: body.json };
+  };
+
+  test("needs the admin token", async () => {
+    expect((await setup().call("workflows/templates", undefined)).status).toBe(401);
+    expect((await setup().call("workflows/install", { repo: "acme/site", templateId: "codex-changelog" })).status).toBe(401);
+  });
+
+  test("templates lists the bundled workflows with their files and requirements, without contents", async () => {
+    const res = await rpc(setup(), "workflows/templates", undefined);
+    expect(res.status).toBe(200);
+    expect(res.body).toContainEqual({
+      id: "codex-changelog",
+      title: "Codex changelog",
+      description: expect.any(String),
+      path: ".github/workflows/codex-changelog.yml",
+      files: [".github/workflows/codex-changelog.yml", ".agents/skills/write-changelog/SKILL.md", ".agents/skills/write-changelog/agents/openai.yaml"],
+      requiredSecrets: [["OPENAI_API_KEY", "CODEX_AUTH_JSON"]],
+      requiredVariables: [],
+    });
+  });
+
+  test("install without a GitHub token is a 412 that points at the Integrations page", async () => {
+    const res = await rpc(setup(), "workflows/install", { repo: "acme/site", templateId: "codex-changelog" });
+    expect(res.status).toBe(412);
+    expect(res.body.message).toContain("Integrations page");
+  });
+
+  test("status and install use the configured token, GitHub failures are a 502 without the token", async () => {
+    const seen: string[] = [];
+    const workflowsFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push(`${init?.method ?? "GET"} ${new URL(String(url)).pathname}`);
+      return new Response("{}", { status: 404 });
+    }) as typeof fetch;
+    const t = setup({ adminToken: TOKEN, workflowsFetch, env: { GITHUB_TOKEN: "ghp_topsecret" } });
+    const status = await rpc(t, "workflows/status", { repo: "acme/site" });
+    expect(status.status).toBe(502);
+    expect(status.body.message).toContain("Repository acme/site was not found");
+    expect(JSON.stringify(status.body)).not.toContain("ghp_topsecret");
+    expect(seen).toEqual(["GET /repos/acme/site"]);
+
+    expect((await rpc(t, "workflows/install", { repo: "acme/site", templateId: "nope" })).status).toBe(404);
+    expect((await rpc(t, "workflows/status", { repo: "not a repo" })).status).toBe(400);
+    expect((await rpc(t, "workflows/install", { repo: "acme/site", templateId: "codex-changelog", mode: "force" })).status).toBe(400);
   });
 });

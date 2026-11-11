@@ -1,6 +1,8 @@
 # GitHub Actions library
 
-Workflow files kept here for reuse. They are **not active** in this repository: GitHub only runs files under `.github/workflows/`. To use one, copy it into the `.github/workflows/` directory of the target repository and adjust it.
+Workflow files kept here for reuse. They are **not active** in this repository: GitHub only runs files under `.github/workflows/`. To use one, install it from the admin's Workflows page, or copy it into the `.github/workflows/` directory of the target repository and adjust it.
+
+The server bundles these files. After changing anything here, run `bun run generate:workflows`, and give a new workflow an entry in `TEMPLATE_META` in `packages/api/src/workflowTemplates.ts`. The tests fail until both are done.
 
 | File | Purpose |
 | --- | --- |

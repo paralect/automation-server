@@ -22,7 +22,7 @@ export type IntegrationSpec = {
   readonly fields: readonly FieldSpec[];
 };
 
-const REPO_PATTERN = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$";
+export const REPO_PATTERN = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$";
 
 export const INTEGRATIONS = {
   github: {

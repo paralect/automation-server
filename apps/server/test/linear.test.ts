@@ -1,4 +1,5 @@
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
+import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
 import { createSqliteSettingsStore, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
@@ -58,6 +59,7 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
       actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
       adminToken: undefined,
       settings: { store: settings, env: {}, reload: runtime.rebuild, test: runtime.test },
+      workflows: () => createWorkflowInstaller({ token: undefined }),
       posthog: {
         preview: async () => ({ ok: false as const, message: "unused" }),
         runNow: async () => ({ status: "busy" as const, message: "unused" }),

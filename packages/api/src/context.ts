@@ -2,6 +2,7 @@ import type { ActivityStore } from "@automation-server/core";
 import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsStore } from "@automation-server/settings";
 
 import type { ActionsReader } from "./githubActions";
+import type { WorkflowInstaller } from "./workflowInstaller";
 
 export type SystemInfo = {
   startedAt: string;
@@ -39,6 +40,8 @@ export type PosthogAdmin = {
 export type Context = {
   activity: ActivityStore;
   actions: () => ActionsReader;
+  /** Built from the current GitHub settings on every call, so a saved token applies at once. */
+  workflows: () => WorkflowInstaller;
   system: () => SystemInfo;
   settings: SettingsAdmin;
   posthog: PosthogAdmin;

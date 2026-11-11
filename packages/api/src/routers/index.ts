@@ -9,6 +9,7 @@ import {
   describeSettings,
   INTEGRATION_IDS,
   planUpdate,
+  REPO_PATTERN,
   resolveConfig,
   SecretsUnavailableError,
   SettingsInputError,
@@ -21,11 +22,35 @@ import { z } from "zod";
 import { adminProcedure, o } from "../index";
 import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../context";
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
+import { WorkflowInstallError, type InstallResult, type WorkflowStatus } from "../workflowInstaller";
+import { WORKFLOW_TEMPLATES } from "../workflowTemplates";
 
 const level = z.enum(["info", "warn", "error"]);
 const status = z.enum(["running", "succeeded", "failed", "duplicate"]);
 const page = { before: z.number().int().optional(), limit: z.number().int().min(1).max(200).default(50) };
 const text = z.string().trim().min(1).max(200).optional();
+const repo = z.string().trim().regex(new RegExp(REPO_PATTERN), "Repository must be in owner/name form").max(200);
+
+export type WorkflowTemplateInfo = {
+  id: string;
+  title: string;
+  description: string;
+  path: string;
+  files: string[];
+  requiredSecrets: string[][];
+  requiredVariables: string[];
+};
+
+const WORKFLOW_ERROR_CODE = { "not-configured": "PRECONDITION_FAILED", "unknown-template": "NOT_FOUND", github: "BAD_GATEWAY" } as const;
+
+async function workflowCall<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof WorkflowInstallError) throw new ORPCError(WORKFLOW_ERROR_CODE[err.kind], { message: err.message });
+    throw err;
+  }
+}
 
 export const appRouter = {
   healthCheck: o.handler(() => "OK"),
@@ -88,6 +113,28 @@ export const appRouter = {
       }),
   },
 
+  workflows: {
+    templates: adminProcedure.output(type<WorkflowTemplateInfo[]>()).handler(() =>
+      WORKFLOW_TEMPLATES.map((t) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        path: t.path,
+        files: t.files.map((f) => f.path),
+        requiredSecrets: t.requiredSecrets.map((names) => [...names]),
+        requiredVariables: [...t.requiredVariables],
+      })),
+    ),
+    status: adminProcedure
+      .input(z.object({ repo }))
+      .output(type<WorkflowStatus>())
+      .handler(({ input, context }) => workflowCall(() => context.workflows().status(input.repo))),
+    install: adminProcedure
+      .input(z.object({ repo, templateId: z.string().min(1).max(100), mode: z.enum(["pr", "direct"]).default("pr") }))
+      .output(type<InstallResult>())
+      .handler(({ input, context }) => workflowCall(() => context.workflows().install(input))),
+  },
+
   system: adminProcedure
     .output(type<SystemInfo & { uptimeSeconds: number }>())
     .handler(({ context }) => {
@@ -137,3 +184,4 @@ export type AppRouter = typeof appRouter;
 export type AppRouterClient = RouterClient<typeof appRouter>;
 export type { PosthogPreview, PosthogRunResult } from "../context";
 export type { ConnectionTestResult, FieldView, IntegrationView, SettingsView } from "@automation-server/settings";
+export type { InstallMode, InstallOutcome, InstallResult, PullRequestRef, TemplateState, TemplateStatus, WorkflowStatus } from "../workflowInstaller";
