@@ -5,15 +5,21 @@ import { claimKey, type ClaimStore } from "./store";
 
 export const SCHEDULE_SOURCE = "schedule";
 
-export type RunNowResult = "ran" | "duplicate" | "busy" | "unknown-job";
+export type RunNowResult =
+  | { readonly status: "succeeded"; readonly runId: string | null }
+  | { readonly status: "failed"; readonly runId: string | null; readonly error: string }
+  | { readonly status: "duplicate" | "busy" | "unknown-job" };
 
 export type Scheduler = {
   start(): void;
   stop(): void;
   /** Checks every job once. Resolves when the jobs it started have finished. */
   tick(): Promise<void>;
-  /** Runs a job now under an explicit claim key, bypassing `due`. Recorded like a scheduled run. */
-  runNow(jobName: string, key: string): Promise<RunNowResult>;
+  /**
+   * Runs a job now under an explicit claim key, bypassing `due`. Recorded like a scheduled run.
+   * A job object runs even when it is not in `jobs()`, so an admin can trigger a job that is disabled on the schedule.
+   */
+  runNow(job: string | Job, key: string): Promise<RunNowResult>;
   drain(timeoutMs: number): Promise<void>;
 };
 
@@ -47,14 +53,14 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
    * A failed run keeps its claim. Retrying every tick would hammer a broken integration once a minute,
    * so a failed occurrence is not retried automatically. `runNow` with a fresh key is the retry.
    */
-  const execute = async (job: Job, key: string, at: Date): Promise<"ran" | "duplicate"> => {
+  const execute = async (job: Job, key: string, at: Date): Promise<RunNowResult> => {
     const claim = claimKey(job.name, key);
     const scoped = { automation: job.name, externalId: key };
     try {
-      if (!store.claim(claim)) return "duplicate";
+      if (!store.claim(claim)) return { status: "duplicate" };
     } catch (err) {
       log.error("claim failed", { ...scoped, error: errorMessage(err) });
-      return "duplicate";
+      return { status: "duplicate" };
     }
     const runId = record("startRun", scoped, (a) =>
       a.startRun({ automation: job.name, source: SCHEDULE_SOURCE, kind: "job", externalId: key, startedAt: at.toISOString() }),
@@ -72,16 +78,17 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
       await job.run({ log: child, key, now: at });
       store.complete(claim);
       finish("succeeded");
+      return { status: "succeeded", runId: runId ?? null };
     } catch (err) {
       store.complete(claim);
       log.error("job failed", { ...tagged, error: errorMessage(err) });
       finish("failed", errorMessage(err));
+      return { status: "failed", runId: runId ?? null, error: errorMessage(err) };
     }
-    return "ran";
   };
 
   const guarded = async (job: Job, key: string, at: Date): Promise<RunNowResult> => {
-    if (running.has(job.name)) return "busy";
+    if (running.has(job.name)) return { status: "busy" };
     running.add(job.name);
     const work = execute(job, key, at);
     inFlight.add(work);
@@ -121,9 +128,9 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
       timer = undefined;
     },
     tick,
-    async runNow(jobName, key) {
-      const job = jobs().find((j) => j.name === jobName);
-      if (!job) return "unknown-job";
+    async runNow(target, key) {
+      const job = typeof target === "string" ? jobs().find((j) => j.name === target) : target;
+      if (!job) return { status: "unknown-job" };
       return guarded(job, key, now());
     },
     async drain(timeoutMs) {
