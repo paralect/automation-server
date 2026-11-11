@@ -21,6 +21,7 @@ import {
 } from "@/lib/api.functions"
 import { errorText } from "@/lib/errors"
 import { settingsQuery, workflowStatusQuery, workflowTemplatesQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 
 export const Route = createFileRoute("/_authed/workflows")({
   validateSearch: z.object({ repo: z.string().optional() }),
@@ -54,11 +55,12 @@ function Workflows() {
   const navigate = Route.useNavigate()
   const [mode, setMode] = useState<InstallMode>("pr")
 
-  const settings = useQuery(settingsQuery())
+  const project = useProjectId()
+  const settings = useQuery(settingsQuery(project))
   const templates = useQuery(workflowTemplatesQuery())
   const repos = settings.data ? configuredRepos(settings.data.integrations) : []
   const repo = search.repo && repos.includes(search.repo) ? search.repo : repos[0]
-  const status = useQuery({ ...workflowStatusQuery(repo ?? ""), enabled: repo !== undefined })
+  const status = useQuery({ ...workflowStatusQuery(project, repo ?? ""), enabled: repo !== undefined })
   const statuses = new Map(status.data?.templates.map((t) => [t.templateId, t]))
 
   const error = settings.error ?? templates.error
@@ -163,9 +165,10 @@ function TemplateRow({
   status: TemplateStatus | undefined
 }) {
   const queryClient = useQueryClient()
+  const project = useProjectId()
   const install = useMutation({
-    mutationFn: () => installWorkflow({ data: { repo, templateId: template.id, mode } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: workflowStatusQuery(repo).queryKey }),
+    mutationFn: () => installWorkflow({ data: { project, repo, templateId: template.id, mode } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: workflowStatusQuery(project, repo).queryKey }),
   })
   const needs = [
     ...template.requiredSecrets.map((names) => names.join(" or ")),

@@ -1,5 +1,5 @@
 import type { Automation, Job, Logger, Source } from "@automation-server/core";
-import { createSqliteSettingsStore, resolveConfig } from "@automation-server/settings";
+import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 
 import { defineModule, type IntegrationModule } from "../src/integrations/module";
@@ -12,7 +12,7 @@ const job = (name: string): Job => ({ name, due: () => null, run: async () => {}
 
 const setup = (modules: IntegrationModule[], env: Record<string, string> = {}) => {
   const store = createSqliteSettingsStore({ path: ":memory:", encryptionKey: "k" });
-  const runtime = createRuntime({ modules, resolve: () => resolveConfig(store, env), deps: { log } });
+  const runtime = createRuntime({ modules, projects: () => store.projects().map((p) => p.id), resolve: (p) => resolveConfig(store.project(p), envFor(p, env)), deps: { log } });
   return { store, runtime };
 };
 
@@ -23,11 +23,11 @@ describe("runtime", () => {
       build: () => ({ sources: [source("sentry")], automations: [automation("a")], jobs: [job("j")] }),
     });
     const { store, runtime } = setup([sentry]);
-    expect(Object.keys(runtime.sources())).toEqual([]);
+    expect(Object.keys(runtime.sources("default"))).toEqual([]);
     store.apply({ set: [{ key: "sentry.clientSecret", json: '"s"', secret: true }] });
-    expect(Object.keys(runtime.sources())).toEqual([]);
+    expect(Object.keys(runtime.sources("default"))).toEqual([]);
     runtime.rebuild();
-    expect(Object.keys(runtime.sources())).toEqual(["sentry"]);
+    expect(Object.keys(runtime.sources("default"))).toEqual(["sentry"]);
     expect(runtime.automations().map((a) => a.name)).toEqual(["a"]);
     expect(runtime.jobs().map((j) => j.name)).toEqual(["j"]);
   });
@@ -51,15 +51,15 @@ describe("runtime", () => {
     });
     const good = defineModule({ id: "github", build: () => ({ sources: [source("g")] }) });
     const { runtime } = setup([bad, good], { SENTRY_CLIENT_SECRET: "s", GITHUB_TOKEN: "t" });
-    expect(Object.keys(runtime.sources())).toEqual(["g"]);
+    expect(Object.keys(runtime.sources("default"))).toEqual(["g"]);
   });
 
   test("a duplicate source name keeps the first", () => {
     const a = defineModule({ id: "sentry", build: () => ({ sources: [source("x")] }) });
     const b = defineModule({ id: "github", build: () => ({ sources: [source("x")] }) });
     const { runtime } = setup([a, b], { SENTRY_CLIENT_SECRET: "s", GITHUB_TOKEN: "t" });
-    expect(runtime.sources().x).toBeDefined();
-    expect(Object.keys(runtime.sources())).toHaveLength(1);
+    expect(runtime.sources("default").x).toBeDefined();
+    expect(Object.keys(runtime.sources("default"))).toHaveLength(1);
   });
 
   test("test() delegates to the module hook and reports not available without one", async () => {
@@ -70,9 +70,9 @@ describe("runtime", () => {
     });
     const without = defineModule({ id: "sentry", build: () => ({}) });
     const { runtime } = setup([withHook, without], { GITHUB_TOKEN: "t", SENTRY_CLIENT_SECRET: "s" });
-    expect(await runtime.test("github")).toEqual({ ok: true, available: true, message: "fine" });
-    expect(await runtime.test("sentry")).toMatchObject({ ok: false, available: false });
-    expect(await runtime.test("linear")).toMatchObject({ ok: false, available: false });
+    expect(await runtime.test("default", "github")).toEqual({ ok: true, available: true, message: "fine" });
+    expect(await runtime.test("default", "sentry")).toMatchObject({ ok: false, available: false });
+    expect(await runtime.test("default", "linear")).toMatchObject({ ok: false, available: false });
   });
 
   test("test() on an unconfigured integration names what is missing, and a throwing hook becomes a result", async () => {
@@ -84,8 +84,8 @@ describe("runtime", () => {
       },
     });
     const { runtime } = setup([throwing]);
-    expect(await runtime.test("github")).toMatchObject({ ok: false, message: expect.stringContaining("token") });
+    expect(await runtime.test("default", "github")).toMatchObject({ ok: false, message: expect.stringContaining("token") });
     const configured = setup([throwing], { GITHUB_TOKEN: "t" }).runtime;
-    expect(await configured.test("github")).toMatchObject({ ok: false, message: expect.stringContaining("network down") });
+    expect(await configured.test("default", "github")).toMatchObject({ ok: false, message: expect.stringContaining("network down") });
   });
 });

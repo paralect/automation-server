@@ -31,10 +31,10 @@ describe("buildConfig", () => {
 
 describe("webhookUrls", () => {
   test("is relative without a public url and absolute with one", () => {
-    expect(webhookUrls(["sentry"], undefined)).toEqual({ sentry: "/webhooks/sentry" });
-    expect(webhookUrls(["sentry", "linear"], "https://hooks.example.com")).toEqual({
-      sentry: "https://hooks.example.com/webhooks/sentry",
-      linear: "https://hooks.example.com/webhooks/linear",
+    expect(webhookUrls("default", ["sentry"], undefined)).toEqual({ sentry: "/webhooks/default/sentry" });
+    expect(webhookUrls("acme", ["sentry", "linear"], "https://hooks.example.com")).toEqual({
+      sentry: "https://hooks.example.com/webhooks/acme/sentry",
+      linear: "https://hooks.example.com/webhooks/acme/linear",
     });
   });
 });

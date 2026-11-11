@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton"
 import { ERROR_COPY, errorKind } from "@/lib/errors"
 import { systemQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 import { formatUptime } from "@/lib/time"
 
 export const Route = createFileRoute("/_authed/system")({ component: System })
@@ -25,7 +26,7 @@ function Names({ names }: { names: string[] }) {
 }
 
 function System() {
-  const { data, error, isPending, refetch } = useQuery(systemQuery())
+  const { data, error, isPending, refetch } = useQuery(systemQuery(useProjectId()))
 
   const backend = error
     ? { label: ERROR_COPY[errorKind(error)].title, variant: "destructive" as const }

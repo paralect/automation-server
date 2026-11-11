@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ACTION_STATES, actionsSearch, type ActionsSearch } from "@/lib/filters"
 import { actionRunsQuery, isActiveState } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 import { formatRelative } from "@/lib/time"
 
 export const Route = createFileRoute("/_authed/actions/")({
@@ -28,7 +29,7 @@ function Actions() {
     [navigate]
   )
 
-  const query = useInfiniteQuery(actionRunsQuery(filters))
+  const query = useInfiniteQuery(actionRunsQuery(useProjectId(), filters))
   const pages = query.data?.pages ?? []
   const first = pages[0]
   const runs = pages.flatMap((page) => page.runs)

@@ -43,9 +43,12 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
   };
 
   const runOne = async (automation: Automation, event: Event): Promise<void> => {
-    const key = claimKey(automation.name, event.externalId);
-    const scoped = { automation: automation.name, externalId: event.externalId };
+    const key = claimKey(automation.name, event.externalId, automation.project);
+    const scoped: Record<string, string> = automation.project
+      ? { project: automation.project, automation: automation.name, externalId: event.externalId }
+      : { automation: automation.name, externalId: event.externalId };
     const runStart = () => ({
+      ...(automation.project ? { project: automation.project } : {}),
       automation: automation.name,
       source: event.source,
       kind: event.kind,
@@ -92,7 +95,7 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
     try {
       return await prepare(event);
     } catch (err) {
-      log.warn("prepare failed, continuing with original event", { externalId: event.externalId, error: errorMessage(err) });
+      log.warn("prepare failed, continuing with original event", { project: event.project, externalId: event.externalId, error: errorMessage(err) });
       return event;
     }
   };
@@ -101,7 +104,11 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
     enqueue(event) {
       const work = prepareSafely(event)
         .then((ready) =>
-          Promise.all(getAutomations().filter((a) => matchesSafely(a, ready)).map((a) => runOne(a, ready))),
+          Promise.all(
+            getAutomations()
+              .filter((a) => a.project === ready.project && matchesSafely(a, ready))
+              .map((a) => runOne(a, ready)),
+          ),
         )
         .then(() => undefined);
       inFlight.add(work);

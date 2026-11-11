@@ -11,11 +11,12 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { settingsQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 
 export const Route = createFileRoute("/_authed/integrations/")({ component: Integrations })
 
 function Integrations() {
-  const settings = useQuery(settingsQuery())
+  const settings = useQuery(settingsQuery(useProjectId()))
   const navigate = useNavigate()
   const [picking, setPicking] = useState(false)
 

@@ -13,7 +13,8 @@ import { createContext, type AdminDeps } from "./context";
 import { createWebhookRoutes } from "./webhooks";
 
 export type AppDeps = {
-  sources: () => Readonly<Record<string, Source>>;
+  source: (project: string, name: string) => Source | undefined;
+  defaultProject: string;
   dispatcher: Dispatcher;
   log: Logger;
   corsOrigin?: string;
@@ -29,7 +30,7 @@ function logUnexpected(error: unknown) {
   console.error(error);
 }
 
-export function createApp({ sources, dispatcher, log, corsOrigin, maxBodyBytes, admin }: AppDeps) {
+export function createApp({ source, defaultProject, dispatcher, log, corsOrigin, maxBodyBytes, admin }: AppDeps) {
   const app = new Hono();
 
   app.use(logger());
@@ -41,7 +42,7 @@ export function createApp({ sources, dispatcher, log, corsOrigin, maxBodyBytes, 
     }),
   );
 
-  app.route("/", createWebhookRoutes({ sources, dispatcher, log, maxBodyBytes }));
+  app.route("/", createWebhookRoutes({ source, defaultProject, dispatcher, log, maxBodyBytes }));
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   const apiHandler = new OpenAPIHandler(appRouter, {

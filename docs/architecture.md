@@ -6,14 +6,24 @@ The server is a Hono app on Bun, split into workspaces so that adding an integra
 | --- | --- |
 | `packages/core` | Generic types and machinery: `Event`, `Source`, `Automation`, `Job`, the dispatcher, the scheduler, the sqlite claim store, the sqlite activity store and the logger. Knows nothing about any specific service. |
 | `packages/sources` | One folder per service that sends webhooks. Verifies the signature, parses the payload into an `Event`, optionally enriches it. |
-| `packages/settings` | Settings store (sqlite, AES-256-GCM secrets), the typed `INTEGRATIONS` spec registry and the resolver that produces each integration's effective config. No runtime dependencies on the rest. |
+| `packages/settings` | Projects, the settings store (sqlite, AES-256-GCM secrets), the typed `INTEGRATIONS` spec registry and the resolver that produces each integration's effective config. No runtime dependencies on the rest. |
 | `packages/automations` | One folder per automation. Matches events and does the work. `registry.ts` lists them. |
-| `apps/server` | HTTP wiring: `POST /webhooks/:source`, config validation, startup, graceful shutdown, and the runtime that builds sources, automations and jobs from integration modules. |
+| `apps/server` | HTTP wiring: `POST /webhooks/:project/:source`, config validation, startup, graceful shutdown, and the runtime that builds sources, automations and jobs from integration modules. |
 | `packages/api` | oRPC routers, including the admin API over the activity store. |
+
+## Projects
+
+Everything an integration does belongs to a project: its settings, webhook sources, automations, jobs, runs and logs. One server hosts any number of projects, each with its own GitHub token, repositories, Sentry, Linear and PostHog.
+
+- Projects live in the `projects` table of the settings database. A project has a slug `id` (from its name, never changes), a `name` and an optional `domain` whose favicon the admin shows as its icon.
+- Setting keys are `<project>:<integration>.<field>`. Only the `default` project falls back to the legacy environment variables, so a new project starts empty. The default project cannot be deleted. Deleting another project removes its settings; its runs and logs stay until retention prunes them.
+- The first start with projects moves everything into the `default` project: setting keys and claim keys gain the project prefix, and existing runs and logs get `project = 'default'`.
+- `Event`, `Automation`, `Job`, runs and logs carry `project`. The dispatcher hands an event only to automations of the same project, and claims are keyed `<project>/<automation>:<externalId>`, so two projects never share a claim.
+- Logs without a project (startup, reloads) are server-wide and show in every project.
 
 ## Request lifecycle
 
-1. `POST /webhooks/:source` looks the source up by name (404 if unknown) and reads the body with a size cap (413 if exceeded).
+1. `POST /webhooks/:project/:source` looks the source up in that project (404 if either is unknown) and reads the body with a size cap (413 if exceeded). The older `POST /webhooks/:source` is the default project.
 2. `Source.verify` checks the signature over the raw bytes (401 on failure).
 3. `Source.parse` produces an `Event { source, kind, externalId, payload }`.
 4. The server logs `webhook received` and responds `200`. Everything after this runs in the background.
@@ -28,12 +38,13 @@ Every log line is written to stdout and also recorded in the `logs` table. Every
 - Runs still `running` at startup are marked `failed` with `interrupted by server restart`.
 - Logs and finished runs older than `LOG_RETENTION_DAYS` are pruned at startup and every hour.
 - Recording is best effort. A failing activity store is logged to stdout and never blocks dispatching.
+- `projects.list`, `projects.create({ name, domain? })`, `projects.update({ id, name?, domain? })` and `projects.delete({ id })` manage projects. Every other procedure takes a `project` and answers 404 for an unknown one.
 - The admin API (`overview`, `logs.list`, `runs.list`, `runs.get`, `system`, `settings.get`, `settings.update`, `settings.testConnection`) is served by oRPC under `/rpc` and requires `Authorization: Bearer <ADMIN_API_TOKEN>`. It answers 401 to every request while `ADMIN_API_TOKEN` is unset.
-- `actions.list` and `actions.get` read GitHub Actions workflow runs, with their jobs and steps, from the GitHub REST API using `GITHUB_TOKEN`. The repositories come from `GITHUB_ACTIONS_REPOS` (default `GITHUB_REPO`), and the token needs Actions: Read on each. Nothing is stored: GitHub stays the source of truth. Responses are cached for 4 seconds and the workflow list for 5 minutes, so several open admin tabs share one GitHub request. A repository the token cannot read is reported next to the runs of the others, not as a failure of the whole list. `actions.get` answers 404 for a repository outside the list.
+- `actions.list` and `actions.get` read GitHub Actions workflow runs, with their jobs and steps, from the GitHub REST API using the project's GitHub token. The repositories come from the project's Actions repositories (default its issues repository), and the token needs Actions: Read on each. Nothing is stored: GitHub stays the source of truth. Responses are cached for 4 seconds and the workflow list for 5 minutes, so several open admin tabs share one GitHub request. A repository the token cannot read is reported next to the runs of the others, not as a failure of the whole list. `actions.get` answers 404 for a repository outside the list.
 - To fill the dashboard with sample data, start a local server and run `bun apps/server/scripts/demo-traffic.ts` with the same `SENTRY_CLIENT_SECRET` (optional `SERVER_URL`, default `http://localhost:3000`).
 
 - `settings.get` returns every integration with its fields, the effective value of non-secret fields, where each value comes from and whether the integration is configured. `settings.update({ integrationId, values, clear? })` validates against the spec, stores a secret only for a non-empty string, removes the keys in `clear` and rebuilds the runtime. `settings.testConnection({ integrationId })` calls the module's `test` hook (implemented for `github`, answering `available: false` for the rest).
-- `system` also returns the registered jobs and `webhookUrls`, built from the optional `PUBLIC_URL` (relative paths when it is unset).
+- `system` returns the project's sources, automations, jobs and `webhookUrls` (`/webhooks/<project>/<source>`), built from the optional `PUBLIC_URL` (relative paths when it is unset).
 - `workflows.templates`, `workflows.status({ repo })` and `workflows.install({ repo, templateId, mode })` install the workflows from `github-actions/` into a repository with the GitHub token from settings, which needs Contents, Pull requests and Workflows write access there. See [Workflow install](#workflow-install).
 
 The admin UI lives in `apps/admin`.
@@ -43,11 +54,11 @@ The admin UI lives in `apps/admin`.
 Integrations are configured through settings, not only environment variables.
 
 - `INTEGRATIONS` in `packages/settings/src/spec.ts` is the domain model: one spec per integration (`github`, `sentry`, `linear`, `posthog`) listing its fields (`text`, `secret`, `number`, `boolean`, `select`, `list`). Validation, the admin form and the resolved types are all derived from it.
-- The effective value of a field is the settings table value, else the legacy environment variable (the field's `env`), else the spec default. An empty environment variable counts as unset. Existing env-only deployments therefore behave as before.
+- The effective value of a field is the project's settings table value, else, for the default project only, the legacy environment variable (the field's `env`), else the spec default. An empty environment variable counts as unset. Existing env-only deployments therefore behave as before.
 - An integration whose required fields are all present is `configured`. An unconfigured integration is simply not registered, so the server boots with no integration env at all.
 - Settings live in the `settings` table of the same sqlite file. Secret values are encrypted with AES-256-GCM using a key derived (HKDF-SHA256) from `SETTINGS_ENCRYPTION_KEY`. Without that variable, plain settings work and writing a secret is rejected. Secrets are write-only: the API reports only whether one is set, and from where (`db`, `env`, `default`, `unset`). A secret that cannot be decrypted (key changed) is treated as unset.
 - `apps/server/src/integrations/registry.ts` lists the `IntegrationModule`s. A module's `build(resolvedConfig, deps)` returns the `sources`, `automations` and `jobs` it contributes, and its optional `test` hook backs `settings.testConnection`. Modules for unconfigured integrations are skipped, and a module that throws is logged and skipped.
-- The runtime holder builds all modules at boot and again after every `settings.update`, then swaps one immutable snapshot. The dispatcher, the webhook routes and the admin API read through getters, so a saved setting applies to the next event or request without a restart. Runs already in flight finish on the snapshot they started with.
+- The runtime holder builds all modules for every project at boot and again after every settings or project change, then swaps one immutable snapshot. Each project's automations and jobs are tagged with the project. The dispatcher, the webhook routes and the admin API read through getters, so a saved setting applies to the next event or request without a restart. Runs already in flight finish on the snapshot they started with.
 
 ## Scheduler
 

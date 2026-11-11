@@ -1,6 +1,6 @@
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
 import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
-import { createSqliteSettingsStore, resolveConfig } from "@automation-server/settings";
+import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -47,18 +47,19 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
       ...(github ? [set("github.token", GH_TOKEN, true)] : []),
     ],
   });
-  const runtime = createRuntime({ modules: INTEGRATION_MODULES, resolve: () => resolveConfig(settings, {}), deps: { log, fetch: fakeGithub } });
+  const runtime = createRuntime({ modules: INTEGRATION_MODULES, projects: () => settings.projects().map((p) => p.id), resolve: (p) => resolveConfig(settings.project(p), envFor(p, {})), deps: { log, fetch: fakeGithub } });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const dispatcher = createDispatcher({ automations: runtime.automations, store: createSqliteStore({ path: ":memory:" }), log, activity });
   const app = createApp({
-    sources: runtime.sources,
+    source: runtime.source,
+    defaultProject: "default",
     dispatcher,
     log,
     admin: {
       activity,
       actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
       adminToken: undefined,
-      settings: { store: settings, env: {}, reload: runtime.rebuild, test: runtime.test },
+      settings: { db: settings, env: {}, reload: runtime.rebuild, test: runtime.test },
       workflows: () => createWorkflowInstaller({ token: undefined }),
       posthog: {
         preview: async () => ({ ok: false as const, message: "unused" }),
@@ -129,6 +130,6 @@ describe("linear integration", () => {
 
   test("the connection test checks that the workflow is installed and active", async () => {
     const t = setup();
-    expect(await t.runtime.test("linear")).toMatchObject({ ok: true, message: "Webhook is ready and linear-implement.yml is active in acme/app" });
+    expect(await t.runtime.test("default", "linear")).toMatchObject({ ok: true, message: "Webhook is ready and linear-implement.yml is active in acme/app" });
   });
 });

@@ -6,9 +6,9 @@ import type { Context as HonoContext } from "hono";
 
 export type AdminDeps = {
   activity: ActivityStore;
-  actions: () => ActionsReader;
-  workflows: () => WorkflowInstaller;
-  system: () => SystemInfo;
+  actions: (project: string) => ActionsReader;
+  workflows: (project: string) => WorkflowInstaller;
+  system: (project: string) => SystemInfo;
   settings: SettingsAdmin;
   posthog: PosthogAdmin;
   adminToken: string | undefined;

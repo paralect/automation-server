@@ -8,9 +8,14 @@ import {
   isBlocked,
   recordFailure,
 } from "@/server/login-guard.server"
+import { rememberedProject } from "@/server/project.server"
 import { endSession, readSession, startSession } from "@/server/session.server"
 
-export const getSessionFn = createServerFn({ method: "GET" }).handler(() => readSession())
+/** The session, plus the project the admin last selected so the layout opens on it. */
+export const getSessionFn = createServerFn({ method: "GET" }).handler(() => {
+  const session = readSession()
+  return session ? { ...session, project: rememberedProject() } : null
+})
 
 export const loginFn = createServerFn({ method: "POST" })
   .validator(z.object({ email: z.string().max(320), password: z.string().max(1024) }))

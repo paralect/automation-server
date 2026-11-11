@@ -7,6 +7,8 @@ export type AutomationContext = {
 
 export type Automation = {
   readonly name: string;
+  /** Only events of this project reach the automation. Its claims and runs are scoped to it too. */
+  readonly project?: string;
   matches(event: Event): boolean;
   run(event: Event, ctx: AutomationContext): Promise<void>;
 };

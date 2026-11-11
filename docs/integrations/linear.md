@@ -41,7 +41,7 @@ The integration uses the token from the GitHub integration. Give it Actions: Rea
 ### Linear
 
 1. In Linear, open Settings, then API, then Webhooks, and create a webhook.
-2. Set the URL to `https://<your-host>/webhooks/linear`. The admin Integrations page shows the full URL when `PUBLIC_URL` is set.
+2. Set the URL to `https://<your-host>/webhooks/<project>/linear` (the default project also answers `/webhooks/linear`). The admin Integrations page shows the full URL when `PUBLIC_URL` is set.
 3. Select the Issues resource type. Pick the teams that should be able to trigger it.
 4. Copy the signing secret into the Linear integration's webhook secret in the admin.
 5. Create the trigger label, for example `codex`, and set the same name as the trigger label in the admin.

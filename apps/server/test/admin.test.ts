@@ -1,5 +1,5 @@
 import { createDispatcher, createScheduler, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
-import { createSqliteSettingsStore, resolveConfig } from "@automation-server/settings";
+import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 
 import { createGithubActionsReader } from "@automation-server/api/githubActions";
@@ -14,17 +14,24 @@ import { createRuntime } from "../src/runtime";
 const TOKEN = "t".repeat(40);
 const quiet: Logger = { info() {}, warn() {}, error() {} };
 
+// Project-scoped procedures get the default project unless the test names one.
+const withProject = (path: string, input: unknown) =>
+  path.startsWith("projects/") || (input !== undefined && (typeof input !== "object" || input === null || "project" in input))
+    ? input
+    : { project: "default", ...(input as object | undefined) };
+
 function setup(options: { adminToken?: string; encryptionKey?: string; env?: Record<string, string>; githubFetch?: typeof fetch; workflowsFetch?: typeof fetch } = { adminToken: TOKEN }) {
   const { adminToken, encryptionKey, env = {}, githubFetch, workflowsFetch } = options;
   const settings = createSqliteSettingsStore({ path: ":memory:", encryptionKey });
-  const resolve = () => resolveConfig(settings, env);
-  const runtime = createRuntime({ modules: INTEGRATION_MODULES, resolve, deps: { log: quiet, fetch: githubFetch } });
+  const resolve = (p: string) => resolveConfig(settings.project(p), envFor(p, env));
+  const runtime = createRuntime({ modules: INTEGRATION_MODULES, projects: () => settings.projects().map((p) => p.id), resolve, deps: { log: quiet, fetch: githubFetch } });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const store = createSqliteStore({ path: ":memory:" });
   const dispatcher = createDispatcher({ automations: runtime.automations, store, log: quiet });
   const scheduler = createScheduler({ jobs: runtime.jobs, store, log: quiet, activity });
   const app = createApp({
-    sources: runtime.sources,
+    source: runtime.source,
+    defaultProject: "default",
     dispatcher,
     log: quiet,
     admin: {
@@ -39,17 +46,17 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
           return new Response("{}", { status: 404 });
         }) as typeof fetch,
       }),
-      workflows: () => createWorkflowInstaller({ token: resolveConfig(settings, env).github.values.token, fetch: workflowsFetch }),
+      workflows: (project) => createWorkflowInstaller({ token: resolve(project).github.values.token, fetch: workflowsFetch }),
       adminToken,
-      settings: { store: settings, env, reload: runtime.rebuild, test: runtime.test },
+      settings: { db: settings, env, reload: runtime.rebuild, test: runtime.test },
       posthog: createPosthogAdmin({ resolve, scheduler, fetch: githubFetch }),
-      system: () => ({
+      system: (project) => ({
         startedAt: new Date().toISOString(),
-        sources: Object.keys(runtime.sources()),
-        automations: runtime.automations().map((a) => a.name),
-        jobs: runtime.jobs().map((j) => j.name),
+        sources: Object.keys(runtime.sources(project)),
+        automations: runtime.project(project).automations.map((a) => a.name),
+        jobs: runtime.project(project).jobs.map((j) => j.name),
         retentionDays: 30,
-        webhookUrls: webhookUrls(["sentry", "linear"], "https://hooks.example.com"),
+        webhookUrls: webhookUrls(project, ["sentry", "linear"], "https://hooks.example.com"),
       }),
     },
   });
@@ -57,7 +64,7 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
     app.request(`/rpc/${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
-      body: JSON.stringify({ json: input }),
+      body: JSON.stringify({ json: withProject(path, input) }),
     });
   return { activity, call, app, settings, runtime };
 }
@@ -79,7 +86,7 @@ describe("admin API auth", () => {
 
   test("the correct token reads the overview", async () => {
     const t = setup();
-    t.activity.recordDuplicate({ automation: "a", source: "s", kind: "k", externalId: "e", startedAt: new Date().toISOString() });
+    t.activity.recordDuplicate({ project: "default", automation: "a", source: "s", kind: "k", externalId: "e", startedAt: new Date().toISOString() });
     const res = await t.call("overview", {}, TOKEN);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { json: { runs: Record<string, number> } };
@@ -92,7 +99,7 @@ describe("admin API auth", () => {
 
   test("runs.get returns a stored run with its logs", async () => {
     const t = setup();
-    const id = t.activity.startRun({ automation: "a", source: "s", kind: "k", externalId: "e", startedAt: new Date().toISOString() });
+    const id = t.activity.startRun({ project: "default", automation: "a", source: "s", kind: "k", externalId: "e", startedAt: new Date().toISOString() });
     t.activity.recordLog({ time: new Date().toISOString(), level: "info", message: "hello", fields: { runId: id } });
     const res = await t.call("runs/get", { id }, TOKEN);
     expect(res.status).toBe(200);
@@ -194,7 +201,7 @@ describe("settings API", () => {
     expect((await rpc(t, "system", undefined)).body).toMatchObject({
       sources: ["sentry"],
       automations: ["sentry-to-github-issue"],
-      webhookUrls: { sentry: "https://hooks.example.com/webhooks/sentry" },
+      webhookUrls: { sentry: "https://hooks.example.com/webhooks/default/sentry" },
     });
   });
 
@@ -367,5 +374,65 @@ describe("workflows API", () => {
     expect((await rpc(t, "workflows/install", { repo: "acme/site", templateId: "nope" })).status).toBe(404);
     expect((await rpc(t, "workflows/status", { repo: "not a repo" })).status).toBe(400);
     expect((await rpc(t, "workflows/install", { repo: "acme/site", templateId: "codex-changelog", mode: "force" })).status).toBe(400);
+  });
+});
+
+describe("projects API", () => {
+  const rpc = async (t: ReturnType<typeof setup>, path: string, input?: unknown) => {
+    const res = await t.call(path, input, TOKEN);
+    const body = (await res.json()) as { json: any };
+    return { status: res.status, body: body.json };
+  };
+
+  test("needs the admin token", async () => {
+    const t = setup();
+    expect((await t.call("projects/list", undefined)).status).toBe(401);
+    expect((await t.call("projects/create", { name: "Acme" })).status).toBe(401);
+  });
+
+  test("create, rename and delete a project", async () => {
+    const t = setup();
+    const created = await rpc(t, "projects/create", { name: "Acme", domain: "https://acme.com/" });
+    expect(created.body).toMatchObject({ id: "acme", name: "Acme", domain: "acme.com" });
+    expect((await rpc(t, "projects/list")).body.map((p: any) => p.id)).toEqual(["default", "acme"]);
+    expect((await rpc(t, "projects/update", { id: "acme", name: "Acme Inc" })).body).toMatchObject({ id: "acme", name: "Acme Inc", domain: "acme.com" });
+    expect((await rpc(t, "projects/update", { id: "nope", name: "x" })).status).toBe(404);
+    expect((await rpc(t, "projects/create", { name: "x", domain: "bad domain" })).status).toBe(400);
+    expect((await rpc(t, "projects/delete", { id: "default" })).status).toBe(400);
+    expect((await rpc(t, "projects/delete", { id: "acme" })).body).toEqual({ deleted: true });
+    expect((await rpc(t, "projects/delete", { id: "acme" })).status).toBe(404);
+  });
+
+  test("a project's settings, system and runs are its own, and only the default project reads env", async () => {
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", env: { SENTRY_CLIENT_SECRET: "s", GITHUB_TOKEN: "t", GITHUB_REPO: "acme/widgets" } });
+    await rpc(t, "projects/create", { name: "Acme" });
+
+    const acme = await rpc(t, "settings/get", { project: "acme" });
+    expect(acme.body.integrations.every((i: any) => !i.configured)).toBe(true);
+    expect((await rpc(t, "system", { project: "acme" })).body).toMatchObject({ sources: [], webhookUrls: { sentry: "https://hooks.example.com/webhooks/acme/sentry" } });
+
+    await rpc(t, "settings/update", { project: "acme", integrationId: "sentry", values: { clientSecret: "acme-secret" } });
+    expect((await rpc(t, "system", { project: "acme" })).body.sources).toEqual(["sentry"]);
+    expect((await rpc(t, "system", { project: "acme" })).body.automations).toEqual([]);
+    expect((await rpc(t, "system")).body.automations).toEqual(["sentry-to-github-issue"]);
+
+    const run = t.activity.startRun({ project: "acme", automation: "a", source: "s", kind: "k", externalId: "e", startedAt: new Date().toISOString() });
+    expect((await rpc(t, "runs/get", { project: "acme", id: run })).status).toBe(200);
+    expect((await rpc(t, "runs/get", { id: run })).status).toBe(404);
+    expect((await rpc(t, "runs/list", { project: "acme" })).body.items).toHaveLength(1);
+    expect((await rpc(t, "runs/list")).body.items).toHaveLength(0);
+  });
+
+  test("an unknown project answers 404 everywhere", async () => {
+    const t = setup();
+    for (const [path, input] of [
+      ["overview", { project: "nope" }],
+      ["settings/get", { project: "nope" }],
+      ["system", { project: "nope" }],
+      ["logs/list", { project: "nope" }],
+    ] as const) {
+      expect((await rpc(t, path, input)).status).toBe(404);
+    }
+    expect((await rpc(t, "settings/get", { project: "Not A Slug" })).status).toBe(400);
   });
 });

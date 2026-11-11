@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { previewPosthogReport, runPosthogNow, testConnection, updateSettings } from "@/lib/api.functions"
 import { errorText } from "@/lib/errors"
 import { settingsQuery, systemQuery } from "@/lib/queries"
+import { useProjectId } from "@/lib/project"
 import { buildPayload, initialState, isDirty, type FormState, type SecretAction } from "@/lib/settings-form"
 
 const SOURCE_NOTE: Partial<Record<FieldView["source"], string>> = {
@@ -103,6 +104,7 @@ export function IntegrationSettings({
   webhookUrl: string | undefined
 }) {
   const queryClient = useQueryClient()
+  const project = useProjectId()
   const { id, fields } = integration
   const [state, setState] = useState<FormState>(() => initialState(fields))
   const [secretActions, setSecretActions] = useState<Record<string, SecretAction>>({})
@@ -114,13 +116,13 @@ export function IntegrationSettings({
 
   const save = useMutation({
     mutationFn: (payload: { values: Record<string, unknown>; clear: string[] }) =>
-      updateSettings({ data: { integrationId: id, ...payload } }),
+      updateSettings({ data: { project, integrationId: id, ...payload } }),
     onSuccess: (view) => {
-      queryClient.setQueryData(settingsQuery().queryKey, view)
-      void queryClient.invalidateQueries({ queryKey: systemQuery().queryKey })
+      queryClient.setQueryData(settingsQuery(project).queryKey, view)
+      void queryClient.invalidateQueries({ queryKey: systemQuery(project).queryKey })
     },
   })
-  const test = useMutation({ mutationFn: () => testConnection({ data: { integrationId: id } }) })
+  const test = useMutation({ mutationFn: () => testConnection({ data: { project, integrationId: id } }) })
 
   const set = (key: string, value: string | boolean) => setState((prev) => ({ ...prev, [key]: value }))
   const setReplace = (key: string, on: boolean) => {
@@ -419,8 +421,9 @@ function TestResult({ result }: { result: ConnectionTestResult }) {
 }
 
 function PosthogActions() {
-  const preview = useMutation({ mutationFn: () => previewPosthogReport() })
-  const send = useMutation({ mutationFn: () => runPosthogNow() })
+  const project = useProjectId()
+  const preview = useMutation({ mutationFn: () => previewPosthogReport({ data: { project } }) })
+  const send = useMutation({ mutationFn: () => runPosthogNow({ data: { project } }) })
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3">

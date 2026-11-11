@@ -19,7 +19,7 @@ Sentry expects a response within about one second, so the server answers `200` a
 ### Sentry
 
 1. In Sentry, open Settings, then Developer Settings, then create a new Internal Integration.
-2. Set the Webhook URL to `https://<your-host>/webhooks/sentry`.
+2. Set the Webhook URL to `https://<your-host>/webhooks/<project>/sentry`. The admin Integrations page shows it per project. The default project also answers `/webhooks/sentry`.
 3. Enable the Alert Rule Action toggle so the integration can be used as an alert action.
 4. Save, then copy the Client Secret from the integration page. This is `SENTRY_CLIENT_SECRET`.
 5. Create or edit an Issue Alert and add the action "Send a notification via <integration name>".

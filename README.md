@@ -5,7 +5,7 @@ A small, self-hosted webhook server that turns events from external services int
 Each integration plugs in at one of two points: a **source** receives and verifies webhooks from a service, and an **automation** reacts to the normalized events. Delivery, deduplication, retries and logging are handled once, in the core.
 
 ```
-POST /webhooks/<source>  --- Source.verify (raw body, 401 on failure)
+POST /webhooks/<project>/<source>  --- Source.verify (raw body, 401 on failure)
         |
         v
 Source.parse  ------------- Event { source, kind, externalId, payload }

@@ -35,7 +35,7 @@ export const posthog = defineModule({
 });
 
 export type PosthogAdminDeps = {
-  resolve: () => ResolvedConfig;
+  resolve: (project: string) => ResolvedConfig;
   scheduler: Pick<Scheduler, "runNow">;
   fetch?: typeof fetch;
   now?: () => Date;
@@ -46,8 +46,8 @@ export function createPosthogAdmin({ resolve, scheduler, fetch, now = () => new 
   const notConfigured = (missing: readonly string[]) => `PostHog is not configured. Missing: ${missing.join(", ")}`;
 
   return {
-    async preview() {
-      const { posthog: config } = resolve();
+    async preview(project) {
+      const { posthog: config } = resolve(project);
       if (!config.configured) return { ok: false, message: notConfigured(config.missing) };
       const at = now();
       try {
@@ -56,11 +56,11 @@ export function createPosthogAdmin({ resolve, scheduler, fetch, now = () => new 
         return { ok: false, message: message(err) };
       }
     },
-    async runNow() {
-      const { posthog: config } = resolve();
+    async runNow(project) {
+      const { posthog: config } = resolve(project);
       if (!config.configured) return { status: "not-configured", message: notConfigured(config.missing) };
       const key = `manual:${now().toISOString()}`;
-      const result = await scheduler.runNow(createPosthogWeeklyReportJob(config.values, { fetch }), key);
+      const result = await scheduler.runNow({ ...createPosthogWeeklyReportJob(config.values, { fetch }), project }, key);
       switch (result.status) {
         case "succeeded":
           return { status: "succeeded", runId: result.runId, key, message: "Report sent to Slack" };

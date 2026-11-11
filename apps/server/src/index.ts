@@ -9,7 +9,9 @@ import {
 } from "@automation-server/core";
 import {
   createSqliteSettingsStore,
+  DEFAULT_PROJECT_ID,
   effectiveActionsRepos,
+  envFor,
   INTEGRATIONS,
   resolveConfig,
 } from "@automation-server/settings";
@@ -24,7 +26,7 @@ import { createRuntime } from "./runtime";
 const config = buildConfig(ENV);
 
 const store = createSqliteStore({ path: config.databasePath });
-const activity = createSqliteActivityStore({ path: config.databasePath });
+const activity = createSqliteActivityStore({ path: config.databasePath, legacyProject: DEFAULT_PROJECT_ID });
 const settings = createSqliteSettingsStore({ path: config.databasePath, encryptionKey: config.encryptionKey });
 const startedAt = new Date().toISOString();
 
@@ -49,59 +51,78 @@ pruneOld();
 const pruneTimer = setInterval(pruneOld, 3_600_000);
 pruneTimer.unref();
 
-const resolve = () => resolveConfig(settings, process.env);
-const runtime = createRuntime({ modules: INTEGRATION_MODULES, resolve, deps: { log } });
+const resolve = (project: string) => resolveConfig(settings.project(project), envFor(project, process.env));
+const runtime = createRuntime({
+  modules: INTEGRATION_MODULES,
+  projects: () => settings.projects().map((p) => p.id),
+  resolve,
+  deps: { log },
+});
 
 const dispatcher = createDispatcher({
   automations: runtime.automations,
   store,
   log,
   activity,
-  prepare: (event) => runtime.sources()[event.source]?.enrich?.(event) ?? Promise.resolve(event),
+  prepare: (event) => runtime.source(event.project ?? DEFAULT_PROJECT_ID, event.source)?.enrich?.(event) ?? Promise.resolve(event),
 });
 
 const scheduler = createScheduler({ jobs: runtime.jobs, store, log, activity });
 
-let actionsReader: { key: string; reader: ActionsReader } | undefined;
-const actions = (): ActionsReader => {
-  const { github } = resolve();
+// One reader per project, kept while its token and repositories stay the same so its cache survives.
+const actionsReaders = new Map<string, { key: string; reader: ActionsReader }>();
+const actions = (project: string): ActionsReader => {
+  const { github } = resolve(project);
   const repos = effectiveActionsRepos(github);
   const token = github.values.token ?? "";
   const key = JSON.stringify([token, repos]);
-  if (actionsReader?.key !== key) actionsReader = { key, reader: createGithubActionsReader({ repos, token }) };
-  return actionsReader.reader;
+  const cached = actionsReaders.get(project);
+  if (cached?.key === key) return cached.reader;
+  const reader = createGithubActionsReader({ repos, token });
+  actionsReaders.set(project, { key, reader });
+  return reader;
 };
 
 const webhookSources = Object.values(INTEGRATIONS).flatMap((spec) => ("webhookSource" in spec ? [spec.webhookSource] : []));
 
+const reload = () => {
+  runtime.rebuild();
+  const live = new Set(settings.projects().map((p) => p.id));
+  for (const project of actionsReaders.keys()) if (!live.has(project)) actionsReaders.delete(project);
+};
+
 const app = createApp({
-  sources: runtime.sources,
+  source: runtime.source,
+  defaultProject: DEFAULT_PROJECT_ID,
   dispatcher,
   log,
   corsOrigin: ENV.CORS_ORIGIN,
   admin: {
     activity,
     actions,
-    workflows: () => createWorkflowInstaller({ token: resolve().github.values.token }),
+    workflows: (project) => createWorkflowInstaller({ token: resolve(project).github.values.token }),
     adminToken: config.adminToken,
-    settings: { store: settings, env: process.env, reload: runtime.rebuild, test: runtime.test },
+    settings: { db: settings, env: process.env, reload, test: runtime.test },
     posthog: createPosthogAdmin({ resolve, scheduler }),
-    system: () => ({
-      startedAt,
-      sources: Object.keys(runtime.sources()),
-      automations: runtime.automations().map((a) => a.name),
-      jobs: runtime.jobs().map((j) => j.name),
-      retentionDays: config.retentionDays,
-      webhookUrls: webhookUrls(webhookSources, config.publicUrl),
-    }),
+    system: (project) => {
+      const built = runtime.project(project);
+      return {
+        startedAt,
+        sources: Object.keys(built.sources),
+        automations: built.automations.map((a) => a.name),
+        jobs: built.jobs.map((j) => j.name),
+        retentionDays: config.retentionDays,
+        webhookUrls: webhookUrls(project, webhookSources, config.publicUrl),
+      };
+    },
   },
 });
 const server = Bun.serve({ port: config.port, fetch: app.fetch });
 log.info("server started", {
   port: server.port,
-  sources: Object.keys(runtime.sources()),
-  automations: runtime.automations().map((a) => a.name),
-  jobs: runtime.jobs().map((j) => j.name),
+  projects: settings.projects().map((p) => p.id),
+  automations: runtime.automations().map((a) => `${a.project}/${a.name}`),
+  jobs: runtime.jobs().map((j) => `${j.project}/${j.name}`),
 });
 scheduler.start();
 

@@ -11,6 +11,7 @@ export type LogEntry = {
 
 export type StoredLog = LogEntry & {
   readonly id: number;
+  readonly project: string | null;
   readonly source: string | null;
   readonly automation: string | null;
   readonly externalId: string | null;
@@ -21,6 +22,7 @@ export type RunStatus = "running" | "succeeded" | "failed" | "duplicate";
 
 export type RunRecord = {
   readonly id: string;
+  readonly project: string | null;
   readonly automation: string;
   readonly source: string;
   readonly kind: string;
@@ -34,6 +36,8 @@ export type RunRecord = {
 export type Page<T> = { readonly items: T[]; readonly nextCursor: number | null };
 
 export type LogQuery = {
+  /** Lines of this project plus server-wide lines that belong to no project. */
+  project?: string;
   level?: LogLevel;
   source?: string;
   automation?: string;
@@ -44,6 +48,7 @@ export type LogQuery = {
 };
 
 export type RunQuery = {
+  project?: string;
   status?: RunStatus;
   automation?: string;
   source?: string;
@@ -68,7 +73,7 @@ export type ActivityStats = {
   readonly recentFailures: RunRecord[];
 };
 
-export type RunStart = Pick<RunRecord, "automation" | "source" | "kind" | "externalId"> & { startedAt: string };
+export type RunStart = Pick<RunRecord, "automation" | "source" | "kind" | "externalId"> & { startedAt: string; project?: string };
 
 export interface ActivityStore {
   recordLog(entry: LogEntry): void;
@@ -78,7 +83,8 @@ export interface ActivityStore {
   queryLogs(query: LogQuery): Page<StoredLog>;
   queryRuns(query: RunQuery): Page<StoredRun>;
   getRun(id: string): { run: RunRecord; logs: StoredLog[] } | null;
-  stats(sinceIso: string, bucketMs: number): ActivityStats;
+  /** With a project, counts that project's runs and its logs plus server-wide logs. */
+  stats(sinceIso: string, bucketMs: number, project?: string): ActivityStats;
   failInterruptedRuns(finishedAt: string): number;
   prune(beforeIso: string): number;
   close(): void;

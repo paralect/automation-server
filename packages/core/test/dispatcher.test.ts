@@ -237,3 +237,21 @@ describe("dispatcher activity recording", () => {
     expect(entries.some((e) => e.level === "error" && e.fields?.error === "disk full")).toBe(true);
   });
 });
+
+describe("dispatcher projects", () => {
+  test("an event reaches only the automations of its project, and claims are per project", async () => {
+    const ran: string[] = [];
+    const scoped = (project: string): Automation => ({ ...auto("a", async () => void ran.push(project)), project });
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const { dispatcher } = setup([scoped("acme"), scoped("globex")], undefined, activity);
+    dispatcher.enqueue({ ...event(), project: "acme" });
+    await dispatcher.drain(1000);
+    dispatcher.enqueue({ ...event(), project: "globex" });
+    await dispatcher.drain(1000);
+    dispatcher.enqueue(event());
+    await dispatcher.drain(1000);
+    expect(ran).toEqual(["acme", "globex"]);
+    expect(activity.queryRuns({ project: "acme", limit: 10 }).items.map((r) => r.status)).toEqual(["succeeded"]);
+    expect(activity.queryRuns({ project: "globex", limit: 10 }).items.map((r) => r.project)).toEqual(["globex"]);
+  });
+});
