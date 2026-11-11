@@ -374,14 +374,17 @@ function PosthogActions({ configured }: { configured: boolean }) {
       </div>
       {!configured && <p className="text-xs text-muted-foreground">Save the required fields to preview or send.</p>}
       {preview.error && <FieldError>{errorText(preview.error)}</FieldError>}
-      {preview.data !== undefined && (
-        <pre className="max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{preview.data}</pre>
-      )}
+      {preview.data &&
+        (preview.data.ok ? (
+          <pre className="max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{preview.data.text}</pre>
+        ) : (
+          <FieldError>{preview.data.message}</FieldError>
+        ))}
       {send.error && <FieldError>{errorText(send.error)}</FieldError>}
       {send.data && (
-        <p role="status" className={`text-xs ${send.data.ok ? "" : "text-destructive"}`}>
+        <p role="status" className={`text-xs ${send.data.status === "succeeded" ? "" : "text-destructive"}`}>
           {send.data.message}
-          {send.data.runId && (
+          {"runId" in send.data && send.data.runId && (
             <>
               {" "}
               <Link to="/runs/$id" params={{ id: send.data.runId }} className="underline underline-offset-4">

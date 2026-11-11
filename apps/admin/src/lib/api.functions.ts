@@ -62,22 +62,40 @@ export const testConnection = authedPost.validator(integrationInput).handler(({ 
   callAutomation((api) => api.settings.testConnection({ integrationId: data.integrationId as IntegrationId }))
 )
 
-export type WorkflowTemplate = {
+export type InstallMode = "pr" | "direct"
+export type PullRequestRef = { number: number; url: string }
+export type WorkflowTemplateInfo = {
   id: string
   title: string
   description: string
   path: string
-  requiredSecrets: string[]
+  files: string[]
+  /** Each entry is satisfied by any one of its names. */
+  requiredSecrets: string[][]
   requiredVariables: string[]
 }
-export type WorkflowStatus = { id: string; installed: boolean }
-export type InstallMode = "pr" | "direct"
-export type WorkflowInstallResult = {
-  status: "pr-opened" | "committed" | "already-installed" | "pr-already-open"
-  /** Pull request URL in pr mode, commit URL in direct mode. */
-  url?: string
+export type TemplateState = "installed" | "differs" | "missing"
+export type TemplateStatus = {
+  templateId: string
+  state: TemplateState
+  changedFiles: string[]
+  pullRequest: PullRequestRef | null
 }
-export type PosthogRunResult = { ok: boolean; message: string; runId?: string }
+export type WorkflowStatus = { repo: string; defaultBranch: string; templates: TemplateStatus[] }
+export type InstallOutcome = "already-installed" | "committed" | "pr-opened" | "pr-exists"
+export type InstallResult = {
+  repo: string
+  templateId: string
+  mode: InstallMode
+  outcome: InstallOutcome
+  branch: string
+  filesWritten: string[]
+  pullRequest: PullRequestRef | null
+}
+export type PosthogPreview = { ok: true; text: string; generatedAt: string } | { ok: false; message: string }
+export type PosthogRunResult =
+  | { status: "succeeded" | "failed"; runId: string | null; key: string; message: string }
+  | { status: "busy" | "not-configured"; message: string }
 
 /**
  * Routes built on the posthog and workflow-install branches, declared here until they merge into
@@ -85,13 +103,13 @@ export type PosthogRunResult = { ok: boolean; message: string; runId?: string }
  */
 type PendingRoutes = {
   posthog: {
-    preview(): Promise<string>
+    preview(): Promise<PosthogPreview>
     runNow(): Promise<PosthogRunResult>
   }
   workflows: {
-    templates(): Promise<WorkflowTemplate[]>
-    status(input: { repo: string }): Promise<WorkflowStatus[]>
-    install(input: { repo: string; templateId: string; mode: InstallMode }): Promise<WorkflowInstallResult>
+    templates(): Promise<WorkflowTemplateInfo[]>
+    status(input: { repo: string }): Promise<WorkflowStatus>
+    install(input: { repo: string; templateId: string; mode?: InstallMode }): Promise<InstallResult>
   }
 }
 const pending = (api: AppRouterClient) => api as AppRouterClient & PendingRoutes
@@ -101,15 +119,15 @@ export const previewPosthogReport = authedPost.handler(() => callAutomation((api
 export const runPosthogNow = authedPost.handler(() => callAutomation((api) => pending(api).posthog.runNow()))
 
 export const listWorkflowTemplates = authed.handler(() =>
-  callAutomation((api) => pending(api).workflows.templates())
+  callAutomation((api) => pending(api).workflows.templates(), { showMessages: true })
 )
 
 const repoInput = z.object({ repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) })
 
 export const getWorkflowStatus = authed.validator(repoInput).handler(({ data }) =>
-  callAutomation((api) => pending(api).workflows.status(data))
+  callAutomation((api) => pending(api).workflows.status(data), { showMessages: true })
 )
 
 export const installWorkflow = authedPost
   .validator(repoInput.extend({ templateId: z.string().min(1).max(100), mode: z.enum(["pr", "direct"]) }))
-  .handler(({ data }) => callAutomation((api) => pending(api).workflows.install(data)))
+  .handler(({ data }) => callAutomation((api) => pending(api).workflows.install(data), { showMessages: true }))
