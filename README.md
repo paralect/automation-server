@@ -23,6 +23,7 @@ Automation(s)  ------------ match the event, do the work, release the claim on f
 | --- | --- | --- | --- |
 | Sentry | source | Verifies and parses Sentry issue alerts (`POST /webhooks/sentry`) | [docs/integrations/sentry.md](docs/integrations/sentry.md) |
 | GitHub Issues | action | Creates one labelled GitHub issue per Sentry issue (`sentry-to-github-issue`) | [docs/integrations/sentry.md](docs/integrations/sentry.md) |
+| PostHog | scheduled job | Sends a weekly week-over-week PostHog report to Slack (`posthog-weekly-report`) | [docs/integrations/posthog.md](docs/integrations/posthog.md) |
 
 More are planned. See [docs/adding-an-integration.md](docs/adding-an-integration.md) to add your own.
 
@@ -166,6 +167,7 @@ automation-server/
 - [Deployment](docs/deployment.md)
 - [Adding an integration](docs/adding-an-integration.md)
 - [Sentry integration](docs/integrations/sentry.md)
+- [PostHog integration](docs/integrations/posthog.md)
 - [GitHub Actions workflows](github-actions/README.md)
 
 ## Contributing
