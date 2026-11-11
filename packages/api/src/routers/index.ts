@@ -19,7 +19,7 @@ import { ORPCError, type, type RouterClient } from "@orpc/server";
 import { z } from "zod";
 
 import { adminProcedure, o } from "../index";
-import type { Context, SystemInfo } from "../context";
+import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../context";
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
 
 const level = z.enum(["info", "warn", "error"]);
@@ -123,6 +123,11 @@ export const appRouter = {
       .output(type<ConnectionTestResult>())
       .handler(({ input, context }) => context.settings.test(input.integrationId)),
   },
+
+  posthog: {
+    preview: adminProcedure.output(type<PosthogPreview>()).handler(({ context }) => context.posthog.preview()),
+    runNow: adminProcedure.output(type<PosthogRunResult>()).handler(({ context }) => context.posthog.runNow()),
+  },
 };
 
 const currentView = ({ store, env }: Context["settings"]): SettingsView =>
@@ -130,4 +135,5 @@ const currentView = ({ store, env }: Context["settings"]): SettingsView =>
 
 export type AppRouter = typeof appRouter;
 export type AppRouterClient = RouterClient<typeof appRouter>;
+export type { PosthogPreview, PosthogRunResult } from "../context";
 export type { ConnectionTestResult, FieldView, IntegrationView, SettingsView } from "@automation-server/settings";

@@ -65,6 +65,10 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
     actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
     adminToken: undefined,
     settings: { store: settings, env, reload: runtime.rebuild, test: runtime.test },
+    posthog: {
+      preview: async () => ({ ok: false as const, message: "unused" }),
+      runNow: async () => ({ status: "busy" as const, message: "unused" }),
+    },
     system: () => ({
       startedAt: new Date().toISOString(),
       sources: Object.keys(runtime.sources()),
