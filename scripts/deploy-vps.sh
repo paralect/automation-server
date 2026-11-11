@@ -257,11 +257,12 @@ write_env() {
     ask ADMIN_DOMAIN "Domain for the admin, e.g. admin.example.com"
     ask ACME_EMAIL "Email for Let's Encrypt expiry notices"
   fi
-  ask GITHUB_REPO "GitHub repository for issues (owner/name)"
-  ask GITHUB_TOKEN "GitHub token (Issues: Read and write, Actions: Read)" "" 1
-  ask SENTRY_CLIENT_SECRET "Sentry integration client secret" "" 1
+  say "Integration credentials can be skipped here and set later on the admin Integrations page."
+  ask GITHUB_REPO "GitHub repository for issues (owner/name)" "" 0 1
+  ask GITHUB_TOKEN "GitHub token (Issues: Read and write, Actions: Read)" "" 1 1
+  ask SENTRY_CLIENT_SECRET "Sentry integration client secret" "" 1 1
   ask SENTRY_AUTH_TOKEN "Sentry auth token for issue stats" "" 1 1
-  ask GITHUB_ACTIONS_REPOS "Repositories whose GitHub Actions the admin shows, comma separated" "$GITHUB_REPO"
+  ask GITHUB_ACTIONS_REPOS "Repositories whose GitHub Actions the admin shows, comma separated" "$GITHUB_REPO" 0 1
   ask ADMIN_EMAIL "Admin login email"
 
   ADMIN_PASSWORD_GENERATED=""
@@ -271,6 +272,7 @@ write_env() {
   fi
   ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-$(secret)}"
   SESSION_SECRET="${SESSION_SECRET:-$(secret)}"
+  SETTINGS_ENCRYPTION_KEY="${SETTINGS_ENCRYPTION_KEY:-$(secret)}"
 
   local tmp
   tmp="$(mktemp "$APP_DIR/.env.XXXXXX")"
@@ -279,16 +281,18 @@ write_env() {
     echo "# Written by scripts/deploy-vps.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ). See .env.example for every option."
     echo "COMPOSE_FILE=$(compose_files "$MODE" "$traefik_flag")"
     echo "ADMIN_API_TOKEN='$ADMIN_API_TOKEN'"
-    echo "SENTRY_CLIENT_SECRET='$SENTRY_CLIENT_SECRET'"
+    echo "SETTINGS_ENCRYPTION_KEY='$SETTINGS_ENCRYPTION_KEY'"
+    if [ -n "$SENTRY_CLIENT_SECRET" ]; then echo "SENTRY_CLIENT_SECRET='$SENTRY_CLIENT_SECRET'"; fi
     if [ -n "$SENTRY_AUTH_TOKEN" ]; then echo "SENTRY_AUTH_TOKEN='$SENTRY_AUTH_TOKEN'"; fi
-    echo "GITHUB_TOKEN='$GITHUB_TOKEN'"
-    echo "GITHUB_REPO='$GITHUB_REPO'"
-    echo "GITHUB_ACTIONS_REPOS='$GITHUB_ACTIONS_REPOS'"
+    if [ -n "$GITHUB_TOKEN" ]; then echo "GITHUB_TOKEN='$GITHUB_TOKEN'"; fi
+    if [ -n "$GITHUB_REPO" ]; then echo "GITHUB_REPO='$GITHUB_REPO'"; fi
+    if [ -n "$GITHUB_ACTIONS_REPOS" ]; then echo "GITHUB_ACTIONS_REPOS='$GITHUB_ACTIONS_REPOS'"; fi
     echo "ADMIN_EMAIL='$ADMIN_EMAIL'"
     echo "ADMIN_PASSWORD='$ADMIN_PASSWORD'"
     echo "SESSION_SECRET='$SESSION_SECRET'"
     if [[ "$use_traefik" =~ ^[Yy1] ]]; then
       echo "SERVER_DOMAIN='$SERVER_DOMAIN'"
+      echo "PUBLIC_URL='https://$SERVER_DOMAIN'"
       echo "ADMIN_DOMAIN='$ADMIN_DOMAIN'"
       echo "ACME_EMAIL='$ACME_EMAIL'"
     fi
@@ -343,6 +347,11 @@ main() {
     say "Keeping the existing .env. Edit it, or delete it to answer the questions again."
   else
     write_env
+  fi
+  # Installs from before the admin Integrations page have no key. It must never change once set.
+  if [ -z "$(env_value SETTINGS_ENCRYPTION_KEY)" ]; then
+    set_env SETTINGS_ENCRYPTION_KEY "$(secret)"
+    say "Added SETTINGS_ENCRYPTION_KEY to .env so the admin can store integration credentials"
   fi
   apply_overrides
 
