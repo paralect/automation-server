@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
+import { Route as AuthedIntegrationsRouteImport } from './routes/_authed/integrations'
 import { Route as AuthedLogsRouteImport } from './routes/_authed/logs'
 import { Route as AuthedSystemRouteImport } from './routes/_authed/system'
 import { Route as AuthedActionsIndexRouteImport } from './routes/_authed/actions/index'
@@ -31,6 +32,11 @@ const LoginRoute = LoginRouteImport.update({
 const AuthedIndexRoute = AuthedIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedIntegrationsRoute = AuthedIntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedLogsRoute = AuthedLogsRouteImport.update({
@@ -67,6 +73,7 @@ const AuthedRunsIdRoute = AuthedRunsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/login': typeof LoginRoute
+  '/integrations': typeof AuthedIntegrationsRoute
   '/logs': typeof AuthedLogsRoute
   '/system': typeof AuthedSystemRoute
   '/actions/$id': typeof AuthedActionsIdRoute
@@ -76,6 +83,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/integrations': typeof AuthedIntegrationsRoute
   '/logs': typeof AuthedLogsRoute
   '/system': typeof AuthedSystemRoute
   '/': typeof AuthedIndexRoute
@@ -88,6 +96,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authed': typeof AuthedRouteWithChildren
   '/login': typeof LoginRoute
+  '/_authed/integrations': typeof AuthedIntegrationsRoute
   '/_authed/logs': typeof AuthedLogsRoute
   '/_authed/system': typeof AuthedSystemRoute
   '/_authed/': typeof AuthedIndexRoute
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/integrations'
     | '/logs'
     | '/system'
     | '/actions/$id'
@@ -110,6 +120,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/integrations'
     | '/logs'
     | '/system'
     | '/'
@@ -121,6 +132,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authed'
     | '/login'
+    | '/_authed/integrations'
     | '/_authed/logs'
     | '/_authed/system'
     | '/_authed/'
@@ -156,6 +168,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AuthedIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/integrations': {
+      id: '/_authed/integrations'
+      path: '/integrations'
+      fullPath: '/integrations'
+      preLoaderRoute: typeof AuthedIntegrationsRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/logs': {
@@ -204,6 +223,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthedRouteChildren {
+  AuthedIntegrationsRoute: typeof AuthedIntegrationsRoute
   AuthedLogsRoute: typeof AuthedLogsRoute
   AuthedSystemRoute: typeof AuthedSystemRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
@@ -214,6 +234,7 @@ interface AuthedRouteChildren {
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedIntegrationsRoute: AuthedIntegrationsRoute,
   AuthedLogsRoute: AuthedLogsRoute,
   AuthedSystemRoute: AuthedSystemRoute,
   AuthedIndexRoute: AuthedIndexRoute,
