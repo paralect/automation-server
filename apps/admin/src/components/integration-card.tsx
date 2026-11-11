@@ -1,12 +1,14 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { CheckCircleIcon, CopyIcon, WarningCircleIcon } from "@phosphor-icons/react"
+import { CheckCircleIcon, CopyIcon, GearSixIcon, PlugIcon, WarningCircleIcon } from "@phosphor-icons/react"
+import { cn } from "cn"
 import type { ConnectionTestResult, FieldView, IntegrationView } from "@automation-server/api/routers/index"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -22,7 +24,72 @@ const SOURCE_NOTE: Partial<Record<FieldView["source"], string>> = {
   default: "Default value.",
 }
 
-export function IntegrationCard({
+const LOGOS: Record<string, string> = {
+  github: "/integrations/github.svg",
+  sentry: "/integrations/sentry.svg",
+  linear: "/integrations/linear.svg",
+  posthog: "/integrations/posthog.svg",
+}
+
+/**
+ * Integrations someone set up: anything saved here, or a credential or required value from the server
+ * environment. Optional env values alone do not count because the env schema gives them defaults.
+ */
+export function isAdded(integration: IntegrationView) {
+  return (
+    integration.configured ||
+    integration.fields.some((f) => f.source === "db" || (f.source === "env" && (f.kind === "secret" || f.required)))
+  )
+}
+
+// A white tile keeps every brand mark in its official colors on both themes.
+export function IntegrationLogo({ id, className }: { id: string; className?: string }) {
+  const src = LOGOS[id]
+  return (
+    <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg bg-white p-2 ring-1 ring-foreground/10", className)}>
+      {src ? <img src={src} alt="" className="max-h-full max-w-full object-contain" /> : <PlugIcon className="size-5 text-neutral-500" />}
+    </div>
+  )
+}
+
+export function StatusBadge({ integration }: { integration: IntegrationView }) {
+  return integration.configured ? (
+    <Badge variant="secondary">Configured</Badge>
+  ) : (
+    <Badge variant="outline">Needs setup</Badge>
+  )
+}
+
+export function IntegrationCard({ integration, onOpen }: { integration: IntegrationView; onOpen: () => void }) {
+  const missing = integration.missing.map((key) => integration.fields.find((f) => f.key === key)?.label ?? key)
+  return (
+    <Card className="transition-shadow hover:ring-foreground/20">
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <IntegrationLogo id={integration.id} />
+          <CardTitle className="text-sm">{integration.title}</CardTitle>
+        </div>
+        <CardAction>
+          <StatusBadge integration={integration} />
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-1 flex-col gap-2">
+        <CardDescription>{integration.description}</CardDescription>
+        {!integration.configured && missing.length > 0 && (
+          <p className="text-xs text-muted-foreground">Missing: {missing.join(", ")}.</p>
+        )}
+      </CardContent>
+      <CardFooter>
+        <Button variant="outline" size="sm" onClick={onOpen}>
+          <GearSixIcon />
+          Configure
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+export function IntegrationSettings({
   integration,
   secretsWritable,
   webhookUrl,
@@ -77,82 +144,86 @@ export function IntegrationCard({
   const missing = integration.missing.map((key) => fields.find((f) => f.key === key)?.label ?? key)
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{integration.title}</CardTitle>
-        <CardDescription>{integration.description}</CardDescription>
-        <CardAction>
-          {integration.configured ? (
-            <Badge variant="secondary">Configured</Badge>
-          ) : (
-            <Badge variant="outline">Not configured</Badge>
-          )}
-        </CardAction>
-      </CardHeader>
-      <form onSubmit={onSubmit} className="contents">
-        <CardContent className="flex flex-col gap-4">
-          {!integration.configured && missing.length > 0 && (
-            <p className="text-xs text-muted-foreground">Missing: {missing.join(", ")}.</p>
-          )}
-          {integration.webhookSource && <WebhookUrl url={webhookUrl} title={integration.title} />}
-          <FieldGroup className="gap-4">
-            {fields.map((field) => (
-              <Field key={field.key}>
-                <FieldLabel htmlFor={`${id}-${field.key}`}>
-                  {field.label}
-                  {field.required && <span className="text-muted-foreground">(required)</span>}
-                </FieldLabel>
-                {field.kind === "secret" ? (
-                  <SecretInput
-                    id={`${id}-${field.key}`}
-                    field={field}
-                    value={String(state[field.key] ?? "")}
-                    onChange={(value) => set(field.key, value)}
-                    action={secretActions[field.key] ?? "keep"}
-                    onAction={(action) => setSecretAction(field.key, action)}
-                    replacing={replacing.has(field.key)}
-                    onReplace={(on) => setReplace(field.key, on)}
-                    writable={secretsWritable}
-                  />
-                ) : (
-                  <PlainInput
-                    id={`${id}-${field.key}`}
-                    field={field}
-                    value={state[field.key] ?? ""}
-                    onChange={(value) => set(field.key, value)}
-                  />
-                )}
-                <FieldNote field={field} />
-              </Field>
-            ))}
-          </FieldGroup>
-          {id === "posthog" && <PosthogActions />}
-        </CardContent>
-        <CardFooter className="flex flex-col items-stretch gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" disabled={!dirty || save.isPending}>
-              {save.isPending ? "Saving..." : "Save"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => test.mutate()}
-              disabled={test.isPending}
-              title="Tests the saved settings"
-            >
-              {test.isPending ? "Testing..." : "Test connection"}
-            </Button>
-            {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
+    <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+      <DialogHeader>
+        <div className="flex items-center gap-3">
+          <IntegrationLogo id={id} />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <div className="flex items-center gap-2">
+              <DialogTitle>{integration.title}</DialogTitle>
+              <StatusBadge integration={integration} />
+            </div>
+            <DialogDescription>{integration.description}</DialogDescription>
           </div>
-          <FieldError>{formError ?? (save.error ? errorText(save.error) : undefined)}</FieldError>
-          {test.error ? (
-            <FieldError>{errorText(test.error)}</FieldError>
+        </div>
+      </DialogHeader>
+      <DialogBody className="flex flex-col gap-4">
+        {!secretsWritable && (
+          <p className="text-xs text-muted-foreground">
+            Set SETTINGS_ENCRYPTION_KEY on the server to save tokens and secrets here. Other fields still save.
+          </p>
+        )}
+        {!integration.configured && missing.length > 0 && (
+          <p className="text-xs text-muted-foreground">Missing: {missing.join(", ")}.</p>
+        )}
+        {integration.webhookSource && <WebhookUrl url={webhookUrl} title={integration.title} />}
+        <FieldGroup className="gap-4">
+          {fields.map((field) => (
+            <Field key={field.key}>
+              <FieldLabel htmlFor={`${id}-${field.key}`}>
+                {field.label}
+                {field.required && <span className="text-muted-foreground">(required)</span>}
+              </FieldLabel>
+              {field.kind === "secret" ? (
+                <SecretInput
+                  id={`${id}-${field.key}`}
+                  field={field}
+                  value={String(state[field.key] ?? "")}
+                  onChange={(value) => set(field.key, value)}
+                  action={secretActions[field.key] ?? "keep"}
+                  onAction={(action) => setSecretAction(field.key, action)}
+                  replacing={replacing.has(field.key)}
+                  onReplace={(on) => setReplace(field.key, on)}
+                  writable={secretsWritable}
+                />
+              ) : (
+                <PlainInput
+                  id={`${id}-${field.key}`}
+                  field={field}
+                  value={state[field.key] ?? ""}
+                  onChange={(value) => set(field.key, value)}
+                />
+              )}
+              <FieldNote field={field} />
+            </Field>
+          ))}
+        </FieldGroup>
+        {id === "posthog" && <PosthogActions />}
+      </DialogBody>
+      <DialogFooter>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" disabled={!dirty || save.isPending}>
+            {save.isPending ? "Saving..." : "Save"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => test.mutate()}
+            disabled={test.isPending}
+            title="Tests the saved settings"
+          >
+            {test.isPending ? "Testing..." : "Test connection"}
+          </Button>
+          {dirty ? (
+            <span className="text-xs text-muted-foreground">Unsaved changes</span>
           ) : (
-            test.data && <TestResult result={test.data} />
+            save.isSuccess && <span className="text-xs text-muted-foreground">Saved</span>
           )}
-        </CardFooter>
-      </form>
-    </Card>
+        </div>
+        <FieldError>{formError ?? (save.error ? errorText(save.error) : undefined)}</FieldError>
+        {test.error ? <FieldError>{errorText(test.error)}</FieldError> : test.data && <TestResult result={test.data} />}
+      </DialogFooter>
+    </form>
   )
 }
 
