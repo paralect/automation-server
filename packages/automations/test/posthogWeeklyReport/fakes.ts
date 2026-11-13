@@ -1,4 +1,4 @@
-import { TOP_EVENTS_QUERY, TOP_PAGES_QUERY, TOTALS_QUERY, type PosthogReportConfig } from "../../src/posthogWeeklyReport";
+import { DAILY_USERS_QUERY, TOP_EVENTS_QUERY, TOP_PAGES_QUERY, TOTALS_QUERY, type PosthogReportConfig } from "../../src/posthogWeeklyReport";
 
 export const API_KEY = "phx_SecretPersonalKey1234567890";
 export const SLACK_URL = "https://hooks.slack.com/services/T0SECRET/B0SECRET/xoxSecretWebhookPath99";
@@ -23,6 +23,14 @@ export const RESULTS: Record<string, unknown[][]> = {
   [TOP_EVENTS_QUERY]: [
     ["$pageview", 5000, 5000],
     ["signed_up", 42, 40],
+  ],
+  // Day 2 has no events, so the query returns no row for it.
+  [DAILY_USERS_QUERY]: [
+    [0, 300],
+    [1, 250],
+    [3, 200],
+    [7, 120],
+    [13, 90],
   ],
 };
 

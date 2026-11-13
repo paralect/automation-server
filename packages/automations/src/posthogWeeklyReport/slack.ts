@@ -1,9 +1,11 @@
+import type { SlackBlock } from "@chat-adapter/slack/blocks";
 import { scrub } from "./scrub";
 
+/** `text` is the notification and fallback. With `blocks`, Slack shows the blocks instead. */
 export async function postToSlack(
   webhookUrl: string,
   text: string,
-  { fetch: doFetch = fetch, timeoutMs = 15_000 }: { fetch?: typeof fetch; timeoutMs?: number } = {},
+  { fetch: doFetch = fetch, timeoutMs = 15_000, blocks }: { fetch?: typeof fetch; timeoutMs?: number; blocks?: SlackBlock[] } = {},
 ): Promise<void> {
   const secrets = [webhookUrl, ...webhookUrl.split("/").filter((part) => part.length >= 8)];
   const fail = (what: string): never => {
@@ -14,7 +16,7 @@ export async function postToSlack(
     res = await doFetch(webhookUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(blocks ? { text, blocks } : { text }),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {

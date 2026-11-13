@@ -281,7 +281,7 @@ describe("posthog API", () => {
     const res = await rpc(t, "posthog/preview");
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, text: expect.stringContaining("Unique users: *10* (+100.0%, was 5)") });
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
     expect(slackPosts()).toBe(0);
     expect(t.activity.queryRuns({ limit: 10 }).items).toEqual([]);
     expect(res.raw).not.toContain(API_KEY);

@@ -51,7 +51,7 @@ export function createPosthogAdmin({ resolve, scheduler, fetch, now = () => new 
       if (!config.configured) return { ok: false, message: notConfigured(config.missing) };
       const at = now();
       try {
-        return { ok: true, text: await generateReport(config.values, at, { fetch }), generatedAt: at.toISOString() };
+        return { ok: true, text: (await generateReport(config.values, at, { fetch })).text, generatedAt: at.toISOString() };
       } catch (err) {
         return { ok: false, message: message(err) };
       }

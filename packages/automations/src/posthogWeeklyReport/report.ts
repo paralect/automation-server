@@ -7,6 +7,8 @@ export type ReportData = {
   readonly sessions: Pair;
   readonly pages: readonly Ranked[];
   readonly events: readonly Ranked[];
+  /** Unique users per day, index 0 is the last 24 hours, 14 entries. */
+  readonly dailyUsers: readonly number[];
 };
 
 const DAY = 86_400_000;

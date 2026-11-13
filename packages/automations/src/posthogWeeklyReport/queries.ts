@@ -28,12 +28,29 @@ export const TOP_EVENTS_QUERY = `SELECT event AS name, countIf(${CURRENT}) AS c,
   FROM events WHERE ${WINDOW}
   GROUP BY name HAVING c > 0 ORDER BY c DESC, name ASC LIMIT ${TOP}`;
 
+/** Unique users per 24 hour bucket, counted back from now: day 0 is the last 24 hours. */
+export const DAILY_USERS_QUERY = `SELECT intDiv(dateDiff('second', timestamp, now()), 86400) AS ago, uniq(person_id)
+  FROM events WHERE ${WINDOW}
+  GROUP BY ago ORDER BY ago`;
+
+const DAYS = 14;
+
+const daily = (rows: unknown[][]): number[] => {
+  const values = Array.from({ length: DAYS }, () => 0);
+  for (const row of rows) {
+    const ago = num(row[0]);
+    if (Number.isInteger(ago) && ago >= 0 && ago < DAYS) values[ago] = num(row[1]);
+  }
+  return values;
+};
+
 /** The last 7 days against the 7 days before them, both relative to PostHog's clock at query time. */
 export async function fetchReportData(client: HogqlClient): Promise<ReportData> {
-  const [totals, pages, events] = await Promise.all([
+  const [totals, pages, events, days] = await Promise.all([
     client.query(TOTALS_QUERY),
     client.query(TOP_PAGES_QUERY),
     client.query(TOP_EVENTS_QUERY),
+    client.query(DAILY_USERS_QUERY),
   ]);
   const row = totals[0] ?? [];
   return {
@@ -42,5 +59,6 @@ export async function fetchReportData(client: HogqlClient): Promise<ReportData> 
     sessions: { current: num(row[4]), previous: num(row[5]) },
     pages: ranked(pages),
     events: ranked(events),
+    dailyUsers: daily(days),
   };
 }

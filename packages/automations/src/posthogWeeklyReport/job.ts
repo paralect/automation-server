@@ -1,5 +1,7 @@
 import type { Job } from "@automation-server/core";
+import type { SlackBlock } from "@chat-adapter/slack/blocks";
 
+import { buildReportSpec, reportBlocks } from "./card";
 import { createHogqlClient } from "./client";
 import { fetchReportData } from "./queries";
 import { buildReport } from "./report";
@@ -23,9 +25,15 @@ export type ReportDeps = { fetch?: typeof fetch };
 const clientFor = (config: PosthogReportConfig, fetch: typeof globalThis.fetch | undefined) =>
   createHogqlClient({ host: config.host, projectId: config.projectId, apiKey: config.personalApiKey, fetch });
 
-/** Builds the report text without sending it. */
-export async function generateReport(config: PosthogReportConfig, now: Date, { fetch }: ReportDeps = {}): Promise<string> {
-  return buildReport(await fetchReportData(clientFor(config, fetch)), now, config.reportTitle);
+export type GeneratedReport = { readonly text: string; readonly blocks: SlackBlock[] };
+
+/** Builds the report without sending it: mrkdwn text for previews and notifications, Block Kit for the message. */
+export async function generateReport(config: PosthogReportConfig, now: Date, { fetch }: ReportDeps = {}): Promise<GeneratedReport> {
+  const data = await fetchReportData(clientFor(config, fetch));
+  return {
+    text: buildReport(data, now, config.reportTitle),
+    blocks: reportBlocks(buildReportSpec(data, now, config.reportTitle)),
+  };
 }
 
 export async function countRecentEvents(config: PosthogReportConfig, { fetch }: ReportDeps = {}): Promise<number> {
@@ -39,9 +47,9 @@ export function createPosthogWeeklyReportJob(config: PosthogReportConfig, deps: 
     due: (now) => isDue(now, config.dayOfWeek, config.hourUtc),
     async run({ log, now, key }) {
       log.info("building posthog report", { key });
-      const text = await generateReport(config, now, deps);
-      await postToSlack(config.slackWebhookUrl, text, deps);
-      log.info("posthog report sent", { key, characters: text.length });
+      const { text, blocks } = await generateReport(config, now, deps);
+      await postToSlack(config.slackWebhookUrl, text, { ...deps, blocks });
+      log.info("posthog report sent", { key, characters: text.length, blocks: blocks.length });
     },
   };
 }
