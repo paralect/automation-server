@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 import { buildTemplates, WORKFLOW_TEMPLATES } from "@automation-server/api/workflowTemplates";
+import { INTEGRATIONS } from "@automation-server/settings";
 
 import { collectSources, generate, OUTPUT_FILE } from "../../../scripts/generate-workflow-templates";
 
@@ -27,6 +28,18 @@ describe("bundled workflow templates", () => {
       ".agents/skills/fix-issue/references/sentry.md",
     ]);
     expect(WORKFLOW_TEMPLATES.find((t) => t.id === "codex-seo-autopilot")?.files).toHaveLength(1);
+  });
+
+  test("an integration link names a repository field that exists, so the admin can read the repository from it", () => {
+    const links = WORKFLOW_TEMPLATES.flatMap((t) => (t.integration ? [[t.id, t.integration] as const] : []));
+    expect(links.map(([id, link]) => [id, link.integration])).toEqual([
+      ["codex-issue-fix", "sentry"],
+      ["linear-implement", "linear"],
+    ]);
+    for (const [, { repoSetting }] of links) {
+      const field = INTEGRATIONS[repoSetting.integration].fields.find((f) => f.key === repoSetting.key);
+      expect(field).toMatchObject({ kind: "text", pattern: expect.any(String) });
+    }
   });
 
   test("a workflow file without metadata fails loudly", () => {

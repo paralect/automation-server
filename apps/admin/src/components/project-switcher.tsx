@@ -86,7 +86,14 @@ export function ProjectSwitcher() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <AddProjectDialog open={adding} onOpenChange={setAdding} onCreated={(p) => select(p.id)} />
+        <AddProjectDialog
+          open={adding}
+          onOpenChange={setAdding}
+          onCreated={(p) => {
+            select(p.id)
+            void navigate({ to: "/setup" })
+          }}
+        />
       </SidebarMenuItem>
     </SidebarMenu>
   )
@@ -137,7 +144,7 @@ function AddProjectDialog({
           <DialogHeader>
             <DialogTitle>Add project</DialogTitle>
             <DialogDescription>
-              A project has its own integrations, repositories, webhook URLs, runs and logs.
+              A project has its own integrations, repositories, webhook URLs, runs and logs. A setup guide opens next.
             </DialogDescription>
           </DialogHeader>
           <DialogBody>

@@ -171,6 +171,18 @@ describe("workflow status", () => {
       { templateId: "other", state: "installed", changedFiles: [], pullRequest: null },
     ]);
   });
+
+  test("check reports one template, from missing to installed after a direct install", async () => {
+    const gh = fakeGithub();
+    expect(await installer(gh).check("acme/site", "demo")).toEqual({
+      repo: "acme/site",
+      defaultBranch: "main",
+      template: { templateId: "demo", state: "missing", changedFiles: [".github/workflows/demo.yml", ".agents/skills/demo/SKILL.md"], pullRequest: null },
+    });
+    await installer(gh).install({ repo: "acme/site", templateId: "demo", mode: "direct" });
+    expect((await installer(gh).check("acme/site", "demo")).template.state).toBe("installed");
+    await expect(installer(gh).check("acme/site", "nope")).rejects.toMatchObject({ kind: "unknown-template" });
+  });
 });
 
 describe("workflow install errors", () => {

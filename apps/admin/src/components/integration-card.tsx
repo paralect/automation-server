@@ -13,8 +13,10 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { IntegrationWorkflow } from "@/components/integration-workflow"
 import { previewPosthogReport, runPosthogNow, testConnection, updateSettings } from "@/lib/api.functions"
 import { errorText } from "@/lib/errors"
+import { fieldOf, isGithubReady, savedRepo, type LinkedTemplate } from "@/lib/integration-workflows"
 import { settingsQuery, systemQuery } from "@/lib/queries"
 import { useProjectId } from "@/lib/project"
 import { buildPayload, initialState, isDirty, type FormState, type SecretAction } from "@/lib/settings-form"
@@ -96,10 +98,15 @@ export function IntegrationCard({ integration }: { integration: IntegrationView 
 
 export function IntegrationSettings({
   integration,
+  integrations,
+  workflow,
   secretsWritable,
   webhookUrl,
 }: {
   integration: IntegrationView
+  /** Every integration of the project, for a workflow whose repository is set on another one. */
+  integrations: readonly IntegrationView[]
+  workflow: LinkedTemplate | undefined
   secretsWritable: boolean
   webhookUrl: string | undefined
 }) {
@@ -148,6 +155,21 @@ export function IntegrationSettings({
   }
 
   const missing = integration.missing.map((key) => fields.find((f) => f.key === key)?.label ?? key)
+  const repoSetting = workflow?.integration.repoSetting
+  // A repository field on this form is checked as it is typed, one on another integration from its saved value.
+  const workflowRepo =
+    workflow && repoSetting
+      ? repoSetting.integration === id
+        ? String(state[repoSetting.key] ?? "")
+        : savedRepo(workflow, integrations)
+      : undefined
+  const repoField = repoSetting && fieldOf(integrations, repoSetting.integration, repoSetting.key)
+  const repoLabel =
+    repoSetting && repoField
+      ? repoSetting.integration === id
+        ? repoField.label
+        : `${repoField.label} on the GitHub integration`
+      : "the repository"
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
@@ -203,6 +225,14 @@ export function IntegrationSettings({
               </Field>
             ))}
           </FieldGroup>
+          {workflow && (
+            <IntegrationWorkflow
+              template={workflow}
+              repo={workflowRepo}
+              repoLabel={repoLabel}
+              githubReady={isGithubReady(integrations)}
+            />
+          )}
           {id === "posthog" && <PosthogActions />}
         </CardContent>
         <CardFooter className="flex flex-col items-stretch gap-3 border-t">

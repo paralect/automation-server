@@ -1,10 +1,13 @@
 import { useState } from "react"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import { ListChecksIcon } from "@phosphor-icons/react"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { StatusBadge } from "@/components/badges"
 import { EmptyState, PageHeader, QueryError } from "@/components/states"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   ChartContainer,
@@ -18,7 +21,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Time } from "@/components/time"
 import { WINDOWS, type WindowKey } from "@/lib/filters"
-import { overviewQuery } from "@/lib/queries"
+import { fieldOf } from "@/lib/integration-workflows"
+import { overviewQuery, settingsQuery } from "@/lib/queries"
 import { useProjectId } from "@/lib/project"
 
 export const Route = createFileRoute("/_authed/")({ component: Overview })
@@ -68,6 +72,8 @@ function Overview() {
           ))}
         </ToggleGroup>
       </PageHeader>
+
+      <SetupBanner />
 
       {error ? (
         <QueryError error={error} onRetry={() => refetch()} />
@@ -156,5 +162,23 @@ function Overview() {
         </>
       )}
     </>
+  )
+}
+
+/** Shown until the project has a GitHub token, which every automation needs. */
+function SetupBanner() {
+  const settings = useQuery(settingsQuery(useProjectId()))
+  if (!settings.data || fieldOf(settings.data.integrations, "github", "token")?.set) return null
+  return (
+    <Alert role="status">
+      <ListChecksIcon />
+      <AlertTitle>This project is not set up yet</AlertTitle>
+      <AlertDescription>The setup guide walks through the GitHub token, repositories and services.</AlertDescription>
+      <AlertAction>
+        <Button size="sm" nativeButton={false} render={<Link to="/setup" />}>
+          Open setup
+        </Button>
+      </AlertAction>
+    </Alert>
   )
 }

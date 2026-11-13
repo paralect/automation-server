@@ -32,6 +32,7 @@ export const Route = createFileRoute("/_authed")({
 
 const TITLES: Record<string, string> = {
   "/": "Overview",
+  "/setup": "Setup",
   "/logs": "Logs",
   "/runs": "Runs",
   "/actions": "GitHub Actions",

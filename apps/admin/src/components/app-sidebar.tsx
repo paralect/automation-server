@@ -5,6 +5,7 @@ import {
   GithubLogoIcon,
   HeartbeatIcon,
   LightningIcon,
+  ListChecksIcon,
   PlugsConnectedIcon,
   TreeStructureIcon,
   ScrollIcon,
@@ -26,6 +27,7 @@ import {
 
 const NAV = [
   { title: "Overview", to: "/", icon: GaugeIcon },
+  { title: "Setup", to: "/setup", icon: ListChecksIcon },
   { title: "Integrations", to: "/integrations", icon: PlugsConnectedIcon },
   { title: "Logs", to: "/logs", icon: ScrollIcon },
   { title: "Runs", to: "/runs", icon: LightningIcon },

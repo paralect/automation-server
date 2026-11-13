@@ -6,7 +6,8 @@ import { IntegrationSettings } from "@/components/integration-card"
 import { EmptyState, QueryError } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { settingsQuery, systemQuery } from "@/lib/queries"
+import { templateFor } from "@/lib/integration-workflows"
+import { settingsQuery, systemQuery, workflowTemplatesQuery } from "@/lib/queries"
 import { useProjectId } from "@/lib/project"
 
 export const Route = createFileRoute("/_authed/integrations/$id")({ component: IntegrationPage })
@@ -16,6 +17,7 @@ function IntegrationPage() {
   const project = useProjectId()
   const settings = useQuery(settingsQuery(project))
   const system = useQuery(systemQuery(project))
+  const templates = useQuery(workflowTemplatesQuery())
 
   const back = (
     <Button variant="ghost" size="sm" className="self-start" nativeButton={false} render={<Link to="/integrations" />}>
@@ -51,6 +53,8 @@ function IntegrationPage() {
         // Remount when the saved view changes so the form starts from the new values.
         key={`${integration.id}:${JSON.stringify(integration.fields)}`}
         integration={integration}
+        integrations={settings.data.integrations}
+        workflow={templateFor(integration.id, templates.data)}
         secretsWritable={settings.data.secretsWritable}
         webhookUrl={integration.webhookSource ? system.data?.webhookUrls[integration.webhookSource] : undefined}
       />

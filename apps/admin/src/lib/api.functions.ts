@@ -4,6 +4,7 @@ import { z } from "zod"
 import type { IntegrationView } from "@automation-server/api/routers/index"
 
 export type {
+  IntegrationLink,
   InstallMode,
   InstallOutcome,
   InstallResult,
@@ -13,6 +14,7 @@ export type {
   PullRequestRef,
   TemplateState,
   TemplateStatus,
+  WorkflowCheck,
   WorkflowStatus,
   WorkflowTemplateInfo,
 } from "@automation-server/api/routers/index"
@@ -118,6 +120,10 @@ const repoInput = inProject.extend({ repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[
 
 export const getWorkflowStatus = authed.validator(repoInput).handler(({ data }) =>
   callAutomation((api) => api.workflows.status(data), { showMessages: true })
+)
+
+export const checkWorkflow = authed.validator(repoInput.extend({ templateId: z.string().min(1).max(100) })).handler(({ data }) =>
+  callAutomation((api) => api.workflows.check(data), { showMessages: true })
 )
 
 export const installWorkflow = authedPost

@@ -1,6 +1,17 @@
+import type { IntegrationId } from "@automation-server/settings";
+
 import { WORKFLOW_SOURCES } from "./workflowTemplates.generated";
 
 export type TemplateFile = { readonly path: string; readonly content: string };
+
+/** Ties a workflow to the integration that relies on it, so setting that integration up can check for and install it. */
+export type IntegrationLink = {
+  readonly integration: IntegrationId;
+  /** `true` when the integration does nothing useful without the workflow. `false` when it only adds to it. */
+  readonly required: boolean;
+  /** The setting that names the repository the workflow belongs in. It can live on another integration. */
+  readonly repoSetting: { readonly integration: IntegrationId; readonly key: string };
+};
 
 export type WorkflowTemplate = {
   readonly id: string;
@@ -13,6 +24,7 @@ export type WorkflowTemplate = {
   /** Each entry is satisfied by any one of its secret names. */
   readonly requiredSecrets: readonly (readonly string[])[];
   readonly requiredVariables: readonly string[];
+  readonly integration?: IntegrationLink;
 };
 
 type TemplateMeta = {
@@ -22,6 +34,7 @@ type TemplateMeta = {
   readonly skill?: string;
   readonly requiredSecrets: readonly (readonly string[])[];
   readonly requiredVariables: readonly string[];
+  readonly integration?: IntegrationLink;
 };
 
 const CODEX_AUTH = ["OPENAI_API_KEY", "CODEX_AUTH_JSON"] as const;
@@ -35,6 +48,7 @@ export const TEMPLATE_META: Readonly<Record<string, TemplateMeta>> = {
     skill: "fix-issue",
     requiredSecrets: [["CODEX_AUTH_JSON"]],
     requiredVariables: [],
+    integration: { integration: "sentry", required: false, repoSetting: { integration: "github", key: "repo" } },
   },
   "codex-seo-autopilot.yml": {
     title: "Codex SEO autopilot",
@@ -55,6 +69,7 @@ export const TEMPLATE_META: Readonly<Record<string, TemplateMeta>> = {
     skill: "implement-task",
     requiredSecrets: [["CODEX_AUTH_JSON"]],
     requiredVariables: [],
+    integration: { integration: "linear", required: true, repoSetting: { integration: "linear", key: "targetRepo" } },
   },
 };
 
@@ -89,6 +104,7 @@ export function buildTemplates(
         files: [{ path, content: sources[file] as string }, ...skillFiles],
         requiredSecrets: spec.requiredSecrets,
         requiredVariables: spec.requiredVariables,
+        ...(spec.integration ? { integration: spec.integration } : {}),
       };
     });
 }

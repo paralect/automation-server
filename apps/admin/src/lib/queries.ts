@@ -1,6 +1,7 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 
 import {
+  checkWorkflow,
   getActionRun,
   listProjects,
   getOverview,
@@ -112,4 +113,11 @@ export const workflowStatusQuery = (project: string, repo: string) =>
     queryKey: [project, "workflow-status", repo],
     queryFn: () => getWorkflowStatus({ data: { project, repo } }),
     retry: retryServerErrorOnce,
+  })
+
+export const workflowCheckQuery = (project: string, repo: string, templateId: string) =>
+  queryOptions({
+    queryKey: [project, "workflow-status", repo, templateId],
+    queryFn: () => checkWorkflow({ data: { project, repo, templateId } }),
+    retry: false,
   })

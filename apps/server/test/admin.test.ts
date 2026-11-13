@@ -349,6 +349,12 @@ describe("workflows API", () => {
       files: [".github/workflows/codex-changelog.yml", ".agents/skills/write-changelog/SKILL.md", ".agents/skills/write-changelog/agents/openai.yaml"],
       requiredSecrets: [["OPENAI_API_KEY", "CODEX_AUTH_JSON"]],
       requiredVariables: [],
+      integration: null,
+    });
+    expect(res.body.find((t: { id: string }) => t.id === "linear-implement")?.integration).toEqual({
+      integration: "linear",
+      required: true,
+      repoSetting: { integration: "linear", key: "targetRepo" },
     });
   });
 
@@ -370,6 +376,9 @@ describe("workflows API", () => {
     expect(status.body.message).toContain("Repository acme/site was not found");
     expect(JSON.stringify(status.body)).not.toContain("ghp_topsecret");
     expect(seen).toEqual(["GET /repos/acme/site"]);
+    const check = await rpc(t, "workflows/check", { repo: "acme/site", templateId: "linear-implement" });
+    expect(check.status).toBe(502);
+    expect(check.body.message).toContain("Repository acme/site was not found");
 
     expect((await rpc(t, "workflows/install", { repo: "acme/site", templateId: "nope" })).status).toBe(404);
     expect((await rpc(t, "workflows/status", { repo: "not a repo" })).status).toBe(400);

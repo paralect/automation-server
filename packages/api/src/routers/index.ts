@@ -26,8 +26,8 @@ import { z } from "zod";
 import { adminProcedure, o } from "../index";
 import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../context";
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
-import { WorkflowInstallError, type InstallResult, type WorkflowStatus } from "../workflowInstaller";
-import { WORKFLOW_TEMPLATES } from "../workflowTemplates";
+import { WorkflowInstallError, type InstallResult, type WorkflowCheck, type WorkflowStatus } from "../workflowInstaller";
+import { WORKFLOW_TEMPLATES, type IntegrationLink } from "../workflowTemplates";
 
 const level = z.enum(["info", "warn", "error"]);
 const status = z.enum(["running", "succeeded", "failed", "duplicate"]);
@@ -60,6 +60,7 @@ export type WorkflowTemplateInfo = {
   files: string[];
   requiredSecrets: string[][];
   requiredVariables: string[];
+  integration: IntegrationLink | null;
 };
 
 const WORKFLOW_ERROR_CODE = { "not-configured": "PRECONDITION_FAILED", "unknown-template": "NOT_FOUND", github: "BAD_GATEWAY" } as const;
@@ -175,12 +176,19 @@ export const appRouter = {
         files: t.files.map((f) => f.path),
         requiredSecrets: t.requiredSecrets.map((names) => [...names]),
         requiredVariables: [...t.requiredVariables],
+        integration: t.integration ?? null,
       })),
     ),
     status: adminProcedure
       .input(z.object({ project, repo }))
       .output(type<WorkflowStatus>())
       .handler(({ input, context }) => workflowCall(() => context.workflows(inProject(context, input.project)).status(input.repo))),
+    check: adminProcedure
+      .input(z.object({ project, repo, templateId: z.string().min(1).max(100) }))
+      .output(type<WorkflowCheck>())
+      .handler(({ input, context }) =>
+        workflowCall(() => context.workflows(inProject(context, input.project)).check(input.repo, input.templateId)),
+      ),
     install: adminProcedure
       .input(z.object({ project, repo, templateId: z.string().min(1).max(100), mode: z.enum(["pr", "direct"]).default("pr") }))
       .output(type<InstallResult>())
@@ -253,4 +261,14 @@ export type AppRouter = typeof appRouter;
 export type AppRouterClient = RouterClient<typeof appRouter>;
 export type { PosthogPreview, PosthogRunResult } from "../context";
 export type { ConnectionTestResult, FieldView, IntegrationView, Project, SettingsView } from "@automation-server/settings";
-export type { InstallMode, InstallOutcome, InstallResult, PullRequestRef, TemplateState, TemplateStatus, WorkflowStatus } from "../workflowInstaller";
+export type {
+  InstallMode,
+  InstallOutcome,
+  InstallResult,
+  PullRequestRef,
+  TemplateState,
+  TemplateStatus,
+  WorkflowCheck,
+  WorkflowStatus,
+} from "../workflowInstaller";
+export type { IntegrationLink } from "../workflowTemplates";

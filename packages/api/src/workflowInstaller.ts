@@ -19,6 +19,8 @@ export type TemplateStatus = {
 
 export type WorkflowStatus = { readonly repo: string; readonly defaultBranch: string; readonly templates: TemplateStatus[] };
 
+export type WorkflowCheck = { readonly repo: string; readonly defaultBranch: string; readonly template: TemplateStatus };
+
 export type InstallMode = "pr" | "direct";
 
 export type InstallOutcome =
@@ -45,6 +47,8 @@ export type InstallRequest = { repo: string; templateId: string; mode: InstallMo
 
 export type WorkflowInstaller = {
   status(repo: string): Promise<WorkflowStatus>;
+  /** `status` for one template, so checking a single workflow costs one file read per template file. */
+  check(repo: string, templateId: string): Promise<WorkflowCheck>;
   install(request: InstallRequest): Promise<InstallResult>;
 };
 
@@ -214,22 +218,28 @@ export function createWorkflowInstaller(config: WorkflowInstallerConfig): Workfl
         : []),
     ].join("\n");
 
+  async function templateStatus(repo: string, owner: string, defaultBranch: string, template: WorkflowTemplate): Promise<TemplateStatus> {
+    const [checks, pullRequest] = await Promise.all([
+      checkFiles(repo, template, defaultBranch),
+      openPullRequest(repo, owner, installBranch(template.id)),
+    ]);
+    const changedFiles = checks.filter((c) => !c.same).map((c) => c.file.path);
+    const workflowPresent = checks[0]?.sha != null;
+    const state: TemplateState = changedFiles.length === 0 ? "installed" : workflowPresent ? "differs" : "missing";
+    return { templateId: template.id, state, changedFiles, pullRequest };
+  }
+
   return {
     async status(repo) {
       const { defaultBranch, owner } = await repoInfo(repo);
-      const statuses = await Promise.all(
-        templates.map(async (template): Promise<TemplateStatus> => {
-          const [checks, pullRequest] = await Promise.all([
-            checkFiles(repo, template, defaultBranch),
-            openPullRequest(repo, owner, installBranch(template.id)),
-          ]);
-          const changedFiles = checks.filter((c) => !c.same).map((c) => c.file.path);
-          const workflowPresent = checks[0]?.sha != null;
-          const state: TemplateState = changedFiles.length === 0 ? "installed" : workflowPresent ? "differs" : "missing";
-          return { templateId: template.id, state, changedFiles, pullRequest };
-        }),
-      );
+      const statuses = await Promise.all(templates.map((template) => templateStatus(repo, owner, defaultBranch, template)));
       return { repo, defaultBranch, templates: statuses };
+    },
+
+    async check(repo, templateId) {
+      const template = templateOf(templateId);
+      const { defaultBranch, owner } = await repoInfo(repo);
+      return { repo, defaultBranch, template: await templateStatus(repo, owner, defaultBranch, template) };
     },
 
     async install({ repo, templateId, mode }) {
