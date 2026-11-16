@@ -1,16 +1,18 @@
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
-import { GearIcon, WarningCircleIcon } from "@phosphor-icons/react"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ChecksIcon, GearIcon, WarningCircleIcon } from "@phosphor-icons/react"
 import { cn } from "cn"
 
-import { CrispCard, DECISION_VIEW, MODE_COPY } from "@/components/crisp-triage"
+import { CrispPanel, CrispRow, DECISION_VIEW, MODE_COPY } from "@/components/crisp-triage"
 import { TextFilter } from "@/components/filters"
 import { EmptyState, PageHeader, QueryError, RowsSkeleton } from "@/components/states"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { markAllCrispRead, markCrispRead, type CrispTriageItem } from "@/lib/api.functions"
 import { CRISP_DECISIONS, crispSearch, type CrispSearch } from "@/lib/filters"
 import { useProjectId } from "@/lib/project"
 import { crispQuery, crispStatsQuery, settingsQuery } from "@/lib/queries"
@@ -34,6 +36,29 @@ function CrispPage() {
   const stats = useQuery(crispStatsQuery(project))
   const list = useInfiniteQuery(crispQuery(project, filters))
   const items = list.data?.pages.flatMap((page) => page.items) ?? []
+
+  // The open conversation is kept as a snapshot, so the panel stays put when a refresh or the "Unread" filter drops its row.
+  const [opened, setOpened] = useState<CrispTriageItem | null>(null)
+  const current = opened ? (items.find((item) => item.id === opened.id) ?? opened) : null
+
+  const queryClient = useQueryClient()
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: [project, "crisp"] })
+    void queryClient.invalidateQueries({ queryKey: [project, "crisp-stats"] })
+  }
+  const setRead = useMutation({
+    mutationFn: ({ item, read }: { item: CrispTriageItem; read: boolean }) => markCrispRead({ data: { project, id: item.id, read } }),
+    onSuccess: (_result, { item, read }) => {
+      setOpened((prev) => (prev?.id === item.id ? { ...prev, read } : prev))
+      refresh()
+    },
+  })
+  const readAll = useMutation({ mutationFn: () => markAllCrispRead({ data: { project } }), onSuccess: refresh })
+
+  const open = (item: CrispTriageItem) => {
+    setOpened(item)
+    if (!item.read) setRead.mutate({ item, read: true })
+  }
 
   const integrations = settings.data?.integrations ?? []
   const crisp = integrations.find((i) => i.id === "crisp")
@@ -110,18 +135,37 @@ function CrispPage() {
           <WarningCircleIcon />
           <AlertTitle>Crisp does not accept private notes on this plan</AlertTitle>
           <AlertDescription>
-            The status segment is still set on each conversation. The note that would have been posted is shown on each card here.
+            The status segment is still set on each conversation. The note that would have been posted is shown in the details of each conversation.
           </AlertDescription>
         </Alert>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        <ToggleGroup
+          value={[filters.unread ? "unread" : "all"]}
+          onValueChange={(next) => next[0] && update({ unread: next[0] === "unread" ? true : undefined })}
+          variant="outline"
+          aria-label="Show"
+        >
+          <ToggleGroupItem value="all">All</ToggleGroupItem>
+          <ToggleGroupItem value="unread">Unread{stats.data ? ` (${stats.data.unread})` : ""}</ToggleGroupItem>
+        </ToggleGroup>
         <TextFilter label="Search" value={filters.q} onChange={(q) => update({ q })} className="w-64" />
         {filters.decision && (
           <Button variant="ghost" size="sm" onClick={() => update({ decision: undefined })}>
             Clear filter: {DECISION_VIEW[filters.decision].label}
           </Button>
         )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          disabled={!stats.data?.unread || readAll.isPending}
+          onClick={() => readAll.mutate()}
+        >
+          <ChecksIcon />
+          Mark all as read
+        </Button>
       </div>
 
       {list.error ? (
@@ -135,11 +179,11 @@ function CrispPage() {
         />
       ) : (
         <>
-          <div className="flex flex-col gap-3">
+          <ul className="divide-y overflow-hidden rounded-lg border">
             {items.map((item) => (
-              <CrispCard key={item.id} item={item} />
+              <CrispRow key={item.id} item={item} selected={current?.id === item.id} onOpen={() => open(item)} />
             ))}
-          </div>
+          </ul>
           {list.hasNextPage && (
             <Button variant="outline" className="self-center" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
               {list.isFetchingNextPage ? "Loading..." : "Load more"}
@@ -147,6 +191,12 @@ function CrispPage() {
           )}
         </>
       )}
+      <CrispPanel
+        item={current}
+        onClose={() => setOpened(null)}
+        busy={setRead.isPending}
+        onToggleRead={(item) => setRead.mutate({ item, read: !item.read })}
+      />
     </>
   )
 }

@@ -36,6 +36,8 @@ export type RunRecord = {
   readonly error: string | null;
   /** Reported by the automation through its context, null when it reported nothing. */
   readonly outcome?: RunOutcome | null;
+  /** When an operator marked the run as read in the admin, null while unread. */
+  readonly readAt?: string | null;
 };
 
 export type Page<T> = { readonly items: T[]; readonly nextCursor: number | null };
@@ -56,6 +58,8 @@ export type RunQuery = {
   project?: string;
   /** Matches the `decision` string of the run's reported outcome. */
   decision?: string;
+  /** Only runs nobody has marked as read. */
+  unread?: boolean;
   status?: RunStatus;
   automation?: string;
   source?: string;
@@ -91,6 +95,12 @@ export interface ActivityStore {
   queryRuns(query: RunQuery): Page<StoredRun>;
   /** Runs of one automation since a time, counted by the `decision` of their outcome. A failed run without an outcome counts under "none"; a finished run without one (recorded before outcomes existed) is left out. */
   decisionCounts(query: { project?: string; automation: string; sinceIso: string }): Record<string, number>;
+  /** Marks one run as read (a time) or unread (null). False when no such run exists. */
+  setRunRead(id: string, readAt: string | null): boolean;
+  /** Marks every unread run of one automation as read. Returns how many changed. */
+  markRunsRead(query: { project?: string; automation: string; readAt: string }): number;
+  /** Unread runs of one automation that carry a decision or failed, the ones worth an operator's attention. */
+  unreadCount(query: { project?: string; automation: string }): number;
   getRun(id: string): { run: RunRecord; logs: StoredLog[] } | null;
   /** With a project, counts that project's runs and its logs plus server-wide logs. */
   stats(sinceIso: string, bucketMs: number, project?: string): ActivityStats;

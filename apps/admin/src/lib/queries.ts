@@ -61,7 +61,7 @@ const CRISP_POLL_MS = 10_000
 export const crispQuery = (project: string, filters: CrispSearch) =>
   infiniteQueryOptions({
     queryKey: [project, "crisp", filters],
-    queryFn: ({ pageParam }) => listCrisp({ data: { ...filters, project, before: pageParam, limit: 20 } }),
+    queryFn: ({ pageParam }) => listCrisp({ data: { ...filters, project, before: pageParam, limit: 30 } }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: CRISP_POLL_MS,

@@ -309,3 +309,34 @@ describe("run outcomes", () => {
     }
   });
 });
+
+describe("read state", () => {
+  test("runs start unread and can be marked read, unread again, filtered and counted", () => {
+    const s = make();
+    const done = (externalId: string, outcome?: Record<string, unknown>) => {
+      const id = s.startRun(runStart({ automation: "triage", externalId }));
+      s.finishRun(id, { status: "succeeded", finishedAt: "2026-01-01T00:00:01.000Z", outcome });
+      return id;
+    };
+    const a = done("a", { decision: "issue" });
+    done("b", { decision: "drop" });
+    done("legacy"); // finished before outcomes existed: never counted
+    const q = { automation: "triage" };
+
+    expect(s.unreadCount(q)).toBe(2);
+    expect(s.queryRuns({ unread: true, limit: 10 }).items).toHaveLength(3);
+
+    expect(s.setRunRead(a, "2026-01-02T00:00:00.000Z")).toBe(true);
+    expect(s.unreadCount(q)).toBe(1);
+    expect(s.queryRuns({ unread: true, limit: 10 }).items.map((r) => r.externalId).sort()).toEqual(["b", "legacy"]);
+    expect(s.queryRuns({ limit: 10 }).items.find((r) => r.id === a)?.readAt).toBe("2026-01-02T00:00:00.000Z");
+
+    expect(s.setRunRead(a, null)).toBe(true);
+    expect(s.unreadCount(q)).toBe(2);
+    expect(s.setRunRead("missing", "2026-01-02T00:00:00.000Z")).toBe(false);
+
+    expect(s.markRunsRead({ ...q, readAt: "2026-01-03T00:00:00.000Z" })).toBe(2);
+    expect(s.unreadCount(q)).toBe(0);
+    expect(s.markRunsRead({ ...q, readAt: "2026-01-03T00:00:00.000Z" })).toBe(0);
+  });
+});

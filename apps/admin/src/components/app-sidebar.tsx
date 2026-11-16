@@ -17,13 +17,14 @@ import { isAdded } from "@/components/integration-card"
 import { NavUser } from "@/components/nav-user"
 import { ProjectSwitcher, ProjectSwitcherSkeleton } from "@/components/project-switcher"
 import { useProjectId } from "@/lib/project"
-import { settingsQuery } from "@/lib/queries"
+import { crispStatsQuery, settingsQuery } from "@/lib/queries"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
+  SidebarMenuBadge,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -49,21 +50,25 @@ const NAV = [
 const SUPPORT_NAV = [{ integration: "crisp", title: "Crisp", to: "/crisp", icon: CrispIcon }] as const
 
 function SupportNav({ pathname }: { pathname: string }) {
-  const settings = useQuery(settingsQuery(useProjectId()))
+  const project = useProjectId()
+  const settings = useQuery(settingsQuery(project))
   const added = new Set((settings.data?.integrations ?? []).filter(isAdded).map((i) => i.id as string))
   const items = SUPPORT_NAV.filter((item) => added.has(item.integration))
+  const crispStats = useQuery({ ...crispStatsQuery(project), enabled: added.has("crisp") })
+  const unread: Record<string, number> = { crisp: crispStats.data?.unread ?? 0 }
   if (items.length === 0) return null
 
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Support</SidebarGroupLabel>
       <SidebarMenu>
-        {items.map(({ title, to, icon: Icon }) => (
+        {items.map(({ integration, title, to, icon: Icon }) => (
           <SidebarMenuItem key={to}>
             <SidebarMenuButton tooltip={title} isActive={pathname.startsWith(to)} render={<Link to={to} />}>
               <Icon />
               <span>{title}</span>
             </SidebarMenuButton>
+            {(unread[integration] ?? 0) > 0 && <SidebarMenuBadge aria-label={`${unread[integration]} unread`}>{unread[integration]}</SidebarMenuBadge>}
           </SidebarMenuItem>
         ))}
       </SidebarMenu>

@@ -77,6 +77,12 @@ export const listCrisp = authed.validator(inProject.extend(crispInput.shape)).ha
   callAutomation((api) => api.crisp.list({ ...rest, search: q }))
 )
 
+export const markCrispRead = authedPost
+  .validator(inProject.extend({ id: z.string().min(1), read: z.boolean() }))
+  .handler(({ data }) => callAutomation((api) => api.crisp.markRead(data)))
+
+export const markAllCrispRead = authedPost.validator(inProject).handler(({ data }) => callAutomation((api) => api.crisp.markAllRead(data)))
+
 export const getCrispStats = authed.validator(inProject).handler(({ data }) => callAutomation((api) => api.crisp.stats(data)))
 
 export const getSystem = authed.validator(inProject).handler(({ data }) => callAutomation((api) => api.system(data)))

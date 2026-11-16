@@ -36,6 +36,8 @@ export type CrispDecisionKey = (typeof CRISP_DECISIONS)[number]
 
 export const crispSearch = z.object({
   decision: z.enum(CRISP_DECISIONS).optional().catch(undefined),
+  /** Only conversations nobody has read yet. */
+  unread: z.boolean().optional().catch(undefined),
   q: text,
 })
 export type CrispSearch = z.infer<typeof crispSearch>

@@ -49,6 +49,7 @@ type RunRow = {
   finished_at: string | null;
   error: string | null;
   outcome: string | null;
+  read_at: string | null;
 };
 
 const asString = (value: unknown) => (typeof value === "string" ? value : null);
@@ -95,6 +96,7 @@ const toRun = (row: RunRow): StoredRun => ({
   finishedAt: row.finished_at,
   error: row.error,
   outcome: parseOutcome(row.outcome),
+  readAt: row.read_at,
 });
 
 type Params = Record<string, string | number>;
@@ -130,6 +132,17 @@ function buildFilter(
 // Server-wide lines (startup, reloads) carry no project and show in every project.
 const logProject = (project: string | undefined): Filter | undefined =>
   project === undefined ? undefined : { where: "(project = $project OR project IS NULL)", params: { $project: project } };
+
+const runExtra = (q: { decision?: string; unread?: boolean }): Filter | undefined => {
+  const where: string[] = [];
+  const params: Params = {};
+  if (q.decision !== undefined) {
+    where.push("json_extract(outcome, '$.decision') = $decision");
+    params.$decision = q.decision;
+  }
+  if (q.unread) where.push("read_at IS NULL");
+  return where.length ? { where: where.join(" AND "), params } : undefined;
+};
 
 const hasColumn = (db: Database, table: string, column: string) =>
   (db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
@@ -176,6 +189,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
     }
   })();
   if (!hasColumn(db, "runs", "outcome")) db.run("ALTER TABLE runs ADD COLUMN outcome TEXT");
+  if (!hasColumn(db, "runs", "read_at")) db.run("ALTER TABLE runs ADD COLUMN read_at TEXT");
   db.run("CREATE INDEX IF NOT EXISTS logs_project_id ON logs (project, id)");
   db.run("CREATE INDEX IF NOT EXISTS runs_project_seq ON runs (project, seq)");
 
@@ -190,6 +204,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
   const finishStmt = db.query(
     "UPDATE runs SET status = $status, finished_at = $finishedAt, error = $error, outcome = $outcome WHERE id = $id AND status = 'running'",
   );
+  const setReadStmt = db.query("UPDATE runs SET read_at = $readAt WHERE id = $id");
   const interruptStmt = db.query(
     "UPDATE runs SET status = 'failed', finished_at = $finishedAt, error = 'interrupted by server restart' WHERE status = 'running'",
   );
@@ -270,9 +285,26 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
         q.search,
         q.before,
         "seq",
-        q.decision === undefined ? undefined : { where: "json_extract(outcome, '$.decision') = $decision", params: { $decision: q.decision } },
+        runExtra(q),
       );
       return paginate<RunRow, StoredRun>("runs", "seq", filter, q.limit, toRun, (r) => r.seq);
+    },
+    setRunRead: (id, readAt) => setReadStmt.run({ $id: id, $readAt: readAt }).changes > 0,
+    markRunsRead({ project, automation, readAt }) {
+      const scope = project === undefined ? "" : "AND project = $project";
+      return db
+        .query(`UPDATE runs SET read_at = $readAt WHERE automation = $automation AND read_at IS NULL AND (outcome IS NOT NULL OR status = 'failed') ${scope}`)
+        .run({ $readAt: readAt, $automation: automation, ...(project === undefined ? {} : { $project: project }) }).changes;
+    },
+    unreadCount({ project, automation }) {
+      const scope = project === undefined ? "" : "AND project = $project";
+      return (
+        db
+          .query<{ n: number }, Params>(
+            `SELECT COUNT(*) AS n FROM runs WHERE automation = $automation AND read_at IS NULL AND (outcome IS NOT NULL OR status = 'failed') ${scope}`,
+          )
+          .get({ $automation: automation, ...(project === undefined ? {} : { $project: project }) })?.n ?? 0
+      );
     },
     decisionCounts({ project, automation, sinceIso }) {
       const scope = project === undefined ? "" : "AND project = $project";

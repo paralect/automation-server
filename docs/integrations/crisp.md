@@ -90,12 +90,13 @@ These follow Crisp's documentation by name but their exact shape is not document
 
 ## The Crisp page in the admin
 
-Once the Crisp integration is added, the admin sidebar shows a **Support** group with **Crisp**. The page lists every triaged conversation, newest first, and refreshes by itself:
+Once the Crisp integration is added, the admin sidebar shows a **Support** group with **Crisp**, with the number of unread conversations next to it. The page is a list of every triaged conversation, newest first, and refreshes by itself:
 
-- Counters per decision (issue created, fix started, needs info, answer drafted, dropped). Click one to filter, or search the list.
-- One card per conversation: the decision and why, category, severity and area, the summary, a link to the conversation in Crisp, a link to the GitHub issue, whether the fix workflow started, and the `triage:*` segment that was set.
-- What an operator needs is shown on the card itself: the questions to ask for *needs info*, the draft for *answer*. Reproduction, the customer's quoted words, the private note and the model, rule and confidence are under **Details**.
-- A run that failed before deciding is shown with its error and a link to its run and logs.
+- Counters per decision (issue created, fix started, needs info, answer drafted, dropped). Click one to filter. **All / Unread** switches between everything and what nobody has opened yet, and there is a search box.
+- One row per conversation: a dot when it is unread (the text is bold too), the decision, a one-line summary, category, severity and area, the GitHub issue number, and the time.
+- Clicking a row opens a side panel and marks the conversation as read. The panel has **Mark as unread**, **Open in Crisp**, the draft answer with a **Copy draft** button (for *answer drafted*), the questions to ask with **Copy questions** (for *needs info*), what the triage did (issue, fix workflow, status segment), the reproduction, the customer's quoted words, the private note with **Copy note**, and the technical details (rule, mode, model, confidence, a link to the run and its logs).
+- **Mark all as read** clears the unread count. The read state is stored on the server, so it is the same in every browser.
+- A run that failed before deciding is listed as *Failed*, and its panel shows the error.
 
 The page reads the outcome each run reports (`ctx.report`, stored on the run), so it works on every Crisp plan, including the ones that refuse API notes. The outcome holds only redacted text, no customer message bodies. Runs recorded before outcomes existed are not listed here, they stay under Runs. Another support integration adds a line to `SUPPORT_NAV` in `apps/admin/src/components/app-sidebar.tsx` to appear in the same group.
 
