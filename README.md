@@ -24,6 +24,7 @@ Automation(s)  ------------ match the event, do the work, release the claim on f
 | Sentry | source | Verifies and parses Sentry issue alerts (`POST /webhooks/sentry`) | [docs/integrations/sentry.md](docs/integrations/sentry.md) |
 | GitHub Issues | action | Creates one labelled GitHub issue per Sentry issue (`sentry-to-github-issue`) | [docs/integrations/sentry.md](docs/integrations/sentry.md) |
 | Linear | source + action | Verifies Linear issue webhooks (`POST /webhooks/linear`) and, when the trigger label is added, dispatches a GitHub workflow where Codex implements the task and opens a PR (`linear-label-to-pr`) | [docs/integrations/linear.md](docs/integrations/linear.md) |
+| Crisp | source + action | Verifies Crisp Web Hooks (`POST /webhooks/crisp`) and, when the trigger segment is added, classifies the conversation with an LLM through OpenRouter. Posts a private note, and by mode opens a GitHub issue or dispatches the Codex fix workflow (`crisp-triage`) | [docs/integrations/crisp.md](docs/integrations/crisp.md) |
 | PostHog | scheduled job | Sends a weekly week-over-week PostHog report to Slack (`posthog-weekly-report`) | [docs/integrations/posthog.md](docs/integrations/posthog.md) |
 
 More are planned. See [docs/adding-an-integration.md](docs/adding-an-integration.md) to add your own.
@@ -169,6 +170,7 @@ automation-server/
 - [Adding an integration](docs/adding-an-integration.md)
 - [Sentry integration](docs/integrations/sentry.md)
 - [PostHog integration](docs/integrations/posthog.md)
+- [Crisp integration](docs/integrations/crisp.md)
 - [GitHub Actions workflows](github-actions/README.md)
 
 ## Contributing
