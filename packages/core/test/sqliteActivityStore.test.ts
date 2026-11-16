@@ -274,3 +274,38 @@ describe("projects", () => {
     }
   });
 });
+
+describe("run outcomes", () => {
+  test("a reported outcome is stored on the run and can be filtered and counted by its decision", () => {
+    const s = make();
+    const finish = (externalId: string, outcome?: Record<string, unknown>, status: "succeeded" | "failed" = "succeeded") =>
+      s.finishRun(s.startRun(runStart({ externalId })), { status, finishedAt: "2026-01-01T00:00:01.000Z", outcome });
+    finish("a", { decision: "issue", issue: { number: 7 } });
+    finish("b", { decision: "drop" });
+    finish("c", { decision: "issue" }, "failed");
+    finish("d");
+
+    const issues = s.queryRuns({ decision: "issue", limit: 10 }).items;
+    expect(issues.map((r) => r.externalId).sort()).toEqual(["a", "c"]);
+    expect(issues.find((r) => r.externalId === "a")?.outcome).toEqual({ decision: "issue", issue: { number: 7 } });
+    expect(s.queryRuns({ limit: 10 }).items.find((r) => r.externalId === "d")?.outcome).toBeNull();
+    expect(s.decisionCounts({ automation: "a", sinceIso: "2025-01-01T00:00:00.000Z" })).toEqual({ issue: 2, drop: 1 });
+    expect(s.decisionCounts({ automation: "other", sinceIso: "2025-01-01T00:00:00.000Z" })).toEqual({});
+  });
+
+  test("an existing database without the outcome column is upgraded in place", () => {
+    const dir = mkdtempSync(join(tmpdir(), "outcome-"));
+    try {
+      const path = join(dir, "a.db");
+      const old = new Database(path);
+      old.run(`CREATE TABLE runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, automation TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL, external_id TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error TEXT)`);
+      old.run("INSERT INTO runs (id, automation, source, kind, external_id, status, started_at) VALUES ('r', 'a', 's', 'k', 'e', 'succeeded', '2026-01-01T00:00:00.000Z')");
+      old.close();
+      const s = createSqliteActivityStore({ path });
+      open.push(s);
+      expect(s.queryRuns({ limit: 10 }).items[0]?.outcome).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

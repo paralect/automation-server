@@ -1,4 +1,4 @@
-import type { ActivityStore } from "./activity";
+import type { ActivityStore, RunOutcome } from "./activity";
 import type { Automation } from "./automation";
 import type { Event } from "./event";
 import type { Logger } from "./logger";
@@ -72,11 +72,17 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
       warn: (m, f) => log.warn(m, { ...tagged, ...f }),
       error: (m, f) => log.error(m, { ...tagged, ...f }),
     };
+    let outcome: RunOutcome | undefined;
     const finish = (status: "succeeded" | "failed", error?: string) => {
-      if (runId) record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: new Date().toISOString() }));
+      if (runId) record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: new Date().toISOString(), outcome }));
     };
     try {
-      await automation.run(event, { log: child });
+      await automation.run(event, {
+        log: child,
+        report: (reported) => {
+          outcome = reported;
+        },
+      });
       store.complete(key);
       finish("succeeded");
     } catch (err) {

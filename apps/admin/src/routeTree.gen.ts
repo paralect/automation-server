@@ -19,6 +19,7 @@ import { Route as AuthedSystemRouteImport } from './routes/_authed/system'
 import { Route as AuthedWorkflowsRouteImport } from './routes/_authed/workflows'
 import { Route as AuthedActionsIndexRouteImport } from './routes/_authed/actions/index'
 import { Route as AuthedActionsIdRouteImport } from './routes/_authed/actions/$id'
+import { Route as AuthedCrispIndexRouteImport } from './routes/_authed/crisp/index'
 import { Route as AuthedIntegrationsIndexRouteImport } from './routes/_authed/integrations/index'
 import { Route as AuthedIntegrationsIdRouteImport } from './routes/_authed/integrations/$id'
 import { Route as AuthedRunsIndexRouteImport } from './routes/_authed/runs/index'
@@ -73,6 +74,11 @@ const AuthedActionsIdRoute = AuthedActionsIdRouteImport.update({
   path: '/actions/$id',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedCrispIndexRoute = AuthedCrispIndexRouteImport.update({
+  id: '/crisp/',
+  path: '/crisp/',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedIntegrationsIndexRoute = AuthedIntegrationsIndexRouteImport.update({
   id: '/integrations/',
   path: '/integrations/',
@@ -106,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/integrations/$id': typeof AuthedIntegrationsIdRoute
   '/runs/$id': typeof AuthedRunsIdRoute
   '/actions/': typeof AuthedActionsIndexRoute
+  '/crisp/': typeof AuthedCrispIndexRoute
   '/integrations/': typeof AuthedIntegrationsIndexRoute
   '/runs/': typeof AuthedRunsIndexRoute
 }
@@ -121,6 +128,7 @@ export interface FileRoutesByTo {
   '/integrations/$id': typeof AuthedIntegrationsIdRoute
   '/runs/$id': typeof AuthedRunsIdRoute
   '/actions': typeof AuthedActionsIndexRoute
+  '/crisp': typeof AuthedCrispIndexRoute
   '/integrations': typeof AuthedIntegrationsIndexRoute
   '/runs': typeof AuthedRunsIndexRoute
 }
@@ -138,6 +146,7 @@ export interface FileRoutesById {
   '/_authed/integrations/$id': typeof AuthedIntegrationsIdRoute
   '/_authed/runs/$id': typeof AuthedRunsIdRoute
   '/_authed/actions/': typeof AuthedActionsIndexRoute
+  '/_authed/crisp/': typeof AuthedCrispIndexRoute
   '/_authed/integrations/': typeof AuthedIntegrationsIndexRoute
   '/_authed/runs/': typeof AuthedRunsIndexRoute
 }
@@ -155,6 +164,7 @@ export interface FileRouteTypes {
     | '/integrations/$id'
     | '/runs/$id'
     | '/actions/'
+    | '/crisp/'
     | '/integrations/'
     | '/runs/'
   fileRoutesByTo: FileRoutesByTo
@@ -170,6 +180,7 @@ export interface FileRouteTypes {
     | '/integrations/$id'
     | '/runs/$id'
     | '/actions'
+    | '/crisp'
     | '/integrations'
     | '/runs'
   id:
@@ -186,6 +197,7 @@ export interface FileRouteTypes {
     | '/_authed/integrations/$id'
     | '/_authed/runs/$id'
     | '/_authed/actions/'
+    | '/_authed/crisp/'
     | '/_authed/integrations/'
     | '/_authed/runs/'
   fileRoutesById: FileRoutesById
@@ -267,6 +279,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedActionsIdRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/crisp/': {
+      id: '/_authed/crisp/'
+      path: '/crisp'
+      fullPath: '/crisp/'
+      preLoaderRoute: typeof AuthedCrispIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/integrations/': {
       id: '/_authed/integrations/'
       path: '/integrations'
@@ -309,6 +328,7 @@ interface AuthedRouteChildren {
   AuthedIntegrationsIdRoute: typeof AuthedIntegrationsIdRoute
   AuthedRunsIdRoute: typeof AuthedRunsIdRoute
   AuthedActionsIndexRoute: typeof AuthedActionsIndexRoute
+  AuthedCrispIndexRoute: typeof AuthedCrispIndexRoute
   AuthedIntegrationsIndexRoute: typeof AuthedIntegrationsIndexRoute
   AuthedRunsIndexRoute: typeof AuthedRunsIndexRoute
 }
@@ -324,6 +344,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedIntegrationsIdRoute: AuthedIntegrationsIdRoute,
   AuthedRunsIdRoute: AuthedRunsIdRoute,
   AuthedActionsIndexRoute: AuthedActionsIndexRoute,
+  AuthedCrispIndexRoute: AuthedCrispIndexRoute,
   AuthedIntegrationsIndexRoute: AuthedIntegrationsIndexRoute,
   AuthedRunsIndexRoute: AuthedRunsIndexRoute,
 }

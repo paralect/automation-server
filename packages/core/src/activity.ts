@@ -20,6 +20,9 @@ export type StoredLog = LogEntry & {
 
 export type RunStatus = "running" | "succeeded" | "failed" | "duplicate";
 
+/** What an automation reports about a run, as plain JSON. A `decision` string, when present, can be filtered on. */
+export type RunOutcome = Readonly<Record<string, unknown>>;
+
 export type RunRecord = {
   readonly id: string;
   readonly project: string | null;
@@ -31,6 +34,8 @@ export type RunRecord = {
   readonly startedAt: string;
   readonly finishedAt: string | null;
   readonly error: string | null;
+  /** Reported by the automation through its context, null when it reported nothing. */
+  readonly outcome?: RunOutcome | null;
 };
 
 export type Page<T> = { readonly items: T[]; readonly nextCursor: number | null };
@@ -49,6 +54,8 @@ export type LogQuery = {
 
 export type RunQuery = {
   project?: string;
+  /** Matches the `decision` string of the run's reported outcome. */
+  decision?: string;
   status?: RunStatus;
   automation?: string;
   source?: string;
@@ -78,10 +85,12 @@ export type RunStart = Pick<RunRecord, "automation" | "source" | "kind" | "exter
 export interface ActivityStore {
   recordLog(entry: LogEntry): void;
   startRun(run: RunStart): string;
-  finishRun(id: string, result: { status: "succeeded" | "failed"; error?: string; finishedAt: string }): void;
+  finishRun(id: string, result: { status: "succeeded" | "failed"; error?: string; finishedAt: string; outcome?: RunOutcome }): void;
   recordDuplicate(run: RunStart): string;
   queryLogs(query: LogQuery): Page<StoredLog>;
   queryRuns(query: RunQuery): Page<StoredRun>;
+  /** Runs of one automation since a time, counted by the `decision` of their outcome. A failed run without an outcome counts under "none"; a finished run without one (recorded before outcomes existed) is left out. */
+  decisionCounts(query: { project?: string; automation: string; sinceIso: string }): Record<string, number>;
   getRun(id: string): { run: RunRecord; logs: StoredLog[] } | null;
   /** With a project, counts that project's runs and its logs plus server-wide logs. */
   stats(sinceIso: string, bucketMs: number, project?: string): ActivityStats;

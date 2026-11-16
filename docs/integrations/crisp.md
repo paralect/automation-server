@@ -88,9 +88,20 @@ These follow Crisp's documentation by name but their exact shape is not document
 - **Inbox link.** The issue links to `https://app.crisp.chat/website/{website}/inbox/{session}/`, the address the Crisp inbox uses. It is not part of the API docs.
 - **Token scopes.** The exact scope names for reading conversations and writing notes and meta.
 
+## The Crisp page in the admin
+
+Once the Crisp integration is added, the admin sidebar shows a **Support** group with **Crisp**. The page lists every triaged conversation, newest first, and refreshes by itself:
+
+- Counters per decision (issue created, fix started, needs info, answer drafted, dropped). Click one to filter, or search the list.
+- One card per conversation: the decision and why, category, severity and area, the summary, a link to the conversation in Crisp, a link to the GitHub issue, whether the fix workflow started, and the `triage:*` segment that was set.
+- What an operator needs is shown on the card itself: the questions to ask for *needs info*, the draft for *answer*. Reproduction, the customer's quoted words, the private note and the model, rule and confidence are under **Details**.
+- A run that failed before deciding is shown with its error and a link to its run and logs.
+
+The page reads the outcome each run reports (`ctx.report`, stored on the run), so it works on every Crisp plan, including the ones that refuse API notes. The outcome holds only redacted text, no customer message bodies. Runs recorded before outcomes existed are not listed here, they stay under Runs. Another support integration adds a line to `SUPPORT_NAV` in `apps/admin/src/components/app-sidebar.tsx` to appear in the same group.
+
 ## Free Crisp plan
 
-A free Crisp workspace refuses API writes of private notes with `402 subscription_upgrade_required`. The triage does not fail on it: the note is written to the server log (message `triage note not posted to crisp`, visible in the admin Logs page), the status segment is still set, and the GitHub issue is still created in modes `issue` and `fix`. On a free plan use `issue` mode, because `shadow` mode only reports through the note.
+A free Crisp workspace refuses API writes of private notes with `402 subscription_upgrade_required`. The triage does not fail on it: the note is shown on the Crisp page of the admin and written to the server log (message `triage note not posted to crisp`), the status segment is still set, and the GitHub issue is still created in modes `issue` and `fix`. On a free plan use `issue` mode, because `shadow` mode only reports through the note.
 
 ## Limits
 

@@ -1,3 +1,4 @@
+export * from "./crisp/outcome";
 export * from "./crisp/client";
 export * from "./crisp/enrich";
 export * from "./crisp/event";

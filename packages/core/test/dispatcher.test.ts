@@ -254,4 +254,32 @@ describe("dispatcher projects", () => {
     expect(activity.queryRuns({ project: "acme", limit: 10 }).items.map((r) => r.status)).toEqual(["succeeded"]);
     expect(activity.queryRuns({ project: "globex", limit: 10 }).items.map((r) => r.project)).toEqual(["globex"]);
   });
+
+  test("the outcome an automation reports is kept on its run, also when the run then fails", async () => {
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const { dispatcher } = setup(
+      [
+        auto("ok", async (_e, { report }) => report?.({ decision: "issue", n: 1 }), "good"),
+        auto(
+          "bad",
+          async (_e, { report }) => {
+            report?.({ decision: "fix" });
+            report?.({ decision: "fix", replaced: true });
+            throw new Error("boom");
+          },
+          "broken",
+        ),
+      ],
+      undefined,
+      activity,
+    );
+    dispatcher.enqueue(event("good", "g1"));
+    dispatcher.enqueue(event("broken", "b1"));
+    await dispatcher.drain(1000);
+    const runs = activity.queryRuns({ limit: 10 }).items;
+    expect(runs.find((r) => r.automation === "ok")?.outcome).toEqual({ decision: "issue", n: 1 });
+    const failed = runs.find((r) => r.automation === "bad");
+    expect(failed).toMatchObject({ status: "failed", outcome: { decision: "fix", replaced: true } });
+    activity.close();
+  });
 });

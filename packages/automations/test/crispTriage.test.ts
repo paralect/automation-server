@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import type { Logger } from "@automation-server/core/logger";
 import type { CrispSessionEvent, CustomerRequest } from "@automation-server/sources/crisp/event";
 
+import { crispOutcomeSchema, type CrispOutcome } from "@automation-server/sources/crisp/outcome";
+
 import { createCrispTriage, type CrispTriageConfig } from "../src/crispTriage/automation";
 import { applyMode, route } from "../src/crispTriage/route";
 import type { Triage } from "../src/crispTriage/types";
@@ -197,6 +199,44 @@ describe("crisp-triage", () => {
     }) as typeof fetch;
     await make(fn).run(event(), { log: quiet });
     expect(logged).toContain("triage note not posted to crisp");
+  });
+
+  test("reports a redacted, complete outcome for the admin", async () => {
+    const { fn } = services([JSON.stringify(triage()), JSON.stringify(triage({ summary: `Customer ${EMAIL} cannot export, call +44 20 7946 0958.` }))]);
+    let reported: unknown;
+    await make(fn).run(event(), { log, report: (o) => void (reported = o) });
+    const outcome = crispOutcomeSchema.parse(reported) as CrispOutcome;
+    expect(outcome).toMatchObject({
+      decision: "fix",
+      rule: "autofix",
+      mode: "fix",
+      sessionId: SESSION,
+      github: { written: true, issue: { number: 12, url: ISSUE_URL }, dispatched: true, dispatchError: null },
+      crisp: { segment: "triage:fix", notePosted: true, segmentSet: true },
+      verdict: { category: "bug", area: "export", model: "anthropic/claude-sonnet-5.5" },
+    });
+    const text = JSON.stringify(outcome);
+    expect(text).not.toContain(EMAIL);
+    expect(text).not.toContain("7946");
+    expect(text).not.toContain("Hi, I'm");
+  });
+
+  test("a failed dispatch is in the reported outcome, with the issue that was created", async () => {
+    const base = services([JSON.stringify(triage()), JSON.stringify(triage())]).fn;
+    const fn = (async (input: string | URL, init?: RequestInit) =>
+      String(input).endsWith("/dispatches") ? json(404, { message: "Not Found" }) : base(input, init)) as typeof fetch;
+    let reported: unknown;
+    await make(fn).run(event(), { log, report: (o) => void (reported = o) }).catch(() => undefined);
+    expect(crispOutcomeSchema.parse(reported)).toMatchObject({
+      github: { issue: { number: 12 }, dispatched: false, dispatchError: expect.stringContaining("was not found") },
+    });
+  });
+
+  test("shadow mode and a drop report what they decided without GitHub", async () => {
+    const { fn } = services([JSON.stringify(triage({ category: "spam" })), JSON.stringify(triage({ category: "spam" }))]);
+    let reported: unknown;
+    await make(fn, { mode: "shadow" }).run(event(), { log, report: (o) => void (reported = o) });
+    expect(crispOutcomeSchema.parse(reported)).toMatchObject({ decision: "drop", dropReason: "spam", github: { written: false, issue: null } });
   });
 
   test("the status segment is merged into the segments Crisp has when the triage ends", async () => {

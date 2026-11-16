@@ -5,7 +5,7 @@ import { CRISP_SEGMENTS, isCrispSession, type CrispSessionEvent, type CustomerRe
 
 import { createGithubClient, GithubApiError } from "../github";
 import { createOpenRouterClient } from "../openrouter";
-import { CRISP_LABEL, crispMarker, formatIssue, formatNote, statusSegment, type Verdict } from "./format";
+import { buildOutcome, CRISP_LABEL, crispMarker, formatIssue, formatNote, scrubber, statusSegment, type Verdict } from "./format";
 import { hasUserText, redactMessages, systemPrompt, userPrompt } from "./prompt";
 import { applyMode, route } from "./route";
 import { TRIAGE_VERSION, triageSchema, type Category, type Decision, type Mode, type Triage } from "./types";
@@ -30,6 +30,7 @@ export type CrispTriageConfig = {
 const ESCALATE: readonly Category[] = ["bug", "regression", "data_fix"];
 const NO_USER_TEXT_QUESTION = "The customer has not described the problem yet. What were they trying to do and what happened?";
 
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const hasStatus = (segments: readonly string[]) => segments.some((s) => s.trim().toLowerCase().startsWith("triage:"));
 
@@ -87,7 +88,7 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
   return defineAutomation({
     name: CRISP_TRIAGE,
     matches,
-    async run(event, { log }) {
+    async run(event, { log, report }) {
       const request = event.payload.request;
       if (!request) throw new Error("The Crisp conversation could not be loaded. Check the Crisp plugin key and its scopes.");
       const sessionId = request.sessionId;
@@ -112,6 +113,7 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
       });
 
       let issueUrl: string | undefined;
+      let issueRef: { number: number; url: string } | null = null;
       let dispatched = false;
       let dispatchError: unknown;
       if (writes && github && verdict && (decision.kind === "issue" || decision.kind === "fix")) {
@@ -119,6 +121,7 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
         await github.ensureLabels(issue.labels);
         const created = await github.createIssue(issue);
         issueUrl = created.html_url;
+        issueRef = { number: created.number, url: created.html_url };
         log.info("created github issue", { sessionId, number: created.number, url: created.html_url });
         if (decision.kind === "fix") {
           try {
@@ -133,8 +136,25 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
       }
 
       const note = formatNote({ decision, mode: config.mode, github: writes, verdict, issueUrl, dispatched, dispatchFailed: dispatchError !== undefined });
-      // A free Crisp plan refuses API writes with 402. That must not fail the triage: the verdict stays in the log
-      // (and in the GitHub issue), only the Crisp copy is skipped.
+      const outcome = (notePosted: boolean | null, segmentSet: boolean | null) =>
+        buildOutcome({
+          request,
+          mode: config.mode,
+          rule,
+          decision,
+          verdict,
+          github: writes,
+          issue: issueRef,
+          dispatched,
+          dispatchError: dispatchError === undefined ? null : errorText(dispatchError),
+          notePosted,
+          segmentSet,
+          note,
+        });
+      // Reported before the Crisp writes, so the admin still shows the decision when one of them throws.
+      report?.(outcome(null, null));
+      // A free Crisp plan refuses API writes with 402. That must not fail the triage: the verdict stays in the
+      // admin (and in the GitHub issue), only the Crisp copy is skipped.
       const paidOnly = async (what: string, write: () => Promise<void>): Promise<boolean> => {
         try {
           await write();
@@ -146,13 +166,14 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
         }
       };
       const noted = await paidOnly("note", () => crisp.addNote(sessionId, note));
-      if (!noted) log.info("triage note not posted to crisp", { sessionId, note });
+      if (!noted) log.info("triage note not posted to crisp", { sessionId, note: scrubber(request)(note) });
       // The triage can take a while, so merge into the segments as they are now, not as they were when it started.
       const segment = statusSegment(decision);
       const segmented = await paidOnly("segments", async () => {
         const current = await crisp.conversation(sessionId);
         await crisp.setSegments(sessionId, [...new Set([...current.segments, segment])]);
       });
+      report?.(outcome(noted, segmented));
       log.info("finished crisp write-back", { sessionId, segment, noted, segmented });
       if (dispatchError !== undefined) throw dispatchError;
     },
