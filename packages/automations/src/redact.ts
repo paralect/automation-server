@@ -17,12 +17,33 @@ const IPV6 = new RegExp(
   `(?<![\\w:])(?:(?:${H}:){7}${H}|(?:${H}(?::${H}){0,6})?::(?:${H}(?::${H}){0,6})?)(?![\\w:])`,
   "gi",
 );
+const CARD = /(?<![\d-])\d(?:[ -]?\d){12,18}(?![\d-])/g;
+const PHONE_INTL = /(?<![\w+])\+\d[\d ().-]{6,18}\d(?!\w)/g;
+const PHONE_LOCAL = /(?<![\w(])(?:\(\d{3}\)[ ]?|\d{3}[-. ])\d{3}[-. ]\d{4}(?![\w])/g;
 const LONG_TOKEN = /(?<![\w+=-])[A-Za-z0-9+_=-]{32,}(?![\w+=-])/g;
 
 function looksLikeSecret(run: string): boolean {
   if (/^[0-9a-f]+$/i.test(run)) return true;
   return /[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run);
 }
+
+function luhn(digits: string): boolean {
+  let sum = 0;
+  for (let i = 0; i < digits.length; i++) {
+    let d = Number(digits[digits.length - 1 - i]);
+    if (i % 2 === 1) d = d * 2 > 9 ? d * 2 - 9 : d * 2;
+    sum += d;
+  }
+  return sum % 10 === 0;
+}
+
+// The Luhn check keeps long numeric ids and timestamps that merely look like card numbers.
+const redactCard = (m: string): string => (luhn(m.replace(/\D/g, "")) ? "[card]" : m);
+
+const redactPhone = (m: string): string => {
+  const digits = m.replace(/\D/g, "").length;
+  return digits >= 8 && digits <= 15 ? "[phone]" : m;
+};
 
 export function stripQuery(url: string): string {
   const cut = url.search(/[?#]/);
@@ -44,6 +65,9 @@ export function redactText(s: string): string {
     })
     .replace(URL_QUERY, `$1?${REDACTED}`)
     .replace(EMAIL, "[email]")
+    .replace(CARD, redactCard)
+    .replace(PHONE_INTL, redactPhone)
+    .replace(PHONE_LOCAL, "[phone]")
     .replace(IPV4, "[ip]")
     .replace(IPV6, (m) => (/[0-9a-f]/i.test(m) ? "[ip]" : m))
     .replace(LONG_TOKEN, (m) => (looksLikeSecret(m) ? REDACTED : m));
