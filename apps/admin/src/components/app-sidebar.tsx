@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Link, useRouterState } from "@tanstack/react-router"
+import { useQuery } from "@tanstack/react-query"
 import {
   GaugeIcon,
   GithubLogoIcon,
@@ -11,13 +12,19 @@ import {
   ScrollIcon,
 } from "@phosphor-icons/react"
 
+import { CrispIcon } from "@/components/crisp-triage"
+import { isAdded } from "@/components/integration-card"
 import { NavUser } from "@/components/nav-user"
 import { ProjectSwitcher, ProjectSwitcherSkeleton } from "@/components/project-switcher"
+import { useProjectId } from "@/lib/project"
+import { crispStatsQuery, settingsQuery } from "@/lib/queries"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenuBadge,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -35,6 +42,39 @@ const NAV = [
   { title: "Workflows", to: "/workflows", icon: TreeStructureIcon },
   { title: "System", to: "/system", icon: HeartbeatIcon },
 ] as const
+
+/**
+ * Pages that exist only for an integration the project added. They sit under one "Support" heading, so a
+ * future support integration adds a line here and shows up in the same place.
+ */
+const SUPPORT_NAV = [{ integration: "crisp", title: "Crisp", to: "/crisp", icon: CrispIcon }] as const
+
+function SupportNav({ pathname }: { pathname: string }) {
+  const project = useProjectId()
+  const settings = useQuery(settingsQuery(project))
+  const added = new Set((settings.data?.integrations ?? []).filter(isAdded).map((i) => i.id as string))
+  const items = SUPPORT_NAV.filter((item) => added.has(item.integration))
+  const crispStats = useQuery({ ...crispStatsQuery(project), enabled: added.has("crisp") })
+  const unread: Record<string, number> = { crisp: crispStats.data?.unread ?? 0 }
+  if (items.length === 0) return null
+
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>Support</SidebarGroupLabel>
+      <SidebarMenu>
+        {items.map(({ integration, title, to, icon: Icon }) => (
+          <SidebarMenuItem key={to}>
+            <SidebarMenuButton tooltip={title} isActive={pathname.startsWith(to)} render={<Link to={to} />}>
+              <Icon />
+              <span>{title}</span>
+            </SidebarMenuButton>
+            {(unread[integration] ?? 0) > 0 && <SidebarMenuBadge aria-label={`${unread[integration]} unread`}>{unread[integration]}</SidebarMenuBadge>}
+          </SidebarMenuItem>
+        ))}
+      </SidebarMenu>
+    </SidebarGroup>
+  )
+}
 
 export function AppSidebar({
   user,
@@ -78,6 +118,7 @@ export function AppSidebar({
             ))}
           </SidebarMenu>
         </SidebarGroup>
+        {projectsReady && <SupportNav pathname={pathname} />}
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={user} />

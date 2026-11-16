@@ -69,6 +69,6 @@ export const crisp = defineModule({
     if (!openrouter.configured) {
       return { ok: false, available: true, message: "The plugin token works, but nothing is triaged until the OpenRouter API key is set", details };
     }
-    return { ok: true, available: true, message: `Plugin token can read website ${name ?? v.websiteId}`, details };
+    return { ok: true, available: true, message: `Plugin token can read website ${name ?? v.websiteId}. Write access for notes and segments is only exercised by the first triage.`, details };
   },
 });

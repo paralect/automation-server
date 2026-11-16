@@ -19,8 +19,8 @@ Turns a Crisp conversation into a triage verdict. An operator adds a segment to 
    | Condition | Decision |
    | --- | --- |
    | spam | drop |
+   | bug or regression without reproduction steps, or confidence below the minimum | needs_info |
    | how_to | answer (draft in the note) |
-   | bug or regression with missing information or no repro, or confidence below the minimum | needs_info |
    | feature_request, performance, data_fix, account_billing | issue |
    | bug or regression, not a blocker, area in Autofix areas | fix |
    | bug or regression | issue |
@@ -88,8 +88,24 @@ These follow Crisp's documentation by name but their exact shape is not document
 - **Inbox link.** The issue links to `https://app.crisp.chat/website/{website}/inbox/{session}/`, the address the Crisp inbox uses. It is not part of the API docs.
 - **Token scopes.** The exact scope names for reading conversations and writing notes and meta.
 
+## The Crisp page in the admin
+
+Once the Crisp integration is added, the admin sidebar shows a **Support** group with **Crisp**, with the number of unread conversations next to it. The page is a list of every triaged conversation, newest first, and refreshes by itself:
+
+- Counters per decision (issue created, fix started, needs info, answer drafted, dropped). Click one to filter. **All / Unread** switches between everything and what nobody has opened yet, and there is a search box.
+- One row per conversation: a dot when it is unread (the text is bold too), the decision, a one-line summary, category, severity and area, the GitHub issue number, and the time.
+- Clicking a row opens a side panel and marks the conversation as read. The panel has **Mark as unread**, **Open in Crisp**, the draft answer with a **Copy draft** button (for *answer drafted*), the questions to ask with **Copy questions** (for *needs info*), what the triage did (issue, fix workflow, status segment), the reproduction, the customer's quoted words, the private note with **Copy note**, and the technical details (rule, mode, model, confidence, a link to the run and its logs).
+- **Mark all as read** clears the unread count. The read state is stored on the server, so it is the same in every browser.
+- A run that failed before deciding is listed as *Failed*, and its panel shows the error.
+
+The page reads the outcome each run reports (`ctx.report`, stored on the run), so it works on every Crisp plan, including the ones that refuse API notes. The outcome holds only redacted text, no customer message bodies. Runs recorded before outcomes existed are not listed here, they stay under Runs. Another support integration adds a line to `SUPPORT_NAV` in `apps/admin/src/components/app-sidebar.tsx` to appear in the same group.
+
+## Free Crisp plan
+
+A free Crisp workspace refuses API writes of private notes with `402 subscription_upgrade_required`. The triage does not fail on it: the note is shown on the Crisp page of the admin and written to the server log (message `triage note not posted to crisp`), the status segment is still set, and the GitHub issue is still created in modes `issue` and `fix`. On a free plan use `issue` mode, because `shadow` mode only reports through the note.
+
 ## Limits
 
-- Only the latest batch of messages is read. Older pages are not followed.
+- Only the latest five pages of messages (about 100) are read.
 - Attachments are never sent to the LLM or GitHub.
-- A failed run releases its claim, but Crisp does not redeliver. Remove the status segment if any, then remove and re-add the trigger segment to retry. When the issue was already created, the retry finds it and drops the request as a duplicate.
+- If starting the fix workflow fails, the note says so and the run fails. The issue exists, so run the workflow by hand for it. GitHub keeps one pending run per concurrency group, so a burst of fixes can drop a queued one. Otherwise a failed run releases its claim, but Crisp does not redeliver. Remove the status segment if any, then remove and re-add the trigger segment to retry. When the issue was already created, the retry finds it and drops the request as a duplicate.

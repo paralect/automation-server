@@ -20,6 +20,7 @@ import {
   type Project,
   type SettingsView,
 } from "@automation-server/settings";
+import { CRISP_DECISIONS, crispOutcomeSchema, type CrispDecision, type CrispOutcome } from "@automation-server/sources/crisp/outcome";
 import { ORPCError, type, type RouterClient } from "@orpc/server";
 import { z } from "zod";
 
@@ -28,6 +29,48 @@ import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../c
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
 import { WorkflowInstallError, type InstallResult, type WorkflowCheck, type WorkflowStatus } from "../workflowInstaller";
 import { WORKFLOW_TEMPLATES, type IntegrationLink } from "../workflowTemplates";
+
+export type { CrispOutcome, CrispDecision };
+
+/** Name of the automation in `packages/automations/src/crispTriage`. */
+const CRISP_TRIAGE = "crisp-triage";
+
+/** One triaged Crisp conversation: the run, and what it decided. `outcome` is null for a run that failed before deciding. */
+export type CrispTriageItem = {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "succeeded" | "failed" | "duplicate";
+  error: string | null;
+  sessionId: string;
+  outcome: CrispOutcome | null;
+  /** Whether an operator has opened or marked it as read. */
+  read: boolean;
+};
+
+export type CrispStats = {
+  windowDays: number;
+  byDecision: Record<CrispDecision, number>;
+  /** Runs that ended without a decision, such as the ones that failed before classifying. */
+  withoutDecision: number;
+  total: number;
+  /** Conversations nobody has read yet, over all time. */
+  unread: number;
+};
+
+const toCrispItem = (run: StoredRun): CrispTriageItem => {
+  const parsed = crispOutcomeSchema.safeParse(run.outcome);
+  return {
+    id: run.id,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    status: run.status,
+    error: run.error,
+    sessionId: parsed.success ? parsed.data.sessionId : run.externalId.replace(/:(triage|resolved)$/, ""),
+    outcome: parsed.success ? parsed.data : null,
+    read: Boolean(run.readAt),
+  };
+};
 
 const level = z.enum(["info", "warn", "error"]);
 const status = z.enum(["running", "succeeded", "failed", "duplicate"]);
@@ -135,6 +178,59 @@ export const appRouter = {
         if (!found || found.run.project !== inProject(context, input.project)) throw new ORPCError("NOT_FOUND");
         return found;
       }),
+  },
+
+  crisp: {
+    list: adminProcedure
+      .input(z.object({ project, decision: z.enum(CRISP_DECISIONS).optional(), unread: z.boolean().optional(), search: text, ...page }))
+      .output(type<Page<CrispTriageItem>>())
+      .handler(({ input, context }) => {
+        const found = context.activity.queryRuns({
+          project: inProject(context, input.project),
+          automation: CRISP_TRIAGE,
+          decision: input.decision,
+          unread: input.unread,
+          search: input.search,
+          before: input.before,
+          limit: input.limit,
+        });
+        return {
+          // Left out: a repeated trigger (a duplicate run with no decision of its own) and runs that finished before
+          // outcomes were recorded. Neither tells the team anything here, and both stay in Runs.
+          items: found.items.filter((run) => run.status !== "duplicate" && (run.outcome || run.status !== "succeeded")).map(toCrispItem),
+          nextCursor: found.nextCursor,
+        };
+      }),
+    stats: adminProcedure
+      .input(z.object({ project, windowDays: z.number().int().min(1).max(90).default(30) }))
+      .output(type<CrispStats>())
+      .handler(({ input, context }) => {
+        const since = new Date(Date.now() - input.windowDays * 86_400_000).toISOString();
+        const counts = context.activity.decisionCounts({ project: inProject(context, input.project), automation: CRISP_TRIAGE, sinceIso: since });
+        const byDecision = Object.fromEntries(CRISP_DECISIONS.map((d) => [d, counts[d] ?? 0])) as Record<CrispDecision, number>;
+        return {
+          windowDays: input.windowDays,
+          byDecision,
+          withoutDecision: counts.none ?? 0,
+          total: Object.values(counts).reduce((a, b) => a + b, 0),
+          unread: context.activity.unreadCount({ project: inProject(context, input.project), automation: CRISP_TRIAGE }),
+        };
+      }),
+    markRead: adminProcedure
+      .input(z.object({ project, id: z.string().min(1), read: z.boolean() }))
+      .output(type<{ read: boolean }>())
+      .handler(({ input, context }) => {
+        const found = context.activity.getRun(input.id);
+        if (!found || found.run.project !== inProject(context, input.project) || found.run.automation !== CRISP_TRIAGE) throw new ORPCError("NOT_FOUND");
+        context.activity.setRunRead(input.id, input.read ? new Date().toISOString() : null);
+        return { read: input.read };
+      }),
+    markAllRead: adminProcedure
+      .input(z.object({ project }))
+      .output(type<{ changed: number }>())
+      .handler(({ input, context }) => ({
+        changed: context.activity.markRunsRead({ project: inProject(context, input.project), automation: CRISP_TRIAGE, readAt: new Date().toISOString() }),
+      })),
   },
 
   actions: {

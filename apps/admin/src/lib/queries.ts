@@ -7,14 +7,16 @@ import {
   getOverview,
   getRun,
   getSettings,
+  getCrispStats,
   getSystem,
   getWorkflowStatus,
   listActionRuns,
+  listCrisp,
   listLogs,
   listRuns,
   listWorkflowTemplates,
 } from "./api.functions"
-import type { ActionState, ActionsSearch, LogsSearch, RunsSearch, WindowKey } from "./filters"
+import type { ActionState, ActionsSearch, CrispSearch, LogsSearch, RunsSearch, WindowKey } from "./filters"
 
 const retryServerErrorOnce = (count: number, error: unknown) =>
   count < 1 && error instanceof Error && error.message === "SERVER_ERROR"
@@ -51,6 +53,26 @@ export const runsQuery = (project: string, filters: RunsSearch) =>
     queryFn: ({ pageParam }) => listRuns({ data: { ...filters, project, before: pageParam, limit: 50 } }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
+    retry: retryServerErrorOnce,
+  })
+
+const CRISP_POLL_MS = 10_000
+
+export const crispQuery = (project: string, filters: CrispSearch) =>
+  infiniteQueryOptions({
+    queryKey: [project, "crisp", filters],
+    queryFn: ({ pageParam }) => listCrisp({ data: { ...filters, project, before: pageParam, limit: 30 } }),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    refetchInterval: CRISP_POLL_MS,
+    retry: retryServerErrorOnce,
+  })
+
+export const crispStatsQuery = (project: string) =>
+  queryOptions({
+    queryKey: [project, "crisp-stats"],
+    queryFn: () => getCrispStats({ data: { project } }),
+    refetchInterval: CRISP_POLL_MS,
     retry: retryServerErrorOnce,
   })
 

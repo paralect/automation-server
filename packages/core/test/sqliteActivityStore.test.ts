@@ -274,3 +274,69 @@ describe("projects", () => {
     }
   });
 });
+
+describe("run outcomes", () => {
+  test("a reported outcome is stored on the run and can be filtered and counted by its decision", () => {
+    const s = make();
+    const finish = (externalId: string, outcome?: Record<string, unknown>, status: "succeeded" | "failed" = "succeeded") =>
+      s.finishRun(s.startRun(runStart({ externalId })), { status, finishedAt: "2026-01-01T00:00:01.000Z", outcome });
+    finish("a", { decision: "issue", issue: { number: 7 } });
+    finish("b", { decision: "drop" });
+    finish("c", { decision: "issue" }, "failed");
+    finish("d");
+
+    const issues = s.queryRuns({ decision: "issue", limit: 10 }).items;
+    expect(issues.map((r) => r.externalId).sort()).toEqual(["a", "c"]);
+    expect(issues.find((r) => r.externalId === "a")?.outcome).toEqual({ decision: "issue", issue: { number: 7 } });
+    expect(s.queryRuns({ limit: 10 }).items.find((r) => r.externalId === "d")?.outcome).toBeNull();
+    expect(s.decisionCounts({ automation: "a", sinceIso: "2025-01-01T00:00:00.000Z" })).toEqual({ issue: 2, drop: 1 });
+    expect(s.decisionCounts({ automation: "other", sinceIso: "2025-01-01T00:00:00.000Z" })).toEqual({});
+  });
+
+  test("an existing database without the outcome column is upgraded in place", () => {
+    const dir = mkdtempSync(join(tmpdir(), "outcome-"));
+    try {
+      const path = join(dir, "a.db");
+      const old = new Database(path);
+      old.run(`CREATE TABLE runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, automation TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL, external_id TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error TEXT)`);
+      old.run("INSERT INTO runs (id, automation, source, kind, external_id, status, started_at) VALUES ('r', 'a', 's', 'k', 'e', 'succeeded', '2026-01-01T00:00:00.000Z')");
+      old.close();
+      const s = createSqliteActivityStore({ path });
+      open.push(s);
+      expect(s.queryRuns({ limit: 10 }).items[0]?.outcome).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("read state", () => {
+  test("runs start unread and can be marked read, unread again, filtered and counted", () => {
+    const s = make();
+    const done = (externalId: string, outcome?: Record<string, unknown>) => {
+      const id = s.startRun(runStart({ automation: "triage", externalId }));
+      s.finishRun(id, { status: "succeeded", finishedAt: "2026-01-01T00:00:01.000Z", outcome });
+      return id;
+    };
+    const a = done("a", { decision: "issue" });
+    done("b", { decision: "drop" });
+    done("legacy"); // finished before outcomes existed: never counted
+    const q = { automation: "triage" };
+
+    expect(s.unreadCount(q)).toBe(2);
+    expect(s.queryRuns({ unread: true, limit: 10 }).items).toHaveLength(3);
+
+    expect(s.setRunRead(a, "2026-01-02T00:00:00.000Z")).toBe(true);
+    expect(s.unreadCount(q)).toBe(1);
+    expect(s.queryRuns({ unread: true, limit: 10 }).items.map((r) => r.externalId).sort()).toEqual(["b", "legacy"]);
+    expect(s.queryRuns({ limit: 10 }).items.find((r) => r.id === a)?.readAt).toBe("2026-01-02T00:00:00.000Z");
+
+    expect(s.setRunRead(a, null)).toBe(true);
+    expect(s.unreadCount(q)).toBe(2);
+    expect(s.setRunRead("missing", "2026-01-02T00:00:00.000Z")).toBe(false);
+
+    expect(s.markRunsRead({ ...q, readAt: "2026-01-03T00:00:00.000Z" })).toBe(2);
+    expect(s.unreadCount(q)).toBe(0);
+    expect(s.markRunsRead({ ...q, readAt: "2026-01-03T00:00:00.000Z" })).toBe(0);
+  });
+});

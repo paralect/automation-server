@@ -4,6 +4,9 @@ import { z } from "zod"
 import type { IntegrationView } from "@automation-server/api/routers/index"
 
 export type {
+  CrispOutcome,
+  CrispStats,
+  CrispTriageItem,
   IntegrationLink,
   InstallMode,
   InstallOutcome,
@@ -22,7 +25,7 @@ export type {
 import { callAutomation } from "@/server/automation-client.server"
 import { rememberProject } from "@/server/project.server"
 import { requireAuth } from "./auth.middleware"
-import { actionRunInput, actionsInput, logsInput, runsInput, WINDOWS, windowInput } from "./filters"
+import { actionRunInput, actionsInput, crispInput, logsInput, runsInput, WINDOWS, windowInput } from "./filters"
 
 const authed = createServerFn({ method: "GET", strict: { input: true, output: false } }).middleware([requireAuth])
 const authedPost = createServerFn({ method: "POST", strict: { input: true, output: false } }).middleware([requireAuth])
@@ -69,6 +72,18 @@ export const getRun = authed
   .handler(({ data }) =>
     callAutomation((api) => api.runs.get(data), { notFoundIsExpected: true })
   )
+
+export const listCrisp = authed.validator(inProject.extend(crispInput.shape)).handler(({ data: { q, ...rest } }) =>
+  callAutomation((api) => api.crisp.list({ ...rest, search: q }))
+)
+
+export const markCrispRead = authedPost
+  .validator(inProject.extend({ id: z.string().min(1), read: z.boolean() }))
+  .handler(({ data }) => callAutomation((api) => api.crisp.markRead(data)))
+
+export const markAllCrispRead = authedPost.validator(inProject).handler(({ data }) => callAutomation((api) => api.crisp.markAllRead(data)))
+
+export const getCrispStats = authed.validator(inProject).handler(({ data }) => callAutomation((api) => api.crisp.stats(data)))
 
 export const getSystem = authed.validator(inProject).handler(({ data }) => callAutomation((api) => api.system(data)))
 

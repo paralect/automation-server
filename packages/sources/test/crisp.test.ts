@@ -137,6 +137,23 @@ describe("crisp enrich", () => {
     });
   });
 
+  test("follows timestamp_before while pages are full", async () => {
+    const page = (from: number) =>
+      Array.from({ length: 20 }, (_, i) => ({ type: "text", from: "user", content: `m${from - i}`, timestamp: from - i }));
+    const urls: string[] = [];
+    const fn = (async (input: string | URL) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.endsWith(`/conversation/${SESSION}`)) return new Response(JSON.stringify({ data: { meta: {}, segments: [] } }));
+      const body = url.includes("timestamp_before=981") ? [{ type: "text", from: "user", content: "first", timestamp: 5 }] : page(1000);
+      return new Response(JSON.stringify({ data: body }));
+    }) as unknown as typeof fetch;
+    const enriched = (await source(fn).enrich!(parsed())) as CrispSessionEvent;
+    expect(enriched.payload.request?.messages).toHaveLength(21);
+    expect(enriched.payload.request?.messages[0]?.text).toBe("first");
+    expect(urls.filter((u) => u.includes("/messages"))).toHaveLength(2);
+  });
+
   test("an API failure throws without leaking the plugin key", async () => {
     const fn = (async () => new Response(JSON.stringify({ error: true, reason: "invalid_session" }), { status: 401 })) as unknown as typeof fetch;
     const err = (await source(fn).enrich!(parsed()).catch((e: Error) => e)) as Error;

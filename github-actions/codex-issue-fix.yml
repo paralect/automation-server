@@ -20,7 +20,9 @@ permissions:
   issues: write
 
 # auth.json holds a refresh token that rotates on use, so two runs in parallel
-# would invalidate each other. Runs must queue, never cancel.
+# would invalidate each other. Runs queue behind the active one and never cancel
+# it, but GitHub keeps only one pending run per group: a newer pending run
+# replaces an older one. Rerun a dropped issue from the Actions tab.
 concurrency:
   group: codex-auth
   cancel-in-progress: false
@@ -52,7 +54,11 @@ jobs:
             exit 1
           fi
 
+      # No stored credentials: the model can read the checkout, so the token
+      # must not sit in .git/config. The PR step adds it back when it pushes.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -153,6 +159,7 @@ jobs:
           branch="codex/issue-$ISSUE_NUMBER"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
           git checkout -b "$branch"
           git add -A
           git commit -m "Fix issue #$ISSUE_NUMBER: $ISSUE_TITLE" -m "Refs #$ISSUE_NUMBER"

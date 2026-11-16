@@ -75,7 +75,7 @@ export function createOpenRouterClient(config: OpenRouterConfig) {
       const { $schema: _, ...schema } = z.toJSONSchema(request.schema) as Record<string, unknown>;
       const json = await call("POST", "/chat/completions", {
         model: request.model,
-        temperature: 0,
+        // No temperature: newer models (Claude 5.x) do not accept it, and require_parameters then finds no provider.
         messages: [
           { role: "system", content: request.system },
           { role: "user", content: request.user },

@@ -31,6 +31,18 @@ const limit = z.number().int().min(1).max(200).default(50)
 export const logsInput = logsSearch.extend({ before: cursor, limit })
 export const runsInput = runsSearch.extend({ before: cursor, limit })
 
+export const CRISP_DECISIONS = ["issue", "fix", "needs_info", "answer", "drop"] as const
+export type CrispDecisionKey = (typeof CRISP_DECISIONS)[number]
+
+export const crispSearch = z.object({
+  decision: z.enum(CRISP_DECISIONS).optional().catch(undefined),
+  /** Only conversations nobody has read yet. */
+  unread: z.boolean().optional().catch(undefined),
+  q: text,
+})
+export type CrispSearch = z.infer<typeof crispSearch>
+export const crispInput = crispSearch.extend({ before: cursor, limit })
+
 export const WINDOWS = { "24h": 24, "7d": 168 } as const
 export type WindowKey = keyof typeof WINDOWS
 export const windowInput = z.object({ window: z.enum(["24h", "7d"]) })

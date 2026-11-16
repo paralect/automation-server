@@ -11,20 +11,25 @@ const ask = (f: typeof fetch) =>
 const reply = (content: string) => json(200, { choices: [{ message: { content } }] });
 
 describe("openrouter client", () => {
-  test("asks for strict JSON schema output at temperature 0 and parses the answer", async () => {
+  test("asks for strict JSON schema output and parses the answer", async () => {
     const { fn, calls } = mockFetch(() => reply('{"answer":"yes"}'));
     expect(await ask(fn)).toEqual({ answer: "yes" });
     expect(calls[0]?.url).toBe("https://openrouter.ai/api/v1/chat/completions");
     expect(calls[0]?.headers).toMatchObject({ Authorization: `Bearer ${KEY}`, "X-Title": "automation-server" });
     expect(calls[0]?.body).toMatchObject({
       model: "m/one",
-      temperature: 0,
       provider: { require_parameters: true },
       response_format: {
         type: "json_schema",
         json_schema: { name: "verdict", strict: true, schema: { type: "object", required: ["answer"], additionalProperties: false } },
       },
     });
+  });
+
+  test("sends no sampling parameters, which newer models reject", async () => {
+    const { fn, calls } = mockFetch(() => reply('{"answer":"yes"}'));
+    await ask(fn);
+    expect(calls[0]?.body).not.toHaveProperty("temperature");
   });
 
   test("invalid JSON and off-schema answers throw", async () => {

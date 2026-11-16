@@ -8,6 +8,7 @@ import type {
   LogEntry,
   LogLevel,
   Page,
+  RunOutcome,
   RunRecord,
   RunStart,
   RunStatus,
@@ -47,6 +48,8 @@ type RunRow = {
   started_at: string;
   finished_at: string | null;
   error: string | null;
+  outcome: string | null;
+  read_at: string | null;
 };
 
 const asString = (value: unknown) => (typeof value === "string" ? value : null);
@@ -70,6 +73,16 @@ const toLog = (row: LogRow): StoredLog => {
   };
 };
 
+const parseOutcome = (raw: string | null): RunOutcome | null => {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as RunOutcome) : null;
+  } catch {
+    return null;
+  }
+};
+
 const toRun = (row: RunRow): StoredRun => ({
   seq: row.seq,
   id: row.id,
@@ -82,6 +95,8 @@ const toRun = (row: RunRow): StoredRun => ({
   startedAt: row.started_at,
   finishedAt: row.finished_at,
   error: row.error,
+  outcome: parseOutcome(row.outcome),
+  readAt: row.read_at,
 });
 
 type Params = Record<string, string | number>;
@@ -117,6 +132,17 @@ function buildFilter(
 // Server-wide lines (startup, reloads) carry no project and show in every project.
 const logProject = (project: string | undefined): Filter | undefined =>
   project === undefined ? undefined : { where: "(project = $project OR project IS NULL)", params: { $project: project } };
+
+const runExtra = (q: { decision?: string; unread?: boolean }): Filter | undefined => {
+  const where: string[] = [];
+  const params: Params = {};
+  if (q.decision !== undefined) {
+    where.push("json_extract(outcome, '$.decision') = $decision");
+    params.$decision = q.decision;
+  }
+  if (q.unread) where.push("read_at IS NULL");
+  return where.length ? { where: where.join(" AND "), params } : undefined;
+};
 
 const hasColumn = (db: Database, table: string, column: string) =>
   (db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
@@ -162,6 +188,8 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       if (legacyProject) db.query(`UPDATE ${table} SET project = $project`).run({ $project: legacyProject });
     }
   })();
+  if (!hasColumn(db, "runs", "outcome")) db.run("ALTER TABLE runs ADD COLUMN outcome TEXT");
+  if (!hasColumn(db, "runs", "read_at")) db.run("ALTER TABLE runs ADD COLUMN read_at TEXT");
   db.run("CREATE INDEX IF NOT EXISTS logs_project_id ON logs (project, id)");
   db.run("CREATE INDEX IF NOT EXISTS runs_project_seq ON runs (project, seq)");
 
@@ -174,8 +202,9 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
      VALUES ($id, $project, $automation, $source, $kind, $externalId, $status, $startedAt, $finishedAt)`,
   );
   const finishStmt = db.query(
-    "UPDATE runs SET status = $status, finished_at = $finishedAt, error = $error WHERE id = $id AND status = 'running'",
+    "UPDATE runs SET status = $status, finished_at = $finishedAt, error = $error, outcome = $outcome WHERE id = $id AND status = 'running'",
   );
+  const setReadStmt = db.query("UPDATE runs SET read_at = $readAt WHERE id = $id");
   const interruptStmt = db.query(
     "UPDATE runs SET status = 'failed', finished_at = $finishedAt, error = 'interrupted by server restart' WHERE status = 'running'",
   );
@@ -234,8 +263,8 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       });
     },
     startRun: (run) => start(run, "running", null),
-    finishRun(id, { status, error, finishedAt }) {
-      finishStmt.run({ $id: id, $status: status, $finishedAt: finishedAt, $error: error ?? null });
+    finishRun(id, { status, error, finishedAt, outcome }) {
+      finishStmt.run({ $id: id, $status: status, $finishedAt: finishedAt, $error: error ?? null, $outcome: outcome ? JSON.stringify(outcome) : null });
     },
     recordDuplicate: (run) => start(run, "duplicate", run.startedAt),
     queryLogs(q) {
@@ -256,8 +285,37 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
         q.search,
         q.before,
         "seq",
+        runExtra(q),
       );
       return paginate<RunRow, StoredRun>("runs", "seq", filter, q.limit, toRun, (r) => r.seq);
+    },
+    setRunRead: (id, readAt) => setReadStmt.run({ $id: id, $readAt: readAt }).changes > 0,
+    markRunsRead({ project, automation, readAt }) {
+      const scope = project === undefined ? "" : "AND project = $project";
+      return db
+        .query(`UPDATE runs SET read_at = $readAt WHERE automation = $automation AND read_at IS NULL AND (outcome IS NOT NULL OR status = 'failed') ${scope}`)
+        .run({ $readAt: readAt, $automation: automation, ...(project === undefined ? {} : { $project: project }) }).changes;
+    },
+    unreadCount({ project, automation }) {
+      const scope = project === undefined ? "" : "AND project = $project";
+      return (
+        db
+          .query<{ n: number }, Params>(
+            `SELECT COUNT(*) AS n FROM runs WHERE automation = $automation AND read_at IS NULL AND (outcome IS NOT NULL OR status = 'failed') ${scope}`,
+          )
+          .get({ $automation: automation, ...(project === undefined ? {} : { $project: project }) })?.n ?? 0
+      );
+    },
+    decisionCounts({ project, automation, sinceIso }) {
+      const scope = project === undefined ? "" : "AND project = $project";
+      const rows = db
+        .query<{ decision: string | null; n: number }, Params>(
+          `SELECT json_extract(outcome, '$.decision') AS decision, COUNT(*) AS n FROM runs
+           WHERE automation = $automation AND started_at >= $since AND (outcome IS NOT NULL OR status = 'failed') ${scope}
+           GROUP BY decision`,
+        )
+        .all({ $automation: automation, $since: sinceIso, ...(project === undefined ? {} : { $project: project }) });
+      return Object.fromEntries(rows.map((r) => [r.decision ?? "none", r.n]));
     },
     getRun(id) {
       const row = runById.get({ $id: id });

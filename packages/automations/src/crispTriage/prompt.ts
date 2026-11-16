@@ -41,7 +41,7 @@ export function systemPrompt(areas: readonly string[]): string {
     "account_billing: payments, plans, access. how_to: the customer does not know how to do something the product supports.",
     `Severity is one of: ${SEVERITIES.join(", ")}. blocker means the customer cannot use a core part of the product.`,
     `Area is the product area, one of: ${areaList}. Use ${UNKNOWN_AREA} when none fits.`,
-    "Fill repro only when the conversation states the steps, the expected and the actual result. Otherwise repro is null and missing lists the questions to ask.",
+    "Fill repro only when the conversation states the steps, the expected and the actual result. Otherwise repro is null and missing lists the questions to ask. When repro is filled, leave missing empty unless an answer is essential to reproduce the problem.",
     "Write summary, repro, missing and answerDraft in English, without names, emails, phone numbers or other personal data.",
     "Evidence holds short verbatim quotes from the conversation that support your verdict.",
     "Confidence is how sure you are of the category, from 0 to 1. Be honest: a vague conversation gets a low confidence.",
