@@ -77,6 +77,35 @@ export const INTEGRATIONS = {
       { key: "reportTitle", label: "Report title", kind: "text", default: "Weekly PostHog report" },
     ],
   },
+  openrouter: {
+    id: "openrouter",
+    title: "OpenRouter",
+    description: "LLM access for automations that classify text, such as Crisp triage.",
+    fields: [
+      { key: "apiKey", label: "API key", kind: "secret", required: true, help: "An OpenRouter API key. Set a credit limit on it." },
+      { key: "triageModel", label: "Triage model", kind: "text", default: "anthropic/claude-haiku-5.5", help: "Fast model for the first pass. Must support structured outputs." },
+      { key: "escalationModel", label: "Escalation model", kind: "text", default: "anthropic/claude-sonnet-5.5", help: "Stronger model for bugs and unsure verdicts." },
+    ],
+  },
+  crisp: {
+    id: "crisp",
+    title: "Crisp",
+    description: "Triages Crisp conversations into a private note, a GitHub issue or a Codex fix.",
+    webhookSource: "crisp",
+    fields: [
+      { key: "websiteId", label: "Website ID", kind: "text", required: true },
+      { key: "pluginIdentifier", label: "Plugin token identifier", kind: "text", required: true, help: "From the plugin's production token in the Crisp Marketplace." },
+      { key: "pluginKey", label: "Plugin token key", kind: "secret", required: true, help: "Needs conversation read and write scopes." },
+      { key: "webhookSecret", label: "Web Hooks signing secret", kind: "secret", required: true, help: "Verifies X-Crisp-Signature." },
+      { key: "triggerSegment", label: "Trigger segment", kind: "text", default: "triage", help: "Adding this segment to a conversation starts the triage." },
+      { key: "autoTriage", label: "Triage resolved conversations", kind: "boolean", default: false, help: "Also triage every conversation marked resolved." },
+      { key: "mode", label: "Mode", kind: "select", options: ["shadow", "issue", "fix"], default: "shadow", help: "shadow only posts a note. issue also opens GitHub issues. fix also starts the Codex fix workflow." },
+      { key: "minConfidence", label: "Minimum confidence", kind: "number", default: 0.7, min: 0, max: 1, help: "Below this the verdict becomes needs_info." },
+      { key: "areas", label: "Product areas", kind: "list", help: "The closed list of areas the classifier picks from." },
+      { key: "autofixAreas", label: "Autofix areas", kind: "list", help: "Areas whose bugs may go to the Codex fix workflow. Empty means none." },
+      { key: "workflowFile", label: "Workflow file", kind: "text", default: "codex-issue-fix.yml" },
+    ],
+  },
 } as const satisfies Record<string, IntegrationSpec>;
 
 export type Integrations = typeof INTEGRATIONS;

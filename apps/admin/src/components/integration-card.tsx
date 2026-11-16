@@ -31,6 +31,7 @@ const LOGOS: Record<string, string> = {
   sentry: "/integrations/sentry.svg",
   linear: "/integrations/linear.svg",
   posthog: "/integrations/posthog.svg",
+  crisp: "/integrations/crisp.svg",
 }
 
 /**
@@ -317,6 +318,7 @@ function PlainInput({
       type={field.kind === "number" ? "number" : "text"}
       min={field.min}
       max={field.max}
+      step={field.kind === "number" ? "any" : undefined}
       value={text}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}

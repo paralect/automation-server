@@ -124,6 +124,12 @@ describe("planUpdate", () => {
     expect(() => planUpdate("sentry", { clear: ["bogus"] })).toThrow(SettingsInputError);
   });
 
+  test("a fractional number between its bounds is accepted, one outside is not", () => {
+    expect(planUpdate("crisp", { values: { minConfidence: 0.65 } }).set).toEqual([{ key: "crisp.minConfidence", json: "0.65", secret: false }]);
+    expect(() => planUpdate("crisp", { values: { minConfidence: 1.5 } })).toThrow(SettingsInputError);
+    expect(() => planUpdate("crisp", { values: { mode: "yolo" } })).toThrow(SettingsInputError);
+  });
+
   test("accepts valid typed values", () => {
     const plan = planUpdate("posthog", { values: { dayOfWeek: 3, hourUtc: 14, enabled: true, projectId: " 42 " } });
     expect(plan.set.map((w) => [w.key, w.json])).toEqual([
