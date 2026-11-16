@@ -126,9 +126,10 @@ export function CrispRow({ item, selected, onOpen }: { item: CrispTriageItem; se
         onClick={onOpen}
         aria-current={selected ? "true" : undefined}
         className={cn(
-          "grid w-full grid-cols-[0.75rem_9rem_1fr_auto] items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-          selected && "bg-muted/60",
-          !item.read && "bg-primary/[0.04]"
+          "grid w-full grid-cols-[0.75rem_9rem_1fr_auto] items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+          // Unread rows are white, read ones gray.
+          item.read ? "bg-muted hover:bg-muted/70" : "bg-background hover:bg-muted/40",
+          selected && "ring-2 ring-inset ring-primary/40"
         )}
       >
         <span
