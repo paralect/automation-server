@@ -21,6 +21,11 @@ describe("redactText", () => {
     ["suffix key", "access_token: abc123", "access_token: [redacted]"],
     ["hex token", "id 0123456789abcdef0123456789abcdef end", "id [redacted] end"],
     ["mixed token", "k Zm9vYmFyQmF6UXV4MTIzNDU2Nzg5MEFiQ2RFZg end", "k [redacted] end"],
+    ["card spaced", "card 4242 4242 4242 4242 declined", "card [card] declined"],
+    ["card plain", "paid with 5555555555554444.", "paid with [card]."],
+    ["phone international", "call me at +44 20 7946 0958 please", "call me at [phone] please"],
+    ["phone e164", "whatsapp +14155552671", "whatsapp [phone]"],
+    ["phone local", "my number is (415) 555-2671 or 415.555.2671", "my number is [phone] or [phone]"],
     ["url query", "GET https://a.com/p/q?id=7&email=x end", "GET https://a.com/p/q?[redacted] end"],
   ];
   for (const [name, input, expected] of cases) {
@@ -51,6 +56,12 @@ describe("redactText", () => {
       "999.1.1.1 is not an ip",
       "1.2.3.4.5",
       "Unexpected token < in JSON at position 0",
+      "order 1234567890123 shipped",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01 00:00:00",
+      "Sentry Issue: 1117540176",
+      "version 2026.11.16",
+      "math 3 + 4 = 7",
     ];
     for (const s of keep) test(s, () => expect(redactText(s)).toBe(s));
   });

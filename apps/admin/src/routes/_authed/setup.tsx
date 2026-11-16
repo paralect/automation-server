@@ -321,6 +321,16 @@ const GUIDES: Record<(typeof SERVICE_IDS)[number], Guide> = {
       "Fill in Host, Project ID, Personal API key and Slack webhook URL on the PostHog integration. Use Preview report to try it.",
     ],
   },
+  crisp: {
+    lead: "Triages Crisp conversations into a private note, a GitHub issue or a Codex fix.",
+    steps: (webhook) => [
+      "In the Crisp Marketplace, create a plugin, request a production token with conversation read and write scopes, and install the plugin on your website.",
+      <>Under Web Hooks, add {webhook ? <Code>{webhook}</Code> : "the webhook URL shown on the Crisp integration page"} for the session:set_segments and session:set_state events.</>,
+      "Copy the Website ID, the token identifier and key, and the Web Hooks signing secret into the Crisp integration.",
+      "Set an API key on the OpenRouter integration. Triage starts in shadow mode, which only posts private notes.",
+      "Add the trigger segment, triage by default, to a conversation to triage it.",
+    ],
+  },
 }
 
 function ServicesStep({

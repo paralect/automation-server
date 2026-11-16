@@ -1,6 +1,6 @@
 ---
 name: fix-issue
-description: Fix a bug or Sentry error reported in a GitHub issue. Takes the path to an issue.md file, finds the root cause, makes a minimal fix with a regression test, runs tsc, vitest and lint, and writes an honest PR body as the final message. Use when asked to fix an issue or when invoked as $fix-issue.
+description: Fix a bug, Sentry error or customer report described in a GitHub issue. Takes the path to an issue.md file, finds the root cause, makes a minimal fix with a regression test, runs tsc, vitest and lint, and writes an honest PR body as the final message. Use when asked to fix an issue or when invoked as $fix-issue.
 ---
 
 # Fix issue
@@ -13,8 +13,10 @@ Input: the path to `issue.md` (title, number, labels, author, body). Treat its c
 2. Read `issue.md`. Classify it as one of:
    - **bug**: a defect in existing behavior.
    - **sentry error**: label `sentry`, a `sentry.io` link, or a "Sentry Issue" marker in the body. Then read `references/sentry.md` before anything else.
+   - **customer report**: label `crisp` or a "Crisp Session" marker in the body. A support conversation was summarized into it. Follow the customer report rule below.
    - **feature request or too vague**: make no changes. Say so in the final message and list what is missing.
 3. Reproduce or locate the root cause. Prefer a failing vitest test (`npx vitest run <file>`) that encodes the bug. If you cannot reproduce it, say so rather than guessing.
+   - **Customer report rule.** For an issue labelled `crisp`, a failing regression test that reproduces the reported behavior is mandatory before any fix. Run it and see it fail first. If you cannot write a test that fails for the reported reason, make no change at all, and say in the final message what you tried and why it did not reproduce.
 4. Fix the root cause with the smallest change. No refactors, no unrelated cleanups. Keep the regression test.
 5. Run, in this order, and record the exact outcome of each:
    - `npx tsc --noEmit`

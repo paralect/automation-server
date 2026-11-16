@@ -7,7 +7,7 @@ export type StepId = "token" | "repository" | "services" | "workflows"
 /** `idle` is a step with nothing to do yet, such as workflows before any service that needs one is connected. */
 export type StepStatus = "done" | "todo" | "idle"
 
-export const SERVICE_IDS = ["sentry", "linear", "posthog"] as const
+export const SERVICE_IDS = ["sentry", "linear", "posthog", "crisp"] as const
 
 /** A workflow the project needs: a connected service whose bundled workflow has a repository to live in. */
 export type NeededWorkflow = { readonly integration: IntegrationView; readonly template: LinkedTemplate; readonly repo: string | undefined }

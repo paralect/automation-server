@@ -5,7 +5,7 @@ import { isSentryIssueAlert } from "@automation-server/sources/sentry/event";
 import { createGithubClient } from "../github";
 import { shouldHandle } from "./config";
 import type { SentryToGithubIssueConfig } from "./config";
-import { formatIssue } from "./format";
+import { formatIssue, sentryMarker } from "./format";
 
 export const SENTRY_TO_GITHUB_ISSUE = "sentry-to-github-issue";
 
@@ -23,7 +23,7 @@ export function createSentryToGithubIssue(config: SentryToGithubIssueConfig): Au
         return;
       }
 
-      const existing = await github.findOpenIssueBySentryId(alert.issueId);
+      const existing = await github.findOpenIssueByMarker("sentry", sentryMarker(alert.issueId));
       if (existing) {
         log.info("open github issue already exists", { issueId: alert.issueId, url: existing });
         return;

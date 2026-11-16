@@ -22,6 +22,8 @@ const clean = (s: string | null | undefined, max: number): string => truncate(si
 const orUnknown = (s: string | null | undefined, max = 300): string => (s ? clean(s, max) || "unknown" : "unknown");
 const labelPart = (s: string): string => s.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").slice(0, 40);
 
+export const sentryMarker = (issueId: string): string => `Sentry Issue: ${singleLine(issueId)}`;
+
 export function sentryIssueLink(alert: SentryIssueAlert): string {
   if (alert.issue?.permalink) return redactUrl(alert.issue.permalink);
   if (alert.eventWebUrl) {
@@ -118,7 +120,7 @@ export function formatIssue(alert: SentryIssueAlert, options: FormatOptions = {}
 
   const body = [
     sentryIssueLink(alert),
-    `Sentry Issue: ${singleLine(alert.issueId)}`,
+    sentryMarker(alert.issueId),
     "",
     `- Level: ${orUnknown(alert.level)}`,
     `- Environment: ${orUnknown(alert.environment)}`,

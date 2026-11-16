@@ -92,12 +92,11 @@ export function createGithubClient(config: GithubClientConfig) {
       for (const l of labels) await ensureLabel(typeof l === "string" ? { name: l } : l);
     },
 
-    // Lists open `sentry` issues instead of using search: search is rate limited, lags behind new issues, and
+    // Lists open issues by label instead of using search: search is rate limited, lags behind new issues, and
     // is rejected for some fine-grained tokens that can otherwise read the repo.
-    async findOpenIssueBySentryId(issueId: string): Promise<string | null> {
-      const marker = `Sentry Issue: ${issueId}`;
+    async findOpenIssueByMarker(label: string, marker: string): Promise<string | null> {
       for (let page = 1; page <= MAX_PAGES; page++) {
-        const path = `${repoPath}/issues?state=open&labels=sentry&per_page=${PAGE_SIZE}&page=${page}`;
+        const path = `${repoPath}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=${PAGE_SIZE}&page=${page}`;
         const res = await request("GET", path);
         if (!res.ok) throw await fail("GET", path, res);
         const items = issueList.parse(await res.json());
