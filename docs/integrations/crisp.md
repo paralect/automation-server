@@ -19,7 +19,7 @@ Turns a Crisp conversation into a triage verdict. An operator adds a segment to 
    | Condition | Decision |
    | --- | --- |
    | spam | drop |
-   | bug or regression with missing information or no repro, or confidence below the minimum | needs_info |
+   | bug or regression without reproduction steps, or confidence below the minimum | needs_info |
    | how_to | answer (draft in the note) |
    | feature_request, performance, data_fix, account_billing | issue |
    | bug or regression, not a blocker, area in Autofix areas | fix |

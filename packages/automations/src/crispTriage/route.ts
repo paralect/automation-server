@@ -29,7 +29,7 @@ export const ROUTES: readonly Route[] = [
   {
     name: "incomplete",
     when: ({ triage, minConfidence }) =>
-      (isBug(triage) && (triage.missing.length > 0 || triage.repro === null)) || triage.confidence < minConfidence,
+      (isBug(triage) && triage.repro === null) || triage.confidence < minConfidence,
     decide: ({ triage }) => ({ kind: "needs_info", questions: triage.missing.length > 0 ? triage.missing : [FALLBACK_QUESTION] }),
   },
   {
