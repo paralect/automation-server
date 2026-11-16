@@ -19,8 +19,8 @@ Turns a Crisp conversation into a triage verdict. An operator adds a segment to 
    | Condition | Decision |
    | --- | --- |
    | spam | drop |
-   | how_to | answer (draft in the note) |
    | bug or regression with missing information or no repro, or confidence below the minimum | needs_info |
+   | how_to | answer (draft in the note) |
    | feature_request, performance, data_fix, account_billing | issue |
    | bug or regression, not a blocker, area in Autofix areas | fix |
    | bug or regression | issue |
@@ -90,6 +90,6 @@ These follow Crisp's documentation by name but their exact shape is not document
 
 ## Limits
 
-- Only the latest batch of messages is read. Older pages are not followed.
+- Only the latest five pages of messages (about 100) are read.
 - Attachments are never sent to the LLM or GitHub.
-- A failed run releases its claim, but Crisp does not redeliver. Remove the status segment if any, then remove and re-add the trigger segment to retry. When the issue was already created, the retry finds it and drops the request as a duplicate.
+- If starting the fix workflow fails, the note says so and the run fails. The issue exists, so run the workflow by hand for it. GitHub keeps one pending run per concurrency group, so a burst of fixes can drop a queued one. Otherwise a failed run releases its claim, but Crisp does not redeliver. Remove the status segment if any, then remove and re-add the trigger segment to retry. When the issue was already created, the retry finds it and drops the request as a duplicate.

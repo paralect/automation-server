@@ -113,6 +113,7 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
 
       let issueUrl: string | undefined;
       let dispatched = false;
+      let dispatchError: unknown;
       if (writes && github && verdict && (decision.kind === "issue" || decision.kind === "fix")) {
         const issue = formatIssue(request, verdict, decision);
         await github.ensureLabels(issue.labels);
@@ -122,17 +123,24 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
         if (decision.kind === "fix") {
           try {
             await github.dispatchWorkflow(config.workflowFile, await github.defaultBranch(), { issue_number: String(created.number) });
+            dispatched = true;
+            log.info("dispatched workflow", { sessionId, number: created.number, workflow: config.workflowFile, repo: repoName });
           } catch (err) {
-            throw actionable(err, repoName, config.workflowFile);
+            // The issue exists, so a retry would only find it as a duplicate. Tell the operator now, fail the run after.
+            dispatchError = actionable(err, repoName, config.workflowFile);
           }
-          dispatched = true;
-          log.info("dispatched workflow", { sessionId, number: created.number, workflow: config.workflowFile, repo: repoName });
         }
       }
 
-      await crisp.addNote(sessionId, formatNote({ decision, mode: config.mode, github: writes, verdict, issueUrl, dispatched }));
-      await crisp.setSegments(sessionId, [...new Set([...request.segments, statusSegment(decision)])]);
+      await crisp.addNote(
+        sessionId,
+        formatNote({ decision, mode: config.mode, github: writes, verdict, issueUrl, dispatched, dispatchFailed: dispatchError !== undefined }),
+      );
+      // The triage can take a while, so merge into the segments as they are now, not as they were when it started.
+      const current = await crisp.conversation(sessionId);
+      await crisp.setSegments(sessionId, [...new Set([...current.segments, statusSegment(decision)])]);
       log.info("posted crisp note", { sessionId, segment: statusSegment(decision) });
+      if (dispatchError !== undefined) throw dispatchError;
     },
   });
 }

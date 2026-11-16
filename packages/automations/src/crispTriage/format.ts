@@ -80,10 +80,11 @@ export type NoteInput = {
   readonly verdict: Verdict | null;
   readonly issueUrl?: string;
   readonly dispatched?: boolean;
+  readonly dispatchFailed?: boolean;
 };
 
 /** A private note for operators. It is never sent to the customer. */
-export function formatNote({ decision, mode, github, verdict, issueUrl, dispatched }: NoteInput): string {
+export function formatNote({ decision, mode, github, verdict, issueUrl, dispatched, dispatchFailed }: NoteInput): string {
   const lines = [AUTOMATION_NOTE_PREFIX];
   if (verdict) {
     const t = verdict.triage;
@@ -104,7 +105,8 @@ export function formatNote({ decision, mode, github, verdict, issueUrl, dispatch
     case "issue":
     case "fix":
       if (issueUrl) lines.push(`GitHub issue: ${issueUrl}`);
-      if (dispatched) lines.push("The Codex fix workflow was started and opens a draft PR if it can reproduce the bug.");
+      if (dispatched) lines.push("The Codex fix workflow was queued. It opens a draft PR if it can reproduce the bug. Check the Actions tab, a busy queue can drop a pending run.");
+      if (dispatchFailed) lines.push("The Codex fix workflow could not be started. Run it by hand for this issue from the Actions tab.");
       break;
   }
   if (!github && (decision.kind === "issue" || decision.kind === "fix")) {

@@ -27,15 +27,15 @@ const FALLBACK_QUESTION = "Could you describe the steps you took, what you expec
 export const ROUTES: readonly Route[] = [
   { name: "spam", when: ({ triage }) => triage.category === "spam", decide: () => ({ kind: "drop", reason: "spam" }) },
   {
-    name: "how_to",
-    when: ({ triage }) => triage.category === "how_to",
-    decide: ({ triage }) => ({ kind: "answer", draft: triage.answerDraft ?? "" }),
-  },
-  {
     name: "incomplete",
     when: ({ triage, minConfidence }) =>
       (isBug(triage) && (triage.missing.length > 0 || triage.repro === null)) || triage.confidence < minConfidence,
     decide: ({ triage }) => ({ kind: "needs_info", questions: triage.missing.length > 0 ? triage.missing : [FALLBACK_QUESTION] }),
+  },
+  {
+    name: "how_to",
+    when: ({ triage }) => triage.category === "how_to",
+    decide: ({ triage }) => ({ kind: "answer", draft: triage.answerDraft ?? "" }),
   },
   // account_billing stops here, so it can never reach a fix.
   {

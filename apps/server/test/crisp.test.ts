@@ -148,7 +148,7 @@ describe("crisp integration", () => {
 
   test("the connection tests reach Crisp and OpenRouter", async () => {
     const t = setup();
-    expect(await t.runtime.test("default", "crisp")).toMatchObject({ ok: true, message: "Plugin token can read website Acme" });
+    expect(await t.runtime.test("default", "crisp")).toMatchObject({ ok: true, message: expect.stringContaining("Plugin token can read website Acme") });
     expect(await t.runtime.test("default", "openrouter")).toMatchObject({ ok: true, message: "OpenRouter accepted the key prod" });
   });
 });

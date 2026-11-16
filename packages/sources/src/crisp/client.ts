@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 const TIMEOUT_MS = 10_000;
+/** Crisp returns up to 20 messages per request; a full page means older ones may exist. */
+const MESSAGES_PAGE_SIZE = 20;
+const MAX_MESSAGE_PAGES = 5;
 export const CRISP_API_BASE_URL = "https://api.crisp.chat/v1";
 
 export type CrispClientOptions = {
@@ -25,24 +28,20 @@ const envelope = <T extends z.ZodType>(data: T) => z.object({ error: z.boolean()
 const websiteSchema = envelope(z.object({ name: z.string().nullish(), domain: z.string().nullish() }));
 
 const conversationSchema = envelope(
-  z
-    .object({
-      segments: z.array(z.string()).nullish(),
-      meta: z.object({ email: z.string().nullish(), segments: z.array(z.string()).nullish() }).nullish(),
-    })
-    ,
+  z.object({
+    segments: z.array(z.string()).nullish(),
+    meta: z.object({ email: z.string().nullish(), segments: z.array(z.string()).nullish() }).nullish(),
+  }),
 );
 
 const messagesSchema = envelope(
   z.array(
-    z
-      .object({
-        type: z.string(),
-        from: z.string(),
-        content: z.unknown(),
-        timestamp: z.number(),
-      })
-      ,
+    z.object({
+      type: z.string(),
+      from: z.string(),
+      content: z.unknown(),
+      timestamp: z.number(),
+    }),
   ),
 );
 
@@ -102,9 +101,19 @@ export function createCrispClient(options: CrispClientOptions) {
       };
     },
 
-    /** The latest batch of messages. Crisp pages older ones with `timestamp_before`, which v1 does not follow. */
+    /** The latest messages, following `timestamp_before` back through up to five pages. */
     async messages(sessionId: string): Promise<CrispRawMessage[]> {
-      return messagesSchema.parse(await call("GET", `${conversation(sessionId)}/messages`)).data;
+      const all: CrispRawMessage[] = [];
+      let before: number | null = null;
+      for (let page = 0; page < MAX_MESSAGE_PAGES; page++) {
+        const query = before === null ? "" : `?timestamp_before=${before}`;
+        const batch = messagesSchema.parse(await call("GET", `${conversation(sessionId)}/messages${query}`)).data;
+        all.push(...batch);
+        const oldest = Math.min(...batch.map((m) => m.timestamp));
+        if (batch.length < MESSAGES_PAGE_SIZE || (before !== null && oldest >= before)) break;
+        before = oldest;
+      }
+      return all;
     },
 
     async addNote(sessionId: string, content: string): Promise<void> {
