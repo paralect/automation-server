@@ -67,7 +67,7 @@ describe("github client", () => {
         { html_url: "https://github.com/o/r/issues/2", body: "link\nSentry Issue: 4501\n- Level" },
       ]),
     );
-    expect(await make(fn).findOpenIssueBySentryId("4501")).toBe("https://github.com/o/r/issues/2");
+    expect(await make(fn).findOpenIssueByMarker("sentry", "Sentry Issue: 4501")).toBe("https://github.com/o/r/issues/2");
     const url = new URL(calls[0]!.url);
     expect(url.pathname).toBe("/repos/o/r/issues");
     expect(url.searchParams.get("state")).toBe("open");
@@ -78,7 +78,7 @@ describe("github client", () => {
     const { fn } = mockFetch(() =>
       json(200, [{ html_url: "u", body: null }, { html_url: "v", body: "Sentry Issue: 45011" }, { html_url: "p", body: "Sentry Issue: 4501", pull_request: {} }]),
     );
-    expect(await make(fn).findOpenIssueBySentryId("4501")).toBeNull();
+    expect(await make(fn).findOpenIssueByMarker("sentry", "Sentry Issue: 4501")).toBeNull();
   });
 
   test("find: follows pages until a short page and stops after finding a hit", async () => {
@@ -86,13 +86,13 @@ describe("github client", () => {
     const { fn, calls } = mockFetch((c) =>
       json(200, new URL(c.url).searchParams.get("page") === "1" ? full : [{ html_url: "hit", body: "Sentry Issue: 4501" }]),
     );
-    expect(await make(fn).findOpenIssueBySentryId("4501")).toBe("hit");
+    expect(await make(fn).findOpenIssueByMarker("sentry", "Sentry Issue: 4501")).toBe("hit");
     expect(calls).toHaveLength(2);
   });
 
   test("find: non-2xx throws", async () => {
     const { fn } = mockFetch(() => json(500, {}));
-    await expect(make(fn).findOpenIssueBySentryId("1")).rejects.toThrow("status 500");
+    await expect(make(fn).findOpenIssueByMarker("sentry", "Sentry Issue: 1")).rejects.toThrow("status 500");
   });
 
   test("createIssue returns number and url; throws on failure", async () => {
@@ -110,7 +110,7 @@ describe("github client", () => {
     const { fn } = mockFetch(() =>
       json(422, { message: "Validation Failed", errors: [{ message: "The listed users and repositories cannot be searched" }] }),
     );
-    await expect(make(fn).findOpenIssueBySentryId("1")).rejects.toThrow(
+    await expect(make(fn).findOpenIssueByMarker("sentry", "Sentry Issue: 1")).rejects.toThrow(
       "status 422: Validation Failed; The listed users and repositories cannot be searched",
     );
   });
