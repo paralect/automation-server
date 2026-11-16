@@ -1,6 +1,6 @@
 import { defineAutomation, type Automation } from "@automation-server/core/automation";
 import type { Event } from "@automation-server/core/event";
-import { createCrispClient } from "@automation-server/sources/crisp/client";
+import { createCrispClient, CrispApiError } from "@automation-server/sources/crisp/client";
 import { CRISP_SEGMENTS, isCrispSession, type CrispSessionEvent, type CustomerRequest } from "@automation-server/sources/crisp/event";
 
 import { createGithubClient, GithubApiError } from "../github";
@@ -132,14 +132,28 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
         }
       }
 
-      await crisp.addNote(
-        sessionId,
-        formatNote({ decision, mode: config.mode, github: writes, verdict, issueUrl, dispatched, dispatchFailed: dispatchError !== undefined }),
-      );
+      const note = formatNote({ decision, mode: config.mode, github: writes, verdict, issueUrl, dispatched, dispatchFailed: dispatchError !== undefined });
+      // A free Crisp plan refuses API writes with 402. That must not fail the triage: the verdict stays in the log
+      // (and in the GitHub issue), only the Crisp copy is skipped.
+      const paidOnly = async (what: string, write: () => Promise<void>): Promise<boolean> => {
+        try {
+          await write();
+          return true;
+        } catch (err) {
+          if (!(err instanceof CrispApiError) || err.status !== 402) throw err;
+          log.warn("crisp refused the write, the plan does not include it", { sessionId, what });
+          return false;
+        }
+      };
+      const noted = await paidOnly("note", () => crisp.addNote(sessionId, note));
+      if (!noted) log.info("triage note not posted to crisp", { sessionId, note });
       // The triage can take a while, so merge into the segments as they are now, not as they were when it started.
-      const current = await crisp.conversation(sessionId);
-      await crisp.setSegments(sessionId, [...new Set([...current.segments, statusSegment(decision)])]);
-      log.info("posted crisp note", { sessionId, segment: statusSegment(decision) });
+      const segment = statusSegment(decision);
+      const segmented = await paidOnly("segments", async () => {
+        const current = await crisp.conversation(sessionId);
+        await crisp.setSegments(sessionId, [...new Set([...current.segments, segment])]);
+      });
+      log.info("finished crisp write-back", { sessionId, segment, noted, segmented });
       if (dispatchError !== undefined) throw dispatchError;
     },
   });

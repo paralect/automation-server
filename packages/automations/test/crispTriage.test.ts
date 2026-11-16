@@ -184,6 +184,20 @@ describe("crisp-triage", () => {
     expect(calls.some((c) => c.startsWith("PATCH") && c.endsWith("/meta"))).toBe(true);
   });
 
+  test("a Crisp plan that refuses writes (402) does not fail the triage", async () => {
+    const base = services([JSON.stringify(triage()), JSON.stringify(triage())]).fn;
+    const logged: string[] = [];
+    const quiet: Logger = { info: (m) => void logged.push(m), warn: (m) => void logged.push(m), error: () => undefined };
+    const fn = (async (input: string | URL, init?: RequestInit) => {
+      if (String(input).includes("api.crisp.chat") && init?.method && init.method !== "GET") {
+        return json(402, { error: true, reason: "subscription_upgrade_required" });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    await make(fn).run(event(), { log: quiet });
+    expect(logged).toContain("triage note not posted to crisp");
+  });
+
   test("the status segment is merged into the segments Crisp has when the triage ends", async () => {
     const base = services([JSON.stringify(triage()), JSON.stringify(triage())]).fn;
     let patched: unknown;

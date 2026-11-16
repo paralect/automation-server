@@ -88,6 +88,10 @@ These follow Crisp's documentation by name but their exact shape is not document
 - **Inbox link.** The issue links to `https://app.crisp.chat/website/{website}/inbox/{session}/`, the address the Crisp inbox uses. It is not part of the API docs.
 - **Token scopes.** The exact scope names for reading conversations and writing notes and meta.
 
+## Free Crisp plan
+
+A free Crisp workspace refuses API writes of private notes with `402 subscription_upgrade_required`. The triage does not fail on it: the note is written to the server log (message `triage note not posted to crisp`, visible in the admin Logs page), the status segment is still set, and the GitHub issue is still created in modes `issue` and `fix`. On a free plan use `issue` mode, because `shadow` mode only reports through the note.
+
 ## Limits
 
 - Only the latest five pages of messages (about 100) are read.
