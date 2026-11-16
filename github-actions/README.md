@@ -6,7 +6,7 @@ The server bundles these files. After changing anything here, run `bun run gener
 
 | File | Purpose |
 | --- | --- |
-| [`codex-issue-fix.yml`](codex-issue-fix.yml) | Opens a draft PR with a Codex-written fix for each new issue. |
+| [`codex-issue-fix.yml`](codex-issue-fix.yml) | Opens a draft PR with a Codex-written fix for each new issue, or for an issue named in a `workflow_dispatch`. |
 | [`codex-seo-autopilot.yml`](codex-seo-autopilot.yml) | Daily run of the [seo-autopilot](https://il.ly/skills/seo-autopilot) skill with Codex. Opens one PR per run. |
 | [`codex-changelog.yml`](codex-changelog.yml) | On every push to the production branch, Codex writes a changelog note from the pushed commits and opens a PR. |
 | [`linear-implement.yml`](linear-implement.yml) | Dispatched by automation-server when a Linear issue gets the trigger label. Codex implements the task and opens a PR. |
@@ -15,7 +15,7 @@ The server bundles these files. After changing anything here, run `bun run gener
 
 Taken from another project. Codex runs the `$fix-issue` skill, which is stored in [`skills/fix-issue`](skills/fix-issue). Copy that folder to `.agents/skills/fix-issue/` in the target repository, next to the workflow in `.github/workflows/`. The workflow does not install it, Codex finds it in the checkout.
 
-The skill classifies the issue (bug, Sentry error, or too vague), finds the root cause, makes a minimal fix with a regression test, runs the checks and writes the PR body as its final message. Issues created by the [Sentry integration](../docs/integrations/sentry.md) carry the `sentry` label, so they take the Sentry path in `references/sentry.md`.
+The skill classifies the issue (bug, Sentry error, or too vague), finds the root cause, makes a minimal fix with a regression test, runs the checks and writes the PR body as its final message. Issues created by the [Sentry integration](../docs/integrations/sentry.md) carry the `sentry` label, so they take the Sentry path in `references/sentry.md`. Issues created by the [Crisp integration](../docs/integrations/crisp.md) carry the `crisp` label. The workflow skips them when they are opened, because the server dispatches only the ones its triage routes to a fix (input `issue_number`), and the skill must reproduce them with a failing test before it changes anything.
 
 The skill and the workflow are still specific to the project they came from. Before using them elsewhere, adapt:
 

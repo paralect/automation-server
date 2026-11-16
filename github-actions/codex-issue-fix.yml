@@ -1,12 +1,18 @@
 name: Codex issue fix
 
-# Opens a draft PR with a Codex-written fix for each new issue. Codex runs the
-# fix-issue skill, which must exist in the repo at .agents/skills/fix-issue/
-# (copy it from github-actions/skills/fix-issue). See github-actions/README.md
-# for setup.
+# Opens a draft PR with a Codex-written fix for each new issue, or for the
+# issue named in a manual or server dispatch. Codex runs the fix-issue skill,
+# which must exist in the repo at .agents/skills/fix-issue/ (copy it from
+# github-actions/skills/fix-issue). See github-actions/README.md for setup.
 on:
   issues:
     types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Number of the issue to fix
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -28,8 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Issue text is untrusted prompt input and this job holds Codex credentials,
-    # so only people with write-ish access to the repo can trigger it.
-    if: contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    # so only people with write-ish access to the repo can trigger it. Only
+    # they can dispatch, too. Issues labelled crisp are skipped on open because
+    # automation-server dispatches the ones that passed its triage.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
+      !contains(github.event.issue.labels.*.name, 'crisp'))
 
     steps:
       - name: Require a private repository
@@ -88,12 +99,26 @@ jobs:
       # text cannot inject shell.
       - name: Write issue file
         env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           ISSUE_LABELS: ${{ join(github.event.issue.labels.*.name, ', ') }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$ISSUE_NUMBER" in
+              '' | *[!0-9]*) echo "::error::issue_number must be a number."; exit 1 ;;
+            esac
+            view() { gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json "$1" --jq "$2"; }
+            ISSUE_TITLE=$(view title .title)
+            ISSUE_AUTHOR=$(view author .author.login)
+            ISSUE_LABELS=$(view labels '[.labels[].name] | join(", ")')
+            ISSUE_BODY=$(view body .body)
+          fi
+          printf '%s' "$ISSUE_TITLE" > "$RUNNER_TEMP/issue-title.txt"
+          printf '%s' "$ISSUE_NUMBER" > "$RUNNER_TEMP/issue-number.txt"
           {
             printf '# Issue #%s: %s\n\n' "$ISSUE_NUMBER" "$ISSUE_TITLE"
             printf 'Author: %s\n' "$ISSUE_AUTHOR"
@@ -113,10 +138,10 @@ jobs:
       - name: Open draft PR
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          ISSUE_NUMBER=$(cat "$RUNNER_TEMP/issue-number.txt")
+          ISSUE_TITLE=$(cat "$RUNNER_TEMP/issue-title.txt")
           if [ -z "$(git status --porcelain)" ]; then
             gh issue comment "$ISSUE_NUMBER" --body "Codex ran but produced no change. See the run log: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             exit 0
