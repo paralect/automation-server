@@ -1,5 +1,6 @@
 export * from "./github";
 export * from "./linearLabelToPr/automation";
+export * from "./openrouter";
 export * from "./posthogWeeklyReport";
 export * from "./redact";
 export * from "./sentryToGithubIssue/automation";
