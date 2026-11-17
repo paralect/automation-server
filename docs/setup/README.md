@@ -58,7 +58,7 @@ All forms work the same way:
 - **Webhook URL** (Sentry, Linear, Crisp). A read-only field with a copy button. You paste it into the other service. It needs `PUBLIC_URL` on the server to show the full address.
 - **Secret fields** (tokens, signing secrets). An empty one is an input box. Once saved it shows **Set** and the value is never displayed again. Click **Replace**, paste the new value, then **Save**. **Clear** removes it. Secrets are stored encrypted and need `SETTINGS_ENCRYPTION_KEY` on the server.
 - **Plain fields** (repository, label, model). Type the value and click **Save**. Saving applies at once, no restart.
-- **Test connection** (GitHub, Linear, PostHog, OpenRouter, Crisp). Checks the saved values against the real service. Run it after every save.
+- **Test connection** (GitHub, Linear, PostHog, OpenRouter, Crisp, Slack alerts). Checks the saved values against the real service. Run it after every save.
 
 Each guide below shows the exact form with the fields numbered in the order you fill them.
 
@@ -91,6 +91,7 @@ For the exact rules of each automation (filters, deduplication, retries, limits)
 | 4 | [Linear](linear.md) | Webhook, trigger label | Signing secret, trigger label, target repository |
 | 5 | [Crisp](crisp.md) | Marketplace plugin, Web Hooks, `triage` segment | Plugin credentials, website ID, signing secret |
 | 6 | [PostHog](posthog.md) | Personal API key, Slack webhook | Project ID, API key, Slack webhook URL |
+| 7 | [Slack alerts](slack.md) | Slack incoming webhook | Webhook URL, failure threshold |
 
 ## Which service needs which
 
@@ -100,6 +101,7 @@ For the exact rules of each automation (filters, deduplication, retries, limits)
 | Linear label to PR | yes | no |
 | Crisp triage | yes | yes |
 | PostHog weekly report | no | no |
+| Slack alerts | no | no |
 
 ## Conventions in these guides
 
