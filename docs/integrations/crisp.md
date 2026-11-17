@@ -26,7 +26,7 @@ Turns a Crisp conversation into a triage verdict. An operator adds a segment to 
    | bug or regression | issue |
    | anything else | issue labelled `triage-unsure` |
 
-8. **Mode.** `shadow` only reports the decision in Crisp. `issue` turns a fix into an issue. `fix` acts on the decision as routed.
+8. **Mode.** `shadow` only reports the decision in Crisp. `issue` turns a fix into an issue. `fix` acts on the decision as routed. `dry-run` triages every conversation like `fix`, but writes nothing to Crisp or GitHub. Each run is recorded on the Runs page with a Dry run badge and a Would have done card that lists the issue it would open (title and labels), whether it would start the fix workflow, and the note it would post. It never adds the `triage:*` segment, so the conversation can be triaged again for real. Dry runs stay out of the Crisp page and its counts. Without a claim, every matching event is triaged again, which costs model calls, so switch back to a real mode once the preview looks right.
 9. **Effects.** For issue and fix the server creates one GitHub issue in the GitHub integration's issues repository, labelled `crisp`, `area:<area>`, `severity:<severity>` plus the decision's labels (`bug`, `feature-request`, `performance`, `data`, `account-billing`, `triage-unsure`). The body has the `Crisp Session` marker, a link to the conversation in the Crisp inbox, the summary, repro, evidence and the classifier verdict with model and triage version. No customer name or email. A fix also gets the `autofix` label and dispatches the fix workflow on the default branch with input `issue_number`. Then, in every mode, the server posts a private note starting with `[automation-server triage]` and adds the status segment `triage:<decision>` (`triage:drop`, `triage:needs-info`, `triage:answer`, `triage:issue`, `triage:fix`).
 
 Only the verdict fields are logged, never message bodies.
@@ -51,7 +51,7 @@ Create an API key at OpenRouter with a credit limit and save it on the OpenRoute
 
 ### GitHub
 
-Modes `issue` and `fix` need the GitHub token and the issues repository on the GitHub integration. The token needs Issues: Read and write and, for `fix`, Actions: Read and write. Shadow mode works without GitHub. When GitHub is set, shadow mode still reads open issues to find duplicates.
+Modes `issue`, `fix` and `dry-run` need the GitHub token and the issues repository on the GitHub integration. The token needs Issues: Read and write and, for `fix`, Actions: Read and write. Shadow mode works without GitHub. When GitHub is set, shadow mode still reads open issues to find duplicates.
 
 ## Configuration
 
@@ -65,7 +65,7 @@ Crisp settings are saved from the admin. The webhook is served once the four req
 | Web Hooks signing secret | yes | | Verifies `X-Crisp-Signature`. |
 | Trigger segment | no | `triage` | Adding it to a conversation starts the triage. |
 | Triage resolved conversations | no | `false` | Also triage every conversation marked resolved. |
-| Mode | no | `shadow` | `shadow`, `issue` or `fix`. |
+| Mode | no | `shadow` | `shadow`, `issue`, `fix` or `dry-run`. |
 | Minimum confidence | no | `0.7` | Between 0 and 1. Below it the decision is `needs_info`, and the escalation model is asked. |
 | Product areas | no | empty | The closed list the classifier picks the area from. |
 | Autofix areas | no | empty | Areas whose non-blocker bugs go to the fix workflow. Empty means no fixes. |
@@ -109,3 +109,7 @@ A free Crisp workspace refuses API writes of private notes with `402 subscriptio
 - Only the latest five pages of messages (about 100) are read.
 - Attachments are never sent to the LLM or GitHub.
 - If starting the fix workflow fails, the note says so and the run fails. The issue exists, so run the workflow by hand for it. GitHub keeps one pending run per concurrency group, so a burst of fixes can drop a queued one. Otherwise a failed run releases its claim, but Crisp does not redeliver. Remove the status segment if any, then remove and re-add the trigger segment to retry. When the issue was already created, the retry finds it and drops the request as a duplicate.
+
+## Dry run of one finished run
+
+Any finished run of any automation that has a stored event has a Dry run button on its run page, next to Replay. It re-runs the stored event with reads only. For `crisp-triage` the model is called and GitHub is read for duplicates, but no issue, note or segment is written. The original run and its claim are left alone, so a real Replay still works afterwards. Scheduled jobs cannot be dry-run.
