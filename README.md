@@ -152,6 +152,7 @@ Server-wide settings:
 | `LOG_RETENTION_DAYS` | no | `30` | Days to keep stored logs and finished runs. |
 | `SETTINGS_ENCRYPTION_KEY` | no | | Encrypts secrets saved from the admin (AES-256-GCM). At least 32 random characters. Keep it stable: changing it makes saved secrets unreadable. Saving a secret is refused while it is unset. |
 | `PUBLIC_URL` | no | | Public base URL of the server, used to show full webhook URLs in the admin. |
+| `ADMIN_PUBLIC_URL` | no | | Public base URL of the admin. Slack failure alerts use it to link to the run page. |
 | `GITHUB_ACTIONS_REPOS` | no | `GITHUB_REPO` | Comma-separated `owner/name` repositories whose GitHub Actions runs the admin shows. `GITHUB_TOKEN` needs Actions: Read on each. |
 
 `GITHUB_TOKEN`, `GITHUB_REPO` and `SENTRY_CLIENT_SECRET` are optional: each integration can be configured from the admin API instead, and an integration with missing required values is simply not registered. Each integration documents its own variables in its page under [docs/integrations](docs/integrations).

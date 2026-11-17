@@ -18,6 +18,7 @@ import {
   resolveConfig,
 } from "@automation-server/settings";
 
+import { createAlertNotifier } from "./alerts";
 import { createApp } from "./app";
 import { buildConfig, webhookUrls } from "./config";
 import { ENV } from "./env.server";
@@ -62,15 +63,18 @@ const runtime = createRuntime({
   deps: { log },
 });
 
+const onRunFinished = createAlertNotifier({ resolve, activity, log, adminUrl: config.adminPublicUrl });
+
 const dispatcher = createDispatcher({
   automations: runtime.automations,
   store,
   log,
   activity,
+  onRunFinished,
   prepare: (event) => runtime.source(event.project ?? DEFAULT_PROJECT_ID, event.source)?.enrich?.(event) ?? Promise.resolve(event),
 });
 
-const scheduler = createScheduler({ jobs: runtime.jobs, store, log, activity });
+const scheduler = createScheduler({ jobs: runtime.jobs, store, log, activity, onRunFinished });
 
 // One reader per project, kept while its token and repositories stay the same so its cache survives.
 const actionsReaders = new Map<string, { key: string; reader: ActionsReader }>();
