@@ -27,6 +27,7 @@ export function isBlocked(ip: string) {
 
 export function recordFailure(ip: string) {
   const now = Date.now()
+  for (const [key, value] of failures) if (value.resetAt <= now) failures.delete(key)
   const entry = failures.get(ip)
   if (!entry || entry.resetAt <= now) {
     failures.set(ip, { count: 1, resetAt: now + WINDOW_MS })

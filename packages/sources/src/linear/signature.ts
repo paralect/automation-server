@@ -12,7 +12,6 @@ export function verifyLinearSignature(rawBody: Uint8Array, signatureHex: string 
   return timingSafeEqual(expected, Buffer.from(provided, "hex"));
 }
 
-/** Linear stamps every delivery with `webhookTimestamp` (ms since epoch). A missing or stale one is a replay. */
 export function isFreshLinearWebhook(rawBody: Uint8Array, nowMs: number): boolean {
   let json: unknown;
   try {

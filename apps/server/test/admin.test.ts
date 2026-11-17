@@ -14,7 +14,6 @@ import { createRuntime } from "../src/runtime";
 const TOKEN = "t".repeat(40);
 const quiet: Logger = { info() {}, warn() {}, error() {} };
 
-// Project-scoped procedures get the default project unless the test names one.
 const withProject = (path: string, input: unknown) =>
   path.startsWith("projects/") || (input !== undefined && (typeof input !== "object" || input === null || "project" in input))
     ? input

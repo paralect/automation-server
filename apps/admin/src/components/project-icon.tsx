@@ -18,7 +18,6 @@ const COLORS = [
 
 const colorOf = (id: string) => COLORS[[...id].reduce((sum, c) => sum + c.charCodeAt(0), 0) % COLORS.length]
 
-/** The site's favicon when the project has a domain, otherwise its first letter on a color picked from the id. */
 export function ProjectIcon({ project, className }: { project: Pick<Project, "id" | "name" | "domain">; className?: string }) {
   const [failed, setFailed] = useState<string | null>(null)
   const { domain } = project

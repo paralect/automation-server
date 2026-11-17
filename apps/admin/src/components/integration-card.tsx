@@ -34,17 +34,6 @@ const LOGOS: Record<string, string> = {
   crisp: "/integrations/crisp.svg",
 }
 
-/**
- * Integrations someone set up: anything saved here, or a credential or required value from the server
- * environment. Optional env values alone do not count because the env schema gives them defaults.
- */
-export function isAdded(integration: IntegrationView) {
-  return (
-    integration.configured ||
-    integration.fields.some((f) => f.source === "db" || (f.source === "env" && (f.kind === "secret" || f.required)))
-  )
-}
-
 // A white tile keeps every brand mark in its official colors on both themes.
 export function IntegrationLogo({ id, className }: { id: string; className?: string }) {
   const src = LOGOS[id]
@@ -105,7 +94,6 @@ export function IntegrationSettings({
   webhookUrl,
 }: {
   integration: IntegrationView
-  /** Every integration of the project, for a workflow whose repository is set on another one. */
   integrations: readonly IntegrationView[]
   workflow: LinkedTemplate | undefined
   secretsWritable: boolean
@@ -157,7 +145,6 @@ export function IntegrationSettings({
 
   const missing = integration.missing.map((key) => fields.find((f) => f.key === key)?.label ?? key)
   const repoSetting = workflow?.integration.repoSetting
-  // A repository field on this form is checked as it is typed, one on another integration from its saved value.
   const workflowRepo =
     workflow && repoSetting
       ? repoSetting.integration === id

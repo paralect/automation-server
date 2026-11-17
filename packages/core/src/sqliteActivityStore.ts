@@ -8,18 +8,17 @@ import type {
   LogEntry,
   LogLevel,
   Page,
-  RunOutcome,
   RunRecord,
   RunStart,
   RunStatus,
   StoredLog,
   StoredRun,
 } from "./activity";
+import { migrate } from "./sqliteSchema";
 
 export type SqliteActivityStoreOptions = {
   path: string;
   now?: () => number;
-  /** Project given to the runs and logs recorded before projects existed, when the column is first added. */
   legacyProject?: string;
 };
 
@@ -57,6 +56,16 @@ const escapeLike = (value: string) => `%${value.replace(/[\\%_]/g, "\\$&")}%`;
 const LOG_LEVELS: LogLevel[] = ["info", "warn", "error"];
 const RUN_STATUSES: RunStatus[] = ["running", "succeeded", "failed", "duplicate"];
 
+const parseObject = (raw: string | null): Readonly<Record<string, unknown>> | null => {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
 const toLog = (row: LogRow): StoredLog => {
   const { id, time, level, message } = row;
   return {
@@ -64,7 +73,7 @@ const toLog = (row: LogRow): StoredLog => {
     time,
     level,
     message,
-    fields: JSON.parse(row.fields),
+    fields: parseObject(row.fields) ?? {},
     project: row.project,
     source: row.source,
     automation: row.automation,
@@ -73,15 +82,6 @@ const toLog = (row: LogRow): StoredLog => {
   };
 };
 
-const parseOutcome = (raw: string | null): RunOutcome | null => {
-  if (raw === null) return null;
-  try {
-    const value: unknown = JSON.parse(raw);
-    return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as RunOutcome) : null;
-  } catch {
-    return null;
-  }
-};
 
 const toRun = (row: RunRow): StoredRun => ({
   seq: row.seq,
@@ -95,7 +95,7 @@ const toRun = (row: RunRow): StoredRun => ({
   startedAt: row.started_at,
   finishedAt: row.finished_at,
   error: row.error,
-  outcome: parseOutcome(row.outcome),
+  outcome: parseObject(row.outcome),
   readAt: row.read_at,
 });
 
@@ -129,7 +129,6 @@ function buildFilter(
   return { where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-// Server-wide lines (startup, reloads) carry no project and show in every project.
 const logProject = (project: string | undefined): Filter | undefined =>
   project === undefined ? undefined : { where: "(project = $project OR project IS NULL)", params: { $project: project } };
 
@@ -152,46 +151,54 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
   const db = new Database(path);
   db.run("PRAGMA busy_timeout = 5000");
   db.run("PRAGMA journal_mode = WAL");
-  db.run(`CREATE TABLE IF NOT EXISTS logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    time TEXT NOT NULL,
-    level TEXT NOT NULL CHECK (level IN ('info','warn','error')),
-    message TEXT NOT NULL,
-    source TEXT,
-    automation TEXT,
-    external_id TEXT,
-    run_id TEXT,
-    fields TEXT NOT NULL
-  )`);
-  db.run("CREATE INDEX IF NOT EXISTS logs_run_id ON logs (run_id)");
-  db.run("CREATE INDEX IF NOT EXISTS logs_level_id ON logs (level, id)");
-  db.run("CREATE INDEX IF NOT EXISTS logs_time ON logs (time)");
-  db.run(`CREATE TABLE IF NOT EXISTS runs (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    id TEXT NOT NULL UNIQUE,
-    automation TEXT NOT NULL,
-    source TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    external_id TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','duplicate')),
-    started_at TEXT NOT NULL,
-    finished_at TEXT,
-    error TEXT
-  )`);
-  db.run("CREATE INDEX IF NOT EXISTS runs_status_seq ON runs (status, seq)");
-  db.run("CREATE INDEX IF NOT EXISTS runs_automation ON runs (automation)");
-  db.run("CREATE INDEX IF NOT EXISTS runs_external_id ON runs (external_id)");
-  db.transaction(() => {
-    for (const table of ["logs", "runs"]) {
-      if (hasColumn(db, table, "project")) continue;
-      db.run(`ALTER TABLE ${table} ADD COLUMN project TEXT`);
-      if (legacyProject) db.query(`UPDATE ${table} SET project = $project`).run({ $project: legacyProject });
-    }
-  })();
-  if (!hasColumn(db, "runs", "outcome")) db.run("ALTER TABLE runs ADD COLUMN outcome TEXT");
-  if (!hasColumn(db, "runs", "read_at")) db.run("ALTER TABLE runs ADD COLUMN read_at TEXT");
-  db.run("CREATE INDEX IF NOT EXISTS logs_project_id ON logs (project, id)");
-  db.run("CREATE INDEX IF NOT EXISTS runs_project_seq ON runs (project, seq)");
+  migrate(db, "activity", [
+    (db) => {
+      db.run(`CREATE TABLE IF NOT EXISTS logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        time TEXT NOT NULL,
+        level TEXT NOT NULL CHECK (level IN ('info','warn','error')),
+        message TEXT NOT NULL,
+        source TEXT,
+        automation TEXT,
+        external_id TEXT,
+        run_id TEXT,
+        fields TEXT NOT NULL
+      )`);
+      db.run("CREATE INDEX IF NOT EXISTS logs_run_id ON logs (run_id)");
+      db.run("CREATE INDEX IF NOT EXISTS logs_level_id ON logs (level, id)");
+      db.run("CREATE INDEX IF NOT EXISTS logs_time ON logs (time)");
+      db.run(`CREATE TABLE IF NOT EXISTS runs (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        automation TEXT NOT NULL,
+        source TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','duplicate')),
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        error TEXT
+      )`);
+      db.run("CREATE INDEX IF NOT EXISTS runs_status_seq ON runs (status, seq)");
+      for (const table of ["logs", "runs"]) {
+        if (hasColumn(db, table, "project")) continue;
+        db.run(`ALTER TABLE ${table} ADD COLUMN project TEXT`);
+        if (legacyProject) db.query(`UPDATE ${table} SET project = $project`).run({ $project: legacyProject });
+      }
+      if (!hasColumn(db, "runs", "outcome")) db.run("ALTER TABLE runs ADD COLUMN outcome TEXT");
+      if (!hasColumn(db, "runs", "read_at")) db.run("ALTER TABLE runs ADD COLUMN read_at TEXT");
+      db.run("CREATE INDEX IF NOT EXISTS logs_project_id ON logs (project, id)");
+      db.run("CREATE INDEX IF NOT EXISTS runs_project_seq ON runs (project, seq)");
+    },
+    (db) => {
+      db.run("DROP INDEX IF EXISTS runs_automation");
+      db.run("DROP INDEX IF EXISTS runs_external_id");
+      db.run("CREATE INDEX runs_project_automation_seq ON runs (project, automation, seq)");
+      db.run("CREATE INDEX runs_project_started_at ON runs (project, started_at)");
+      db.run("CREATE INDEX runs_finished_at ON runs (finished_at)");
+      db.run("CREATE INDEX logs_project_time ON logs (project, time)");
+    },
+  ]);
 
   const insertLog = db.query(
     `INSERT INTO logs (time, level, message, project, source, automation, external_id, run_id, fields)
@@ -380,9 +387,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       return { runs, logs, buckets, recentFailures };
     },
     failInterruptedRuns: (finishedAt) => interruptStmt.run({ $finishedAt: finishedAt }).changes,
-    prune(beforeIso) {
-      return pruneLogs.run({ $before: beforeIso }).changes + pruneRuns.run({ $before: beforeIso }).changes;
-    },
+    prune: db.transaction((beforeIso: string) => pruneLogs.run({ $before: beforeIso }).changes + pruneRuns.run({ $before: beforeIso }).changes),
     close() {
       db.close();
     },

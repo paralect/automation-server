@@ -23,11 +23,6 @@ export const parseList = (text: string) =>
     .map((s) => s.trim())
     .filter(Boolean)
 
-/**
- * Maps edited form state to a `settings.update` payload. Only fields that differ from the loaded state are sent,
- * so untouched env-sourced values are not copied into the database. An emptied optional field is cleared so it
- * falls back to env or default. A secret is sent only when something was typed, and `clear` marks it for removal.
- */
 export function buildPayload(
   fields: readonly FieldView[],
   state: FormState,

@@ -44,6 +44,8 @@ services:
 
   admin:
     ports: !reset []
+    environment:
+      TRUST_PROXY: "true"
     networks:
       - default
       - edge

@@ -283,3 +283,53 @@ describe("dispatcher projects", () => {
     activity.close();
   });
 });
+
+describe("dispatcher failures outside the automation", () => {
+  const unhandled = () => {
+    const seen: unknown[] = [];
+    const listener = (reason: unknown) => void seen.push(reason);
+    process.on("unhandledRejection", listener);
+    return {
+      seen,
+      async stop() {
+        await Bun.sleep(10);
+        process.off("unhandledRejection", listener);
+      },
+    };
+  };
+
+  test("a claim store that fails to complete keeps a successful run succeeded and its claim held", async () => {
+    const { log, entries } = memoryLogger();
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const store = { ...createSqliteStore({ path: ":memory:" }), complete: () => {
+      throw new Error("disk full");
+    } };
+    let runs = 0;
+    const dispatcher = createDispatcher({ automations: () => [auto("a", async () => void runs++)], store, log, activity });
+    dispatcher.enqueue(event());
+    await dispatcher.drain(1000);
+    dispatcher.enqueue(event());
+    await dispatcher.drain(1000);
+    expect(runs).toBe(1);
+    expect(activity.queryRuns({ limit: 10 }).items.map((r) => r.status)).toEqual(["duplicate", "succeeded"]);
+    expect(entries.some((e) => e.level === "error" && e.fields?.error === "disk full")).toBe(true);
+    expect(entries.some((e) => e.message === "automation failed")).toBe(false);
+  });
+
+  test("an automation list that throws is logged and never becomes an unhandled rejection", async () => {
+    const rejections = unhandled();
+    const { log, entries } = memoryLogger();
+    const dispatcher = createDispatcher({
+      automations: () => {
+        throw new Error("registry broken");
+      },
+      store: createSqliteStore({ path: ":memory:" }),
+      log,
+    });
+    dispatcher.enqueue(event());
+    await dispatcher.drain(1000);
+    await rejections.stop();
+    expect(rejections.seen).toEqual([]);
+    expect(entries.some((e) => e.level === "error" && e.fields?.error === "registry broken")).toBe(true);
+  });
+});

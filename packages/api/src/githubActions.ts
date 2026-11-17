@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { errorMessage } from "./errors";
+import { GITHUB_API, githubErrorDetail, githubHeaders } from "./githubApi";
+
 export const ACTION_STATES = ["queued", "waiting", "running", "success", "failure", "cancelled", "skipped"] as const;
 export type ActionState = (typeof ACTION_STATES)[number];
 
@@ -59,8 +62,6 @@ export type ActionsReader = {
   listRuns(query: ActionsRunQuery): Promise<ActionsRunList>;
   getRun(repo: string, id: number): Promise<{ run: WorkflowRun; jobs: WorkflowJob[] } | null>;
 };
-
-export const isActive = (state: ActionState) => state === "queued" || state === "waiting" || state === "running";
 
 // GitHub splits a run's lifecycle into `status` and, once completed, `conclusion`. The admin needs one value.
 export function toState(status: string | null | undefined, conclusion: string | null | undefined): ActionState {
@@ -138,7 +139,6 @@ const ghJobList = z.object({
     }),
   ),
 });
-const ghError = z.object({ message: z.string().optional() });
 
 const toRun = (repo: string, r: z.infer<typeof ghRun>): WorkflowRun => ({
   id: r.id,
@@ -180,7 +180,7 @@ export type GithubActionsReaderConfig = {
 };
 
 export function createGithubActionsReader(config: GithubActionsReaderConfig): ActionsReader {
-  const base = (config.apiBaseUrl ?? "https://api.github.com").replace(/\/+$/, "");
+  const base = (config.apiBaseUrl ?? GITHUB_API).replace(/\/+$/, "");
   const doFetch = config.fetch ?? fetch;
   const now = config.now ?? Date.now;
   const cacheMs = config.cacheMs ?? 4_000;
@@ -194,12 +194,7 @@ export function createGithubActionsReader(config: GithubActionsReaderConfig): Ac
     let res: Response;
     try {
       res = await doFetch(`${base}${path}`, {
-        headers: {
-          Authorization: `Bearer ${config.token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "automation-server",
-        },
+        headers: githubHeaders(config.token),
         signal: AbortSignal.timeout(10_000),
       });
     } catch {
@@ -214,9 +209,8 @@ export function createGithubActionsReader(config: GithubActionsReaderConfig): Ac
       throw new GithubApiError("The token lacks Actions: Read on this repository", res.status);
     }
     if (res.status === 401) throw new GithubApiError("GitHub rejected the token", 401);
-    const parsed = ghError.safeParse(await res.json().catch(() => null));
-    const detail = parsed.success && parsed.data.message ? `: ${parsed.data.message.slice(0, 200)}` : "";
-    throw new GithubApiError(`GitHub API answered ${res.status}${detail}`, res.status);
+    const detail = await githubErrorDetail(res);
+    throw new GithubApiError(`GitHub API answered ${res.status}${detail ? `: ${detail}` : ""}`, res.status);
   }
 
   function cached<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T> {
@@ -224,7 +218,9 @@ export function createGithubActionsReader(config: GithubActionsReaderConfig): Ac
     if (hit && now() - hit.at < hit.ttl) return hit.value as Promise<T>;
     const value = load();
     cache.set(key, { at: now(), ttl, value });
-    value.catch(() => cache.delete(key));
+    value.catch(() => {
+      if (cache.get(key)?.value === value) cache.delete(key);
+    });
     if (cache.size > 500) {
       for (const [k, v] of cache) if (now() - v.at >= v.ttl) cache.delete(k);
     }
@@ -251,8 +247,6 @@ export function createGithubActionsReader(config: GithubActionsReaderConfig): Ac
     );
   }
 
-  const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
   return {
     repos,
 
@@ -271,7 +265,7 @@ export function createGithubActionsReader(config: GithubActionsReaderConfig): Ac
               if (found && found.length === perPage) full = true;
               return found ?? [];
             } catch (err) {
-              errors.push({ repo, message: message(err) });
+              errors.push({ repo, message: errorMessage(err) });
               return [];
             }
           }),

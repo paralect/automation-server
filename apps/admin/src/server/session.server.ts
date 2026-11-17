@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
+import { z } from "zod"
 import { deleteCookie, getCookie, setCookie } from "@tanstack/react-start/server"
 
 import { env } from "./env.server"
@@ -8,22 +9,25 @@ const MAX_AGE_SECONDS = 60 * 60 * 24 * 7
 
 export type Session = { email: string }
 
+const payloadSchema = z.object({ email: z.string(), exp: z.number() })
+type Payload = z.infer<typeof payloadSchema>
+
 const key = () => createHash("sha256").update(env().SESSION_SECRET).digest()
 
-function seal(payload: Session & { exp: number }) {
+function seal(payload: Payload) {
   const iv = randomBytes(12)
   const cipher = createCipheriv("aes-256-gcm", key(), iv)
   const body = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()])
   return Buffer.concat([iv, cipher.getAuthTag(), body]).toString("base64url")
 }
 
-function unseal(value: string): (Session & { exp: number }) | null {
+function unseal(value: string): Payload | null {
   try {
     const raw = Buffer.from(value, "base64url")
     const decipher = createDecipheriv("aes-256-gcm", key(), raw.subarray(0, 12))
     decipher.setAuthTag(raw.subarray(12, 28))
     const json = Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString("utf8")
-    const payload = JSON.parse(json) as Session & { exp: number }
+    const payload = payloadSchema.parse(JSON.parse(json))
     return payload.exp > Date.now() ? payload : null
   } catch {
     return null

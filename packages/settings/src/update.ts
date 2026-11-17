@@ -39,10 +39,6 @@ export function updateSchema(id: IntegrationId) {
 
 export type SettingsChange = { readonly set: SettingWrite[]; readonly remove: string[] };
 
-/**
- * Validates an update against the integration spec. Secrets are written only for non-empty strings,
- * an empty or absent secret keeps the stored one. `clear` removes keys so they fall back to env or default.
- */
 export function planUpdate(
   id: IntegrationId,
   input: { values?: Record<string, unknown>; clear?: readonly string[] },
@@ -84,9 +80,7 @@ export type FieldView = {
   readonly max?: number;
   readonly default?: FieldSpec["default"];
   readonly source: Origin;
-  /** Effective value of a non-secret field. Never present for secrets. */
   readonly value?: string | number | boolean | string[];
-  /** For secrets, whether any value is set (db or env). */
   readonly set: boolean;
 };
 
@@ -145,7 +139,6 @@ export function describeSettings(
 
 export type ConnectionTestResult = {
   readonly ok: boolean;
-  /** false when the integration has no connection test yet. */
   readonly available: boolean;
   readonly message: string;
   readonly details?: Readonly<Record<string, string>>;

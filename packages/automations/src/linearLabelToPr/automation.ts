@@ -11,7 +11,6 @@ export type LinearLabelToPrConfig = {
   repo: { owner: string; name: string };
   token: string;
   workflowFile: string;
-  /** Empty means the repository default branch. */
   ref: string;
   apiBaseUrl?: string;
   fetch?: typeof fetch;
@@ -24,7 +23,6 @@ export type WorkflowInputs = {
   issue_description: string;
 };
 
-/** GitHub rejects a dispatch whose inputs exceed 65,535 characters in total; the margin covers JSON overhead. */
 export const MAX_INPUT_CHARS = 60_000;
 
 export function addedTriggerLabel(issue: LinearIssue, triggerLabel: string): boolean {

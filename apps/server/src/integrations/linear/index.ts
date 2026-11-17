@@ -1,10 +1,13 @@
+import { GITHUB_API, githubHeaders } from "@automation-server/api/githubApi";
 import { createLinearLabelToPr } from "@automation-server/automations";
 import { createLinearSource } from "@automation-server/sources";
 import { parseRepo } from "@automation-server/settings";
 
+import { z } from "zod";
+
 import { defineModule } from "../module";
 
-const API = "https://api.github.com";
+const workflowSchema = z.object({ state: z.string().optional() });
 
 export const linear = defineModule({
   id: "linear",
@@ -38,20 +41,15 @@ export const linear = defineModule({
     }
     const { owner, name } = parseRepo(linear.values.targetRepo);
     const file = linear.values.workflowFile;
-    const res = await doFetch(`${API}/repos/${owner}/${name}/actions/workflows/${encodeURIComponent(file)}`, {
-      headers: {
-        authorization: `Bearer ${github.values.token}`,
-        accept: "application/vnd.github+json",
-        "x-github-api-version": "2022-11-28",
-        "user-agent": "automation-server",
-      },
+    const res = await doFetch(`${GITHUB_API}/repos/${owner}/${name}/actions/workflows/${encodeURIComponent(file)}`, {
+      headers: githubHeaders(github.values.token),
     });
     const repo = `${owner}/${name}`;
     if (res.status === 404) {
       return { ok: false, available: true, message: `Workflow ${file} is not installed in ${repo}, or the token cannot see it. Install it from the Workflows page.`, details };
     }
     if (!res.ok) return { ok: false, available: true, message: `GitHub answered ${res.status} for workflow ${file} in ${repo}`, details };
-    const state = ((await res.json().catch(() => ({}))) as { state?: string }).state ?? "unknown";
+    const state = workflowSchema.safeParse(await res.json().catch(() => null)).data?.state ?? "unknown";
     if (state !== "active") {
       return { ok: false, available: true, message: `Workflow ${file} in ${repo} is ${state}. Enable it in the repository's Actions tab.`, details };
     }

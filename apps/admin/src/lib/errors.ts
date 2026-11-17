@@ -35,7 +35,6 @@ export const ERROR_COPY: Record<ErrorKind, { title: string; body: string }> = {
   },
 }
 
-/** One-line text for an error shown next to the control that caused it. Operator-facing server messages pass through. */
 export function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : ""
   if (!message || message in BY_MESSAGE || message === "SERVER_ERROR") return ERROR_COPY[errorKind(error)].body

@@ -11,7 +11,6 @@ function toMessage(m: CrispRawMessage): CustomerMessage | null {
   return { from: m.from, at: new Date(m.timestamp).toISOString(), text: m.content };
 }
 
-/** Loads the conversation into `payload.request`. A failure throws, so the dispatcher logs it and the run fails. */
 export function createCrispEnricher(client: Pick<CrispClient, "conversation" | "messages">): (event: Event) => Promise<Event> {
   return async (event) => {
     if (!isCrispSession(event)) return event;

@@ -3,12 +3,12 @@ import { Link } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowClockwiseIcon,
-  ArrowSquareOutIcon,
   CheckCircleIcon,
   GitPullRequestIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
 
+import { ExternalLink } from "@/components/external-link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { FieldError } from "@/components/ui/field"
@@ -17,7 +17,7 @@ import { installWorkflow, type InstallMode, type PullRequestRef, type WorkflowCh
 import { errorText } from "@/lib/errors"
 import { REPO_RE, secretsUrl, type LinkedTemplate } from "@/lib/integration-workflows"
 import { useProjectId } from "@/lib/project"
-import { workflowCheckQuery } from "@/lib/queries"
+import { workflowCheckKey, workflowCheckQuery, workflowStatusKey } from "@/lib/queries"
 
 type View =
   | { kind: "no-github" }
@@ -48,10 +48,6 @@ function useDebounced<T>(value: T, ms: number): T {
   return settled
 }
 
-/**
- * Checks whether the workflow an integration relies on is in its repository, and installs it when it is not.
- * `repo` may be a value the operator is still typing, so the check waits for a valid owner/name to settle.
- */
 export function IntegrationWorkflow({
   template,
   repo: typedRepo,
@@ -73,7 +69,11 @@ export function IntegrationWorkflow({
   })
   const install = useMutation({
     mutationFn: (mode: InstallMode) => installWorkflow({ data: { project, repo: repo ?? "", templateId: template.id, mode } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [project, "workflow-status", repo] }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: workflowStatusKey(project, repo ?? "") }),
+        queryClient.invalidateQueries({ queryKey: workflowCheckKey(project, repo ?? "") }),
+      ]),
   })
 
   const view = viewOf(githubReady, repo, check)
@@ -178,19 +178,5 @@ export function IntegrationWorkflow({
         </p>
       )}
     </section>
-  )
-}
-
-export function ExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="inline-flex items-center gap-1 underline underline-offset-4"
-    >
-      {children}
-      <ArrowSquareOutIcon className="size-3" />
-    </a>
   )
 }

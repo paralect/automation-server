@@ -48,12 +48,13 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
     depends_on:
       server:
         condition: service_healthy
     ports:
-      # Loopback only. The session cookie is Secure and the login rate limit trusts
-      # X-Forwarded-For, so the admin must not face the internet without a proxy.
+      # Loopback only. The session cookie is Secure and the login rate limit ignores
+      # X-Forwarded-For unless TRUST_PROXY=true, so keep it off the internet without a proxy.
       # Reach it with `ssh -L 3001:127.0.0.1:3001 <vps>`, or use the Traefik overlay.
       - "127.0.0.1:${ADMIN_PORT:-3001}:3001"
 

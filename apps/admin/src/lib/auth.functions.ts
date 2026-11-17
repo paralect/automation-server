@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start"
-import { getRequestIP } from "@tanstack/react-start/server"
+import { getRequestHeader, getRequestIP } from "@tanstack/react-start/server"
 import { z } from "zod"
 
+import { CLIENT_IP_HEADER } from "@/server/client-ip.server"
 import {
   clearFailures,
   credentialsMatch,
@@ -11,7 +12,6 @@ import {
 import { rememberedProject } from "@/server/project.server"
 import { endSession, readSession, startSession } from "@/server/session.server"
 
-/** The session, plus the project the admin last selected so the layout opens on it. */
 export const getSessionFn = createServerFn({ method: "GET" }).handler(() => {
   const session = readSession()
   return session ? { ...session, project: rememberedProject() } : null
@@ -20,7 +20,7 @@ export const getSessionFn = createServerFn({ method: "GET" }).handler(() => {
 export const loginFn = createServerFn({ method: "POST" })
   .validator(z.object({ email: z.string().max(320), password: z.string().max(1024) }))
   .handler(({ data }): { ok: true } | { ok: false; error: string } => {
-    const ip = getRequestIP({ xForwardedFor: true }) ?? "unknown"
+    const ip = getRequestHeader(CLIENT_IP_HEADER) ?? getRequestIP() ?? "unknown"
     if (isBlocked(ip)) {
       return { ok: false, error: "Too many failed attempts. Try again in 15 minutes." }
     }

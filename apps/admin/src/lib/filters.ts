@@ -36,7 +36,6 @@ export type CrispDecisionKey = (typeof CRISP_DECISIONS)[number]
 
 export const crispSearch = z.object({
   decision: z.enum(CRISP_DECISIONS).optional().catch(undefined),
-  /** Only conversations nobody has read yet. */
   unread: z.boolean().optional().catch(undefined),
   q: text,
 })
@@ -45,7 +44,8 @@ export const crispInput = crispSearch.extend({ before: cursor, limit })
 
 export const WINDOWS = { "24h": 24, "7d": 168 } as const
 export type WindowKey = keyof typeof WINDOWS
-export const windowInput = z.object({ window: z.enum(["24h", "7d"]) })
+export const WINDOW_KEYS = ["24h", "7d"] as const satisfies readonly WindowKey[]
+export const windowInput = z.object({ window: z.enum(WINDOW_KEYS) })
 
 export const ACTION_STATES = ["queued", "waiting", "running", "success", "failure", "cancelled", "skipped"] as const
 export type ActionState = (typeof ACTION_STATES)[number]

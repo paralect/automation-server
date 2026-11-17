@@ -25,13 +25,15 @@ export type {
 import { callAutomation } from "@/server/automation-client.server"
 import { rememberProject } from "@/server/project.server"
 import { requireAuth } from "./auth.middleware"
+import { REPO_RE } from "./integration-workflows"
 import { actionRunInput, actionsInput, crispInput, logsInput, runsInput, WINDOWS, windowInput } from "./filters"
 
 const authed = createServerFn({ method: "GET", strict: { input: true, output: false } }).middleware([requireAuth])
 const authedPost = createServerFn({ method: "POST", strict: { input: true, output: false } }).middleware([requireAuth])
 
 const projectId = z.string().min(1).max(64)
-/** Every project-scoped call names its project, so cached data of one project never shows under another. */
+const entityId = z.string().min(1).max(200)
+const templateId = z.string().min(1).max(100)
 const inProject = z.object({ project: projectId })
 
 export const listProjects = authed.handler(() => callAutomation((api) => api.projects.list()))
@@ -50,7 +52,6 @@ export const deleteProject = authedPost
   .validator(z.object({ id: projectId }))
   .handler(({ data }) => callAutomation((api) => api.projects.delete(data)))
 
-/** Remembers the selected project in a cookie, so the admin opens on it next time. */
 export const selectProject = authedPost.validator(inProject).handler(({ data }) => rememberProject(data.project))
 
 export const getOverview = authed
@@ -68,7 +69,7 @@ export const listRuns = authed.validator(inProject.extend(runsInput.shape)).hand
 )
 
 export const getRun = authed
-  .validator(inProject.extend({ id: z.string().min(1) }))
+  .validator(inProject.extend({ id: entityId }))
   .handler(({ data }) =>
     callAutomation((api) => api.runs.get(data), { notFoundIsExpected: true })
   )
@@ -78,7 +79,7 @@ export const listCrisp = authed.validator(inProject.extend(crispInput.shape)).ha
 )
 
 export const markCrispRead = authedPost
-  .validator(inProject.extend({ id: z.string().min(1), read: z.boolean() }))
+  .validator(inProject.extend({ id: entityId, read: z.boolean() }))
   .handler(({ data }) => callAutomation((api) => api.crisp.markRead(data)))
 
 export const markAllCrispRead = authedPost.validator(inProject).handler(({ data }) => callAutomation((api) => api.crisp.markAllRead(data)))
@@ -96,7 +97,10 @@ export const getActionRun = authed.validator(inProject.extend(actionRunInput.sha
 )
 
 type IntegrationId = IntegrationView["id"]
-const integrationInput = inProject.extend({ integrationId: z.string().min(1).max(64) })
+const INTEGRATION_IDS = ["github", "sentry", "linear", "posthog", "openrouter", "crisp"] as const satisfies readonly IntegrationId[]
+const allIntegrationIds: [Exclude<IntegrationId, (typeof INTEGRATION_IDS)[number]>] extends [never] ? true : never = true
+void allIntegrationIds
+const integrationInput = inProject.extend({ integrationId: z.enum(INTEGRATION_IDS) })
 
 export const getSettings = authed.validator(inProject).handler(({ data }) => callAutomation((api) => api.settings.get(data)))
 
@@ -107,16 +111,10 @@ export const updateSettings = authedPost
       clear: z.array(z.string().max(64)).max(64),
     })
   )
-  .handler(({ data }) =>
-    callAutomation((api) =>
-      api.settings.update({ ...data, integrationId: data.integrationId as IntegrationId })
-    )
-  )
+  .handler(({ data }) => callAutomation((api) => api.settings.update(data)))
 
 export const testConnection = authedPost.validator(integrationInput).handler(({ data }) =>
-  callAutomation((api) =>
-    api.settings.testConnection({ project: data.project, integrationId: data.integrationId as IntegrationId })
-  )
+  callAutomation((api) => api.settings.testConnection(data))
 )
 
 export const previewPosthogReport = authedPost
@@ -131,16 +129,16 @@ export const listWorkflowTemplates = authed.handler(() =>
   callAutomation((api) => api.workflows.templates(), { showMessages: true })
 )
 
-const repoInput = inProject.extend({ repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/) })
+const repoInput = inProject.extend({ repo: z.string().regex(REPO_RE) })
 
 export const getWorkflowStatus = authed.validator(repoInput).handler(({ data }) =>
   callAutomation((api) => api.workflows.status(data), { showMessages: true })
 )
 
-export const checkWorkflow = authed.validator(repoInput.extend({ templateId: z.string().min(1).max(100) })).handler(({ data }) =>
+export const checkWorkflow = authed.validator(repoInput.extend({ templateId })).handler(({ data }) =>
   callAutomation((api) => api.workflows.check(data), { showMessages: true })
 )
 
 export const installWorkflow = authedPost
-  .validator(repoInput.extend({ templateId: z.string().min(1).max(100), mode: z.enum(["pr", "direct"]) }))
+  .validator(repoInput.extend({ templateId, mode: z.enum(["pr", "direct"]) }))
   .handler(({ data }) => callAutomation((api) => api.workflows.install(data), { showMessages: true }))

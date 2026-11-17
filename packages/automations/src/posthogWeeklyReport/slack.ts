@@ -1,7 +1,6 @@
 import type { SlackBlock } from "@chat-adapter/slack/blocks";
 import { scrub } from "./scrub";
 
-/** `text` is the notification and fallback. With `blocks`, Slack shows the blocks instead. */
 export async function postToSlack(
   webhookUrl: string,
   text: string,

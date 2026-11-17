@@ -21,9 +21,10 @@ const TRACKED_LABEL: Partial<Record<Category, string>> = {
   account_billing: "account-billing",
 };
 
+const trackedLabel = (t: Triage): string | undefined => TRACKED_LABEL[t.category];
+
 const FALLBACK_QUESTION = "Could you describe the steps you took, what you expected and what happened instead?";
 
-/** Checked top to bottom, the first match wins. */
 export const ROUTES: readonly Route[] = [
   { name: "spam", when: ({ triage }) => triage.category === "spam", decide: () => ({ kind: "drop", reason: "spam" }) },
   {
@@ -37,11 +38,10 @@ export const ROUTES: readonly Route[] = [
     when: ({ triage }) => triage.category === "how_to",
     decide: ({ triage }) => ({ kind: "answer", draft: triage.answerDraft ?? "" }),
   },
-  // account_billing stops here, so it can never reach a fix.
   {
     name: "tracked",
-    when: ({ triage }) => TRACKED_LABEL[triage.category] !== undefined,
-    decide: ({ triage }) => ({ kind: "issue", labels: [TRACKED_LABEL[triage.category] as string] }),
+    when: ({ triage }) => trackedLabel(triage) !== undefined,
+    decide: ({ triage }) => ({ kind: "issue", labels: [trackedLabel(triage) ?? "triage-unsure"] }),
   },
   {
     name: "autofix",
@@ -57,11 +57,12 @@ export const ROUTES: readonly Route[] = [
 ];
 
 export function route(ctx: RouteContext): { rule: string; decision: Decision } {
-  const hit = ROUTES.find((r) => r.when(ctx)) as Route;
-  return { rule: hit.name, decision: hit.decide(ctx) };
+  for (const r of ROUTES) {
+    if (r.when(ctx)) return { rule: r.name, decision: r.decide(ctx) };
+  }
+  throw new Error("no route matched");
 }
 
-/** What the mode allows: `github` false means the decision is only reported in Crisp. */
 export function applyMode(decision: Decision, mode: Mode): { decision: Decision; github: boolean } {
   if (mode === "shadow") return { decision, github: false };
   if (mode === "issue" && decision.kind === "fix") {

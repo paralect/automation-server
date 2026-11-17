@@ -9,18 +9,20 @@ const absolute = new Intl.DateTimeFormat(undefined, {
 
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
 
+const FALLBACK_UNIT: [Intl.RelativeTimeFormatUnit, number] = ["second", 1]
+
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["day", 86_400],
   ["hour", 3_600],
   ["minute", 60],
-  ["second", 1],
+  FALLBACK_UNIT,
 ]
 
 export const formatAbsolute = (iso: string) => absolute.format(new Date(iso))
 
 export function formatRelative(iso: string, now = Date.now()) {
   const seconds = Math.round((Date.parse(iso) - now) / 1000)
-  const [unit, size] = UNITS.find(([, s]) => Math.abs(seconds) >= s) ?? UNITS[3]!
+  const [unit, size] = UNITS.find(([, s]) => Math.abs(seconds) >= s) ?? FALLBACK_UNIT
   return relative.format(Math.round(seconds / size), unit)
 }
 

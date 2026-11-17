@@ -63,11 +63,11 @@ export function createApp({ source, defaultProject, dispatcher, log, corsOrigin,
   });
 
   app.use("/*", async (c, next) => {
-    const context = await createContext({ context: c, ...admin });
+    const context = createContext({ context: c, ...admin });
 
     const rpcResult = await rpcHandler.handle(c.req.raw, {
       prefix: "/rpc",
-      context: context,
+      context,
     });
 
     if (rpcResult.matched) {
@@ -76,7 +76,7 @@ export function createApp({ source, defaultProject, dispatcher, log, corsOrigin,
 
     const apiResult = await apiHandler.handle(c.req.raw, {
       prefix: "/api-reference",
-      context: context,
+      context,
     });
 
     if (apiResult.matched) {

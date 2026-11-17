@@ -1,6 +1,7 @@
 import type { ActivityStore } from "./activity";
 import type { Job } from "./job";
 import type { Logger } from "./logger";
+import { drainWithTimeout, errorMessage, recordActivity, scopeFields, withFields } from "./internal";
 import { claimKey, type ClaimStore } from "./store";
 
 export const SCHEDULE_SOURCE = "schedule";
@@ -13,12 +14,7 @@ export type RunNowResult =
 export type Scheduler = {
   start(): void;
   stop(): void;
-  /** Checks every job once. Resolves when the jobs it started have finished. */
   tick(): Promise<void>;
-  /**
-   * Runs a job now under an explicit claim key, bypassing `due`. Recorded like a scheduled run.
-   * A job object runs even when it is not in `jobs()`, so an admin can trigger a job that is disabled on the schedule.
-   */
   runNow(job: string | Job, key: string): Promise<RunNowResult>;
   drain(timeoutMs: number): Promise<void>;
 };
@@ -32,32 +28,17 @@ export type SchedulerDeps = {
   tickMs?: number;
 };
 
-const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
 export function createScheduler({ jobs, store, log, activity, now = () => new Date(), tickMs = 60_000 }: SchedulerDeps): Scheduler {
   const running = new Set<string>();
   const inFlight = new Set<Promise<unknown>>();
   let timer: ReturnType<typeof setInterval> | undefined;
 
-  const record = <T>(what: string, scoped: Record<string, string>, fn: (activity: ActivityStore) => T): T | undefined => {
-    if (!activity) return undefined;
-    try {
-      return fn(activity);
-    } catch (err) {
-      log.error(`activity ${what} failed`, { ...scoped, error: errorMessage(err) });
-      return undefined;
-    }
-  };
+  const record = <T>(what: string, scoped: Record<string, string>, fn: (activity: ActivityStore) => T) =>
+    recordActivity(activity, log, what, scoped, fn);
 
-  /**
-   * A failed run keeps its claim. Retrying every tick would hammer a broken integration once a minute,
-   * so a failed occurrence is not retried automatically. `runNow` with a fresh key is the retry.
-   */
   const execute = async (job: Job, key: string, at: Date): Promise<RunNowResult> => {
     const claim = claimKey(job.name, key, job.project);
-    const scoped: Record<string, string> = job.project
-      ? { project: job.project, automation: job.name, externalId: key }
-      : { automation: job.name, externalId: key };
+    const scoped = scopeFields(job.name, key, job.project);
     try {
       if (!store.claim(claim)) return { status: "duplicate" };
     } catch (err) {
@@ -75,25 +56,29 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
       }),
     );
     const tagged = runId ? { ...scoped, source: SCHEDULE_SOURCE, runId } : { ...scoped, source: SCHEDULE_SOURCE };
-    const child: Logger = {
-      info: (m, f) => log.info(m, { ...tagged, ...f }),
-      warn: (m, f) => log.warn(m, { ...tagged, ...f }),
-      error: (m, f) => log.error(m, { ...tagged, ...f }),
-    };
+    const child = withFields(log, tagged);
     const finish = (status: "succeeded" | "failed", error?: string) => {
       if (runId) record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: now().toISOString() }));
     };
+    let error: string | undefined;
     try {
       await job.run({ log: child, key, now: at });
-      store.complete(claim);
-      finish("succeeded");
-      return { status: "succeeded", runId: runId ?? null };
     } catch (err) {
-      store.complete(claim);
-      log.error("job failed", { ...tagged, error: errorMessage(err) });
-      finish("failed", errorMessage(err));
-      return { status: "failed", runId: runId ?? null, error: errorMessage(err) };
+      error = errorMessage(err);
     }
+    // A failed run keeps its claim too, so a broken integration is not retried every tick; runNow with a fresh key is the retry.
+    try {
+      store.complete(claim);
+    } catch (err) {
+      log.error("complete failed", { ...tagged, error: errorMessage(err) });
+    }
+    if (error !== undefined) {
+      log.error("job failed", { ...tagged, error });
+      finish("failed", error);
+      return { status: "failed", runId: runId ?? null, error };
+    }
+    finish("succeeded");
+    return { status: "succeeded", runId: runId ?? null };
   };
 
   const guarded = async (job: Job, key: string, at: Date): Promise<RunNowResult> => {
@@ -112,8 +97,15 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
 
   const tick = async () => {
     const at = now();
+    let current: readonly Job[];
+    try {
+      current = jobs();
+    } catch (err) {
+      log.error("job list failed", { error: errorMessage(err) });
+      return;
+    }
     const started: Promise<unknown>[] = [];
-    for (const job of jobs()) {
+    for (const job of current) {
       let key: string | null;
       try {
         key = job.due(at);
@@ -143,13 +135,6 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
       if (!job) return { status: "unknown-job" };
       return guarded(job, key, now());
     },
-    async drain(timeoutMs) {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      const limit = new Promise<void>((resolve) => {
-        timeout = setTimeout(resolve, timeoutMs);
-      });
-      await Promise.race([Promise.allSettled([...inFlight]), limit]);
-      clearTimeout(timeout);
-    },
+    drain: (timeoutMs) => drainWithTimeout(inFlight, timeoutMs),
   };
 }

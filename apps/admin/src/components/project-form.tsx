@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input"
 
 export type ProjectFormValues = { name: string; domain: string }
 
-/** Name and domain fields with a live icon preview. The parent owns submit, so it can sit in a dialog or a card. */
 export function ProjectFields({
   id,
   values,

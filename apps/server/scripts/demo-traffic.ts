@@ -34,7 +34,9 @@ for (const [i, fixture] of fixtures.entries()) {
     await post(`signed fixture ${i} issue ${n}`, "/webhooks/sentry", body, sign(body));
   }
 }
-const repeat = withIssueId(fixtures[0]!, "demo-0-1");
+const first = fixtures[0];
+if (!first) throw new Error(`no fixtures found in ${dir}`);
+const repeat = withIssueId(first, "demo-0-1");
 await post("redelivery of demo-0-1", "/webhooks/sentry", repeat, sign(repeat));
 await post("bad signature", "/webhooks/sentry", repeat, "0".repeat(64));
 await post("unknown source", "/webhooks/nope", repeat, sign(repeat));

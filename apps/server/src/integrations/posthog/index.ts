@@ -1,4 +1,5 @@
 import type { PosthogAdmin } from "@automation-server/api/context";
+import { errorMessage } from "@automation-server/api/errors";
 import {
   countRecentEvents,
   createPosthogWeeklyReportJob,
@@ -9,8 +10,6 @@ import type { Scheduler } from "@automation-server/core";
 import type { ResolvedConfig } from "@automation-server/settings";
 
 import { defineModule } from "../module";
-
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export const posthog = defineModule({
   id: "posthog",
@@ -41,7 +40,6 @@ export type PosthogAdminDeps = {
   now?: () => Date;
 };
 
-/** Backs `posthog.preview` and `posthog.runNow`. Both work while the schedule is disabled, so the report can be tried first. */
 export function createPosthogAdmin({ resolve, scheduler, fetch, now = () => new Date() }: PosthogAdminDeps): PosthogAdmin {
   const notConfigured = (missing: readonly string[]) => `PostHog is not configured. Missing: ${missing.join(", ")}`;
 
@@ -53,7 +51,7 @@ export function createPosthogAdmin({ resolve, scheduler, fetch, now = () => new 
       try {
         return { ok: true, text: (await generateReport(config.values, at, { fetch })).text, generatedAt: at.toISOString() };
       } catch (err) {
-        return { ok: false, message: message(err) };
+        return { ok: false, message: errorMessage(err) };
       }
     },
     async runNow(project) {

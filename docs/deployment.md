@@ -14,7 +14,7 @@ What has to be reachable from where:
 
 - Sentry must reach `POST /webhooks/sentry` on the server. That is the only public route the server needs, plus `/health` for monitoring.
 - The admin calls the server's `/rpc` with `ADMIN_API_TOKEN`. In every option below that call stays on a private network.
-- People reach the admin in a browser. Its session cookie is `Secure` and its login rate limit trusts `X-Forwarded-For`, so the admin must sit behind HTTPS and a proxy you control, or be reachable on loopback only.
+- People reach the admin in a browser. Its session cookie is `Secure` and its login rate limit keys on the socket address and honors `X-Forwarded-For` (last entry) only when `TRUST_PROXY=true`. Set it only behind a proxy you control that appends to that header; the Traefik overlay and `.do/app.yaml` already do. With your own proxy (the first two options), set `TRUST_PROXY=true` in `.env`. Without a proxy, leave it unset and keep the admin on loopback.
 
 Both services refuse to start while a required variable is missing, and name it in the log.
 

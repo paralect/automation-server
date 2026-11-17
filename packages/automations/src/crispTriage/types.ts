@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-/** Written into every issue and log line, so verdicts from different prompt versions can be told apart. */
 export const TRIAGE_VERSION = "crisp-triage/1";
 
 export const CATEGORIES = [
@@ -24,10 +23,6 @@ export const UNKNOWN_AREA = "unknown";
 export const MODES = ["shadow", "issue", "fix"] as const;
 export type Mode = (typeof MODES)[number];
 
-/**
- * The classifier's verdict. The same schema is sent to the model as its required output format and parses
- * the reply, so the two cannot drift. Areas come from settings, so the schema is built per configuration.
- */
 export function triageSchema(areas: readonly string[]) {
   return z.object({
     category: z.enum(CATEGORIES),

@@ -121,7 +121,6 @@ export function envNames(): string[] {
   );
 }
 
-/** GitHub Actions repositories shown in the admin. Falls back to the issues repository. */
 export function effectiveActionsRepos(github: ResolvedConfig["github"]): string[] {
   const listed = github.values.actionsRepos ?? [];
   const repos = listed.length > 0 ? listed : github.values.repo ? [github.values.repo] : [];

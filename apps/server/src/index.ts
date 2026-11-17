@@ -1,4 +1,6 @@
+import { errorMessage } from "@automation-server/api/errors";
 import { createGithubActionsReader, type ActionsReader } from "@automation-server/api/githubActions";
+import { DAY_MS, HOUR_MS } from "@automation-server/api/time";
 import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
 import {
   createDispatcher,
@@ -34,7 +36,7 @@ const log = createLogger({}, console.log, (entry) => {
   try {
     activity.recordLog(entry);
   } catch (err) {
-    console.error("activity recordLog failed", err instanceof Error ? err.message : String(err));
+    console.error("activity recordLog failed", errorMessage(err));
   }
 });
 
@@ -42,13 +44,13 @@ activity.failInterruptedRuns(startedAt);
 
 const pruneOld = () => {
   try {
-    activity.prune(new Date(Date.now() - config.retentionDays * 86_400_000).toISOString());
+    activity.prune(new Date(Date.now() - config.retentionDays * DAY_MS).toISOString());
   } catch (err) {
-    log.error("activity prune failed", { error: err instanceof Error ? err.message : String(err) });
+    log.error("activity prune failed", { error: errorMessage(err) });
   }
 };
 pruneOld();
-const pruneTimer = setInterval(pruneOld, 3_600_000);
+const pruneTimer = setInterval(pruneOld, HOUR_MS);
 pruneTimer.unref();
 
 const resolve = (project: string) => resolveConfig(settings.project(project), envFor(project, process.env));
@@ -131,15 +133,22 @@ async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   log.info("shutting down", { signal });
-  clearInterval(pruneTimer);
-  scheduler.stop();
-  await server.stop();
-  await Promise.all([dispatcher.drain(10_000), scheduler.drain(10_000)]);
-  store.close();
-  settings.close();
-  log.info("shutdown complete");
-  activity.close();
-  process.exit(0);
+  let exitCode = 0;
+  try {
+    clearInterval(pruneTimer);
+    scheduler.stop();
+    await server.stop();
+    await Promise.all([dispatcher.drain(10_000), scheduler.drain(10_000)]);
+    store.close();
+    settings.close();
+    log.info("shutdown complete");
+    activity.close();
+  } catch (err) {
+    exitCode = 1;
+    console.error("shutdown failed", errorMessage(err));
+  } finally {
+    process.exit(exitCode);
+  }
 }
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

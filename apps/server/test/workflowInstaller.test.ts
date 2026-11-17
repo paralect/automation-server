@@ -15,7 +15,6 @@ const TEMPLATES = templatesWith("name: demo v1");
 
 type Pull = { number: number; head: string; base: string; open: boolean };
 
-/** An in-memory repository `acme/site` that speaks the slice of the GitHub REST API the installer uses. */
 function fakeGithub(options: { deny?: (method: string, path: string) => number | undefined } = {}) {
   const branches: Record<string, Record<string, string>> = { main: {} };
   const pulls: Pull[] = [];

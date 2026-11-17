@@ -28,6 +28,7 @@ export const Route = createFileRoute("/_authed/workflows")({
   component: Workflows,
 })
 
+const INSTALL_MODES = ["pr", "direct"] as const satisfies readonly InstallMode[]
 const MODES: Record<InstallMode, string> = { pr: "Pull request", direct: "Direct commit" }
 
 const OUTCOME_COPY: Record<InstallOutcome, string> = {
@@ -69,11 +70,14 @@ function Workflows() {
       <PageHeader title="Workflows" description="Add the bundled GitHub Actions workflows to a repository.">
         <ToggleGroup
           value={[mode]}
-          onValueChange={(next) => next[0] && setMode(next[0] as InstallMode)}
+          onValueChange={(next) => {
+            const picked = INSTALL_MODES.find((m) => m === next[0])
+            if (picked) setMode(picked)
+          }}
           variant="outline"
           aria-label="Install mode"
         >
-          {(Object.keys(MODES) as InstallMode[]).map((key) => (
+          {INSTALL_MODES.map((key) => (
             <ToggleGroupItem key={key} value={key}>
               {MODES[key]}
             </ToggleGroupItem>

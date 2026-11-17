@@ -129,7 +129,6 @@ function collectBreadcrumbs(event: z.infer<typeof eventSchema>): SentryBreadcrum
   else if (direct?.values) raw = direct.values;
   else {
     const entry = event.entries?.find((e) => e.type === "breadcrumbs");
-    // Entries are unvalidated until here, so each item is checked on its own and bad ones dropped.
     for (const item of entry?.data?.values ?? []) {
       const parsed = breadcrumbSchema.safeParse(item);
       if (parsed.success) raw.push(parsed.data);

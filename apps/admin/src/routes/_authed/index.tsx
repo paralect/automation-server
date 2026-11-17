@@ -20,7 +20,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Time } from "@/components/time"
-import { WINDOWS, type WindowKey } from "@/lib/filters"
+import { WINDOW_KEYS, type WindowKey } from "@/lib/filters"
 import { fieldOf } from "@/lib/integration-workflows"
 import { overviewQuery, settingsQuery } from "@/lib/queries"
 import { useProjectId } from "@/lib/project"
@@ -61,11 +61,14 @@ function Overview() {
       <PageHeader title="Overview" description="What the automation server did recently.">
         <ToggleGroup
           value={[window]}
-          onValueChange={(next) => next[0] && setWindow(next[0] as WindowKey)}
+          onValueChange={(next) => {
+            const key = WINDOW_KEYS.find((k) => k === next[0])
+            if (key) setWindow(key)
+          }}
           variant="outline"
           aria-label="Time window"
         >
-          {(Object.keys(WINDOWS) as WindowKey[]).map((key) => (
+          {WINDOW_KEYS.map((key) => (
             <ToggleGroupItem key={key} value={key}>
               Last {key}
             </ToggleGroupItem>
@@ -165,7 +168,6 @@ function Overview() {
   )
 }
 
-/** Shown until the project has a GitHub token, which every automation needs. */
 function SetupBanner() {
   const settings = useQuery(settingsQuery(useProjectId()))
   if (!settings.data || fieldOf(settings.data.integrations, "github", "token")?.set) return null

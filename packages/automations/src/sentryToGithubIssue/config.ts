@@ -25,8 +25,6 @@ export function shouldHandle(alert: SentryIssueAlert, config: SentryToGithubIssu
     }
   }
 
-  // Issue stats are absent on some payloads. An unknown count must not suppress a
-  // real error, so the threshold only applies when the count is actually known.
   if (alert.issue && alert.issue.count < config.minEventCount) {
     return { handle: false, reason: `event count ${alert.issue.count} below minimum ${config.minEventCount}` };
   }

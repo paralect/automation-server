@@ -2,6 +2,8 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+import { migrate } from "@automation-server/core/sqliteSchema";
+
 import { createSecretBox } from "./crypto";
 import {
   DEFAULT_PROJECT_ID,
@@ -20,33 +22,24 @@ export class SecretsUnavailableError extends Error {
 
 export type StoredSetting = {
   readonly secret: boolean;
-  /** JSON text of the value. null when a secret cannot be decrypted (key missing or changed). */
   readonly json: string | null;
 };
 
 export type SettingWrite = { readonly key: string; readonly json: string; readonly secret: boolean };
 
-/** The settings of one project. Keys are `<integration>.<field>`, without the project. */
 export type SettingsStore = {
   readonly canStoreSecrets: boolean;
   all(): Record<string, StoredSetting>;
-  /** Applies every write and delete in one transaction. Throws SecretsUnavailableError before writing anything. */
   apply(changes: { set?: readonly SettingWrite[]; remove?: readonly string[] }): void;
-  close(): void;
 };
 
-/**
- * The settings database. Used directly it is the default project's settings, so callers that predate
- * projects keep working. `project(id)` gives another project's settings.
- */
 export type SettingsDb = SettingsStore & {
+  close(): void;
   project(id: string): SettingsStore;
   projects(): Project[];
   getProject(id: string): Project | null;
   createProject(input: { name: string; domain?: string | null }): Project;
-  /** Returns null for an unknown project. The id never changes. */
   updateProject(id: string, input: { name?: string; domain?: string | null }): Project | null;
-  /** Deletes the project and its settings. The default project cannot be deleted. */
   deleteProject(id: string): boolean;
 };
 
@@ -60,6 +53,11 @@ type ProjectRow = { id: string; name: string; domain: string | null; created_at:
 
 const toProject = (row: ProjectRow): Project => ({ id: row.id, name: row.name, domain: row.domain, createdAt: row.created_at });
 
+type KeyRange = { $from: string; $to: string };
+
+// Every key of a project starts with "<id>:", and ";" is the character right after ":", so this range is exactly that prefix and can use the key index.
+const keyRange = (id: string): KeyRange => ({ $from: `${id}:`, $to: `${id};` });
+
 const tableExists = (db: Database, name: string) =>
   db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name").get({ $name: name }) !== null;
 
@@ -68,34 +66,33 @@ export function createSqliteSettingsStore({ path, encryptionKey, now = () => new
   const db = new Database(path);
   db.run("PRAGMA busy_timeout = 5000");
   db.run("PRAGMA journal_mode = WAL");
-  db.run(
-    "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, secret INTEGER NOT NULL, updated_at TEXT NOT NULL)",
-  );
-
-  // First start with projects: everything configured so far becomes the default project. Setting keys
-  // gain the project prefix, and so do claim keys, so a weekly job that already ran this week does not
-  // run again under its new project-scoped key.
-  db.transaction(() => {
-    if (tableExists(db, "projects")) return;
-    db.run("CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, domain TEXT, created_at TEXT NOT NULL)");
-    db.query("INSERT INTO projects (id, name, domain, created_at) VALUES ($id, 'Default', NULL, $at)").run({
-      $id: DEFAULT_PROJECT_ID,
-      $at: now().toISOString(),
-    });
-    db.query("UPDATE settings SET key = $prefix || key").run({ $prefix: `${DEFAULT_PROJECT_ID}:` });
-    if (tableExists(db, "claims")) db.query("UPDATE claims SET key = $prefix || key").run({ $prefix: `${DEFAULT_PROJECT_ID}/` });
-  })();
+  migrate(db, "settings", [
+    (db) => {
+      db.run(
+        "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, secret INTEGER NOT NULL, updated_at TEXT NOT NULL)",
+      );
+      if (tableExists(db, "projects")) return;
+      db.run("CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, domain TEXT, created_at TEXT NOT NULL)");
+      db.query("INSERT INTO projects (id, name, domain, created_at) VALUES ($id, 'Default', NULL, $at)").run({
+        $id: DEFAULT_PROJECT_ID,
+        $at: now().toISOString(),
+      });
+      // Claim keys are re-prefixed too so a weekly job that already ran this week does not rerun under its project-scoped key.
+      db.query("UPDATE settings SET key = $prefix || key").run({ $prefix: `${DEFAULT_PROJECT_ID}:` });
+      if (tableExists(db, "claims")) db.query("UPDATE claims SET key = $prefix || key").run({ $prefix: `${DEFAULT_PROJECT_ID}/` });
+    },
+  ]);
 
   const box = encryptionKey ? createSecretBox(encryptionKey) : undefined;
-  const selectProject = db.query<{ key: string; value: string; secret: number }, { $prefix: string; $len: number }>(
-    "SELECT substr(key, $len + 1) AS key, value, secret FROM settings WHERE substr(key, 1, $len) = $prefix",
+  const selectProject = db.query<{ key: string; value: string; secret: number }, KeyRange & { $len: number }>(
+    "SELECT substr(key, $len + 1) AS key, value, secret FROM settings WHERE key >= $from AND key < $to",
   );
   const upsert = db.query(
     `INSERT INTO settings (key, value, secret, updated_at) VALUES ($key, $value, $secret, $updatedAt)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, secret = excluded.secret, updated_at = excluded.updated_at`,
   );
   const del = db.query("DELETE FROM settings WHERE key = $key");
-  const delProject = db.query("DELETE FROM settings WHERE substr(key, 1, $len) = $prefix");
+  const delProject = db.query<unknown, KeyRange>("DELETE FROM settings WHERE key >= $from AND key < $to");
   const listProjects = db.query<ProjectRow, []>("SELECT * FROM projects ORDER BY created_at, rowid");
   const projectById = db.query<ProjectRow, { $id: string }>("SELECT * FROM projects WHERE id = $id");
   const insertProject = db.query("INSERT INTO projects (id, name, domain, created_at) VALUES ($id, $name, $domain, $at)");
@@ -111,12 +108,13 @@ export function createSqliteSettingsStore({ path, encryptionKey, now = () => new
   });
 
   const scoped = (id: string): SettingsStore => {
-    const prefix = `${id}:`;
+    const range = keyRange(id);
+    const prefix = range.$from;
     return {
       canStoreSecrets: box !== undefined,
       all() {
         const out: Record<string, StoredSetting> = {};
-        for (const row of selectProject.all({ $prefix: prefix, $len: prefix.length })) {
+        for (const row of selectProject.all({ ...range, $len: prefix.length })) {
           const secret = row.secret === 1;
           out[row.key] = { secret, json: secret ? (box?.open(row.value) ?? null) : row.value };
         }
@@ -125,9 +123,6 @@ export function createSqliteSettingsStore({ path, encryptionKey, now = () => new
       apply({ set = [], remove = [] }) {
         if (!box && set.some((w) => w.secret)) throw new SecretsUnavailableError();
         write(prefix, set, remove);
-      },
-      close() {
-        db.close();
       },
     };
   };
@@ -139,6 +134,7 @@ export function createSqliteSettingsStore({ path, encryptionKey, now = () => new
 
   return {
     ...scoped(DEFAULT_PROJECT_ID),
+    close: () => db.close(),
     project: scoped,
     projects: () => listProjects.all().map(toProject),
     getProject,
@@ -150,21 +146,22 @@ export function createSqliteSettingsStore({ path, encryptionKey, now = () => new
         insertProject.run({ $id: id, $name: name, $domain: domain, $at: now().toISOString() });
         return id;
       });
-      return getProject(create())!;
+      return getProject(create.immediate())!;
     },
     updateProject(id, input) {
-      const current = getProject(id);
-      if (!current) return null;
-      const name = input.name === undefined ? current.name : normalizeName(input.name);
-      const domain = input.domain === undefined ? current.domain : normalizeDomain(input.domain);
-      renameProject.run({ $id: id, $name: name, $domain: domain });
-      return getProject(id);
+      return db.transaction(() => {
+        const current = getProject(id);
+        if (!current) return null;
+        const name = input.name === undefined ? current.name : normalizeName(input.name);
+        const domain = input.domain === undefined ? current.domain : normalizeDomain(input.domain);
+        renameProject.run({ $id: id, $name: name, $domain: domain });
+        return getProject(id);
+      }).immediate();
     },
     deleteProject(id) {
       if (id === DEFAULT_PROJECT_ID) throw new ProjectInputError("The default project cannot be deleted");
-      const prefix = `${id}:`;
       return db.transaction(() => {
-        delProject.run({ $prefix: prefix, $len: prefix.length });
+        delProject.run(keyRange(id));
         return removeProject.run({ $id: id }).changes > 0;
       })();
     },

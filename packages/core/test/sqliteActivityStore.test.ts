@@ -320,7 +320,7 @@ describe("read state", () => {
     };
     const a = done("a", { decision: "issue" });
     done("b", { decision: "drop" });
-    done("legacy"); // finished before outcomes existed: never counted
+    done("legacy");
     const q = { automation: "triage" };
 
     expect(s.unreadCount(q)).toBe(2);
@@ -338,5 +338,60 @@ describe("read state", () => {
     expect(s.markRunsRead({ ...q, readAt: "2026-01-03T00:00:00.000Z" })).toBe(2);
     expect(s.unreadCount(q)).toBe(0);
     expect(s.markRunsRead({ ...q, readAt: "2026-01-03T00:00:00.000Z" })).toBe(0);
+  });
+});
+
+describe("upgrades and damaged rows", () => {
+  const withFile = (run: (path: string) => void) => {
+    const dir = mkdtempSync(join(tmpdir(), "activity-"));
+    try {
+      run(join(dir, "db.sqlite"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("a database from before versioned schemas keeps its rows and stays queryable across reopens", () => {
+    withFile((path) => {
+      const old = new Database(path);
+      old.run("CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL, source TEXT, automation TEXT, external_id TEXT, run_id TEXT, fields TEXT NOT NULL, project TEXT)");
+      old.run("CREATE TABLE runs (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, automation TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL, external_id TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error TEXT, project TEXT, outcome TEXT, read_at TEXT)");
+      old.run("CREATE INDEX runs_automation ON runs (automation)");
+      old.run("CREATE INDEX runs_external_id ON runs (external_id)");
+      old.run(`INSERT INTO runs (id, project, automation, source, kind, external_id, status, started_at, finished_at, outcome)
+        VALUES ('r1', 'acme', 'triage', 's', 'k', 'e1', 'succeeded', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z', '{"decision":"issue"}')`);
+      old.run(`INSERT INTO logs (time, level, message, project, run_id, fields) VALUES ('2026-01-01T00:00:00.000Z', 'info', 'kept', 'acme', 'r1', '{"runId":"r1"}')`);
+      old.close();
+
+      for (let i = 0; i < 2; i++) {
+        const s = createSqliteActivityStore({ path, legacyProject: "default" });
+        expect(s.queryRuns({ project: "acme", automation: "triage", decision: "issue", limit: 10 }).items.map((r) => r.id)).toEqual(["r1"]);
+        expect(s.unreadCount({ project: "acme", automation: "triage" })).toBe(1);
+        expect(s.getRun("r1")?.logs.map((l) => l.message)).toEqual(["kept"]);
+        s.close();
+      }
+    });
+  });
+
+  test("a log row whose fields are not a JSON object is returned with empty fields instead of failing the page", () => {
+    withFile((path) => {
+      const s = createSqliteActivityStore({ path });
+      open.push(s);
+      s.recordLog(entry("before", { runId: "r1" }));
+      const raw = new Database(path);
+      raw.run(`INSERT INTO logs (time, level, message, run_id, fields) VALUES ('2026-01-01T00:00:00.000Z', 'warn', 'corrupt', 'r1', '{not json')`);
+      raw.run(`INSERT INTO logs (time, level, message, run_id, fields) VALUES ('2026-01-01T00:00:00.000Z', 'warn', 'array', 'r1', '[1]')`);
+      raw.close();
+      s.recordLog(entry("after", { runId: "r1" }));
+
+      const page = s.queryLogs({ limit: 10 }).items;
+      expect(page.map((l) => [l.message, l.fields])).toEqual([
+        ["after", { runId: "r1" }],
+        ["array", {}],
+        ["corrupt", {}],
+        ["before", { runId: "r1" }],
+      ]);
+      expect(s.queryLogs({ runId: "r1", limit: 10 }).items).toHaveLength(4);
+    });
   });
 });
