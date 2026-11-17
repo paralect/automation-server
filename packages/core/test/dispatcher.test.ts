@@ -333,3 +333,94 @@ describe("dispatcher failures outside the automation", () => {
     expect(entries.some((e) => e.level === "error" && e.fields?.error === "registry broken")).toBe(true);
   });
 });
+
+describe("dispatcher replay", () => {
+  const scoped = (name: string, run: Automation["run"], project = "acme", kind = "thing"): Automation => ({
+    ...auto(name, run, kind),
+    project,
+  });
+  const withActivity = (automations: Automation[], prepare?: (event: Event) => Promise<Event>) => {
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    return { activity, ...setup(automations, prepare, activity) };
+  };
+  const request = (over: Partial<Parameters<ReturnType<typeof setup>["dispatcher"]["replay"]>[0]> = {}) => ({
+    project: "acme",
+    automation: "a",
+    event: event(),
+    replayOf: "run-1",
+    ...over,
+  });
+
+  test("runs exactly the named automation, even when another one would also match, and links the original run", async () => {
+    const ran: string[] = [];
+    const { dispatcher, activity } = withActivity([scoped("a", async () => void ran.push("a")), scoped("b", async () => void ran.push("b"))]);
+    const result = await dispatcher.replay(request());
+    await dispatcher.drain(1000);
+    expect(result.outcome).toBe("started");
+    expect(ran).toEqual(["a"]);
+    const stored = activity.getRun(result.runId!);
+    expect(stored?.run).toMatchObject({ automation: "a", project: "acme", status: "succeeded", replayOf: "run-1", hasEvent: true });
+    expect(stored?.event?.payload).toEqual({ secret: "[redacted]" });
+  });
+
+  test("bypasses matches", async () => {
+    let ran = 0;
+    const { dispatcher } = withActivity([scoped("a", async () => void ran++, "acme", "other-kind")]);
+    const result = await dispatcher.replay(request());
+    await dispatcher.drain(1000);
+    expect(result.outcome).toBe("started");
+    expect(ran).toBe(1);
+  });
+
+  test("re-runs prepare and hands the prepared event to the automation while storing the original", async () => {
+    const seen: unknown[] = [];
+    const { dispatcher, activity } = withActivity([scoped("a", async (e) => void seen.push(e.payload))], async (e) => ({ ...e, payload: "enriched" }));
+    const result = await dispatcher.replay(request());
+    await dispatcher.drain(1000);
+    expect(seen).toEqual(["enriched"]);
+    expect(activity.getRun(result.runId!)?.event?.payload).toEqual({ secret: "[redacted]" });
+  });
+
+  test("returns the run id while the automation is still running", async () => {
+    let release!: () => void;
+    const { dispatcher, activity } = withActivity([scoped("a", () => new Promise<void>((r) => (release = r)))]);
+    const result = await dispatcher.replay(request());
+    expect(activity.getRun(result.runId!)?.run.status).toBe("running");
+    release();
+    await dispatcher.drain(1000);
+    expect(activity.getRun(result.runId!)?.run.status).toBe("succeeded");
+  });
+
+  test("a failed run releases its claim so a replay then succeeds", async () => {
+    let calls = 0;
+    const { dispatcher, activity } = withActivity([
+      scoped("a", async () => {
+        if (++calls === 1) throw new Error("boom");
+      }),
+    ]);
+    dispatcher.enqueue({ ...event(), project: "acme" });
+    await dispatcher.drain(1000);
+    const failed = activity.queryRuns({ limit: 10 }).items[0]!;
+    expect(failed.status).toBe("failed");
+    const result = await dispatcher.replay(request({ replayOf: failed.id }));
+    await dispatcher.drain(1000);
+    expect(result.outcome).toBe("started");
+    expect(activity.getRun(result.runId!)?.run).toMatchObject({ status: "succeeded", replayOf: failed.id });
+  });
+
+  test("a replay of an event whose claim is already done is a duplicate", async () => {
+    const { dispatcher } = withActivity([scoped("a", async () => {})]);
+    await dispatcher.replay(request());
+    await dispatcher.drain(1000);
+    const again = await dispatcher.replay(request());
+    expect(again.outcome).toBe("duplicate");
+  });
+
+  test("an unknown automation or a different project returns unknown-automation without running anything", async () => {
+    let ran = 0;
+    const { dispatcher } = withActivity([scoped("a", async () => void ran++)]);
+    expect(await dispatcher.replay(request({ automation: "gone" }))).toEqual({ outcome: "unknown-automation" });
+    expect(await dispatcher.replay(request({ project: "other" }))).toEqual({ outcome: "unknown-automation" });
+    expect(ran).toBe(0);
+  });
+});
