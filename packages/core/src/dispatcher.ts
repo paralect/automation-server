@@ -56,7 +56,8 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
 
   // Claims and records the run synchronously so callers can learn the run id before the automation finishes.
   // `original` is the event as received, `event` the one handed to the automation after prepare.
-  const begin = (automation: Automation, event: Event, original: Event, replayOf?: string, dryRun = false): Started => {
+  const begin = (automation: Automation, event: Event, original: Event, replayOf?: string, requestedDryRun = false): Started => {
+    const dryRun = requestedDryRun || automation.dryRun === true;
     const key = claimKey(automation.name, event.externalId, automation.project);
     const scoped = scopeFields(automation.name, event.externalId, automation.project);
     const runStart = () => ({

@@ -81,6 +81,15 @@ describe("linear-label-to-pr", () => {
     });
   });
 
+  test("a dry run reads the default branch, dispatches nothing and says what it would do", async () => {
+    const { fn, calls } = mockFetch((c) => (c.method === "GET" ? json(200, { default_branch: "main" }) : new Response(null, { status: 204 })));
+    lines.length = 0;
+    await make(fn).run(event(issue()), { log, dryRun: true });
+    expect(calls.map((c) => c.method)).toEqual(["GET"]);
+    expect(lines).toEqual([expect.stringContaining("dry-run: would dispatch workflow")]);
+    expect(lines[0]).toContain('"ref":"main"');
+  });
+
   test("a configured ref skips the default branch lookup", async () => {
     const { fn, calls } = mockFetch(() => new Response(null, { status: 204 }));
     await make(fn, { ref: "develop" }).run(event(issue()), { log });

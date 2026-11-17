@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { defineAutomation, type Automation } from "../src/automation";
+import { defineAutomation, withDryRun, type Automation } from "../src/automation";
 import { createDispatcher } from "../src/dispatcher";
 import type { Event } from "../src/event";
 import type { Logger } from "../src/logger";
@@ -453,5 +453,18 @@ describe("dispatcher replay", () => {
     expect(await dispatcher.replay(request({ automation: "gone" }))).toEqual({ outcome: "unknown-automation" });
     expect(await dispatcher.replay(request({ project: "other" }))).toEqual({ outcome: "unknown-automation" });
     expect(ran).toBe(0);
+  });
+});
+
+describe("withDryRun", () => {
+  test("every run of a wrapped automation is a dry run, live events included", async () => {
+    const seen: (boolean | undefined)[] = [];
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const wrapped = withDryRun({ ...auto("a", async (_e, ctx) => void seen.push(ctx.dryRun)), project: "acme" });
+    const { dispatcher } = setup([wrapped], undefined, activity);
+    dispatcher.enqueue({ ...event(), project: "acme" });
+    await dispatcher.drain(1000);
+    expect(seen).toEqual([true]);
+    expect(activity.queryRuns({ limit: 10 }).items[0]).toMatchObject({ status: "succeeded", dryRun: true });
   });
 });

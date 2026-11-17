@@ -42,6 +42,14 @@ export const crispOutcomeSchema = z.object({
     segmentSet: z.boolean().nullable(),
   }),
   note: text,
+  // Present only on dry runs: what a real run would have written. `note` then holds the note it would have posted.
+  dryRun: z.literal(true).optional(),
+  wouldDo: z
+    .object({
+      issue: z.object({ title: text, labels: z.array(text) }).nullable(),
+      dispatch: z.boolean(),
+    })
+    .optional(),
 });
 
 export type CrispOutcome = z.infer<typeof crispOutcomeSchema>;

@@ -99,7 +99,7 @@ export const INTEGRATIONS = {
       { key: "webhookSecret", label: "Web Hooks signing secret", kind: "secret", required: true, help: "Verifies X-Crisp-Signature." },
       { key: "triggerSegment", label: "Trigger segment", kind: "text", default: "triage", help: "Adding this segment to a conversation starts the triage." },
       { key: "autoTriage", label: "Triage resolved conversations", kind: "boolean", default: false, help: "Also triage every conversation marked resolved." },
-      { key: "mode", label: "Mode", kind: "select", options: ["shadow", "issue", "fix"], default: "shadow", help: "shadow only posts a note. issue also opens GitHub issues. fix also starts the Codex fix workflow." },
+      { key: "mode", label: "Mode", kind: "select", options: ["shadow", "issue", "fix", "dry-run"], default: "shadow", help: "shadow only posts a note. issue also opens GitHub issues. fix also starts the Codex fix workflow. dry-run does everything fix would, but writes nothing to Crisp or GitHub: each run shows what it would have done on its Runs page." },
       { key: "minConfidence", label: "Minimum confidence", kind: "number", default: 0.7, min: 0, max: 1, help: "Below this the verdict becomes needs_info." },
       { key: "areas", label: "Product areas", kind: "list", help: "The closed list of areas the classifier picks from." },
       { key: "autofixAreas", label: "Autofix areas", kind: "list", help: "Areas whose bugs may go to the Codex fix workflow. Empty means none." },

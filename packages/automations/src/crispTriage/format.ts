@@ -82,9 +82,10 @@ export type NoteInput = {
   readonly issueUrl?: string;
   readonly dispatched?: boolean;
   readonly dispatchFailed?: boolean;
+  readonly dryRun?: boolean;
 };
 
-export function formatNote({ decision, mode, github, verdict, issueUrl, dispatched, dispatchFailed }: NoteInput): string {
+export function formatNote({ decision, mode, github, verdict, issueUrl, dispatched, dispatchFailed, dryRun }: NoteInput): string {
   const lines = [AUTOMATION_NOTE_PREFIX];
   if (verdict) {
     const t = verdict.triage;
@@ -105,6 +106,8 @@ export function formatNote({ decision, mode, github, verdict, issueUrl, dispatch
     case "issue":
     case "fix":
       if (issueUrl) lines.push(`GitHub issue: ${issueUrl}`);
+      if (dryRun && github) lines.push("GitHub issue: (opened by a real run)");
+      if (dryRun && github && decision.kind === "fix") lines.push("The Codex fix workflow would be queued.");
       if (dispatched) lines.push("The Codex fix workflow was queued. It opens a draft PR if it can reproduce the bug. Check the Actions tab, a busy queue can drop a pending run.");
       if (dispatchFailed) lines.push("The Codex fix workflow could not be started. Run it by hand for this issue from the Actions tab.");
       break;
@@ -131,6 +134,7 @@ export type OutcomeInput = {
   readonly notePosted: boolean | null;
   readonly segmentSet: boolean | null;
   readonly note: string;
+  readonly wouldDo?: { readonly issue: { readonly title: string; readonly labels: readonly string[] } | null; readonly dispatch: boolean };
 };
 
 export function buildOutcome(i: OutcomeInput): CrispOutcome {
@@ -173,5 +177,6 @@ export function buildOutcome(i: OutcomeInput): CrispOutcome {
     },
     crisp: { segment: statusSegment(i.decision), notePosted: i.notePosted, segmentSet: i.segmentSet },
     note: clean(i.note),
+    ...(i.wouldDo ? { dryRun: true as const, wouldDo: { issue: i.wouldDo.issue && { title: clean(i.wouldDo.issue.title), labels: [...i.wouldDo.issue.labels] }, dispatch: i.wouldDo.dispatch } } : {}),
   };
 }

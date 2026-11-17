@@ -12,6 +12,8 @@ export type AutomationContext = {
 export type Automation = {
   readonly name: string;
   readonly project?: string;
+  // Every run of this automation is a dry run, whoever started it. The dispatcher marks the run row and sets ctx.dryRun.
+  readonly dryRun?: boolean;
   matches(event: Event): boolean;
   run(event: Event, ctx: AutomationContext): Promise<void>;
 };
@@ -27,3 +29,5 @@ export function defineAutomation<E extends Event>(spec: {
     run: (event, ctx) => spec.run(event as E, ctx),
   };
 }
+
+export const withDryRun = (automation: Automation): Automation => ({ ...automation, dryRun: true });
