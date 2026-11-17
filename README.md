@@ -29,6 +29,7 @@ An **automation** runs inside the server. A **workflow** is a GitHub Actions fil
 | `linear-label-to-pr` | automation | The trigger label is added to a Linear issue | Dispatches the `linear-implement` workflow. |
 | `crisp-triage` | automation | The trigger segment is added to a Crisp conversation | Classifies the conversation, writes a private note, and by mode opens an issue or starts a fix. |
 | `posthog-weekly-report` | scheduled job | Once a week | Posts a week-over-week PostHog report to Slack. |
+| `token-health` | scheduled job | Once a day, 06:00 UTC | Tests every configured integration, shows the result on the integration tiles and alerts on Slack when a token fails or nears expiry. See [docs/integrations/slack.md](docs/integrations/slack.md#token-health). |
 | `codex-issue-fix.yml` | workflow | A team member opens an issue, or the server dispatches it | Codex writes a fix with a regression test and opens a draft PR. |
 | `linear-implement.yml` | workflow | Dispatched by `linear-label-to-pr` | Codex implements the Linear issue and opens a PR. |
 | `codex-changelog.yml` | workflow | A push to the production branch | Codex writes a changelog note and opens a PR. |

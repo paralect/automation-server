@@ -29,7 +29,7 @@ Treat the URL as a secret. Anyone who has it can post to the channel. Alerts quo
 | --- | --- |
 | Incoming webhook URL | The `https://hooks.slack.com/services/...` URL from step 1. It must start with `https://`. |
 | Failure threshold | How many failures in a row trigger an alert. Default `3`, from 1 to 50. |
-| Alert on token health | Leave on. Used by token health alerts. |
+| Alert on token health | On by default. Alerts when a connected token stops working or is about to expire. Turn it off to keep only failure alerts. |
 | Channel label | Optional. Shown in the alert text, for example `#alerts`. |
 
 3. Click **Save**. The card shows **Configured** once the webhook URL is set.
@@ -43,5 +43,19 @@ The server alerts once when an automation's streak of failed runs reaches the th
 - The first successful run ends the streak. Three new failures after it alert again.
 - Duplicates, dry runs and runs that were interrupted by a server restart are not counted, and they do not end a streak.
 - Each project has its own streaks and its own Slack settings.
+
+## Token health alerts
+
+Once a day, from 06:00 UTC, the server tests every configured integration and records the result. The integration tiles show a green, red or grey dot, when the last check ran, and "Expires in N days" or "Expired" when the token has a known expiry. The **Test** button on a tile runs the same check at once and records it.
+
+With **Alert on token health** on, the channel gets one message when:
+
+- A check that passed, or had never run, now fails. A token that already fails on its very first check alerts once.
+- A token expires within 14 days. It alerts once for each expiry date.
+- A token has already expired. This alerts once too.
+
+While the state stays bad, nothing more is posted. A token that recovers and fails again alerts again. The message names the integration and project and never contains a token or the webhook URL.
+
+Only GitHub fine-grained tokens, and an OpenRouter key that has an expiry, report when they expire. Sentry, Linear, Crisp and PostHog keys do not, so for them the check shows only whether the key still works. The Slack webhook is not part of the daily check because testing it posts a message.
 
 To get run links in the message, set `ADMIN_PUBLIC_URL` on the server to the public address of the admin, for example `https://admin.example.com`.
