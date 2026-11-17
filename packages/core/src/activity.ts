@@ -1,3 +1,5 @@
+import type { StoredEvent } from "./redact";
+import type { Event } from "./event";
 import type { LogFields } from "./logger";
 
 export type LogLevel = "info" | "warn" | "error";
@@ -35,6 +37,8 @@ export type RunRecord = {
   readonly error: string | null;
   readonly outcome?: RunOutcome | null;
   readonly readAt?: string | null;
+  readonly replayOf?: string;
+  readonly hasEvent: boolean;
 };
 
 export type Page<T> = { readonly items: T[]; readonly nextCursor: number | null };
@@ -78,7 +82,12 @@ export type ActivityStats = {
   readonly recentFailures: RunRecord[];
 };
 
-export type RunStart = Pick<RunRecord, "automation" | "source" | "kind" | "externalId"> & { startedAt: string; project?: string };
+export type RunStart = Pick<RunRecord, "automation" | "source" | "kind" | "externalId"> & {
+  startedAt: string;
+  project?: string;
+  event?: Event;
+  replayOf?: string;
+};
 
 export interface ActivityStore {
   recordLog(entry: LogEntry): void;
@@ -91,7 +100,7 @@ export interface ActivityStore {
   setRunRead(id: string, readAt: string | null): boolean;
   markRunsRead(query: { project?: string; automation: string; readAt: string }): number;
   unreadCount(query: { project?: string; automation: string }): number;
-  getRun(id: string): { run: RunRecord; logs: StoredLog[] } | null;
+  getRun(id: string): { run: RunRecord; logs: StoredLog[]; event?: StoredEvent } | null;
   stats(sinceIso: string, bucketMs: number, project?: string): ActivityStats;
   failInterruptedRuns(finishedAt: string): number;
   prune(beforeIso: string): number;

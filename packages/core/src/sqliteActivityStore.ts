@@ -14,6 +14,8 @@ import type {
   StoredLog,
   StoredRun,
 } from "./activity";
+import type { Event } from "./event";
+import { toStoredEvent } from "./redact";
 import { migrate } from "./sqliteSchema";
 
 export type SqliteActivityStoreOptions = {
@@ -49,6 +51,9 @@ type RunRow = {
   error: string | null;
   outcome: string | null;
   read_at: string | null;
+  replay_of: string | null;
+  has_event: number;
+  event?: string | null;
 };
 
 const asString = (value: unknown) => (typeof value === "string" ? value : null);
@@ -97,7 +102,22 @@ const toRun = (row: RunRow): StoredRun => ({
   error: row.error,
   outcome: parseObject(row.outcome),
   readAt: row.read_at,
+  ...(row.replay_of ? { replayOf: row.replay_of } : {}),
+  hasEvent: row.has_event === 1,
 });
+
+// The event body is left out so list pages never carry payloads.
+const RUN_COLUMNS =
+  "seq, id, project, automation, source, kind, external_id, status, started_at, finished_at, error, outcome, read_at, replay_of, (event IS NOT NULL) AS has_event";
+
+const parseEvent = (raw: string | null): Event | undefined => {
+  if (raw === null) return undefined;
+  try {
+    return JSON.parse(raw) as Event;
+  } catch {
+    return undefined;
+  }
+};
 
 type Params = Record<string, string | number>;
 
@@ -198,6 +218,10 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       db.run("CREATE INDEX runs_finished_at ON runs (finished_at)");
       db.run("CREATE INDEX logs_project_time ON logs (project, time)");
     },
+    (db) => {
+      if (!hasColumn(db, "runs", "event")) db.run("ALTER TABLE runs ADD COLUMN event TEXT");
+      if (!hasColumn(db, "runs", "replay_of")) db.run("ALTER TABLE runs ADD COLUMN replay_of TEXT");
+    },
   ]);
 
   const insertLog = db.query(
@@ -205,8 +229,8 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
      VALUES ($time, $level, $message, $project, $source, $automation, $externalId, $runId, $fields)`,
   );
   const insertRun = db.query(
-    `INSERT INTO runs (id, project, automation, source, kind, external_id, status, started_at, finished_at)
-     VALUES ($id, $project, $automation, $source, $kind, $externalId, $status, $startedAt, $finishedAt)`,
+    `INSERT INTO runs (id, project, automation, source, kind, external_id, status, started_at, finished_at, event, replay_of)
+     VALUES ($id, $project, $automation, $source, $kind, $externalId, $status, $startedAt, $finishedAt, $event, $replayOf)`,
   );
   const finishStmt = db.query(
     "UPDATE runs SET status = $status, finished_at = $finishedAt, error = $error, outcome = $outcome WHERE id = $id AND status = 'running'",
@@ -217,7 +241,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
   );
   const pruneLogs = db.query("DELETE FROM logs WHERE time < $before");
   const pruneRuns = db.query("DELETE FROM runs WHERE finished_at IS NOT NULL AND finished_at < $before");
-  const runById = db.query<RunRow, { $id: string }>("SELECT * FROM runs WHERE id = $id");
+  const runById = db.query<RunRow, { $id: string }>(`SELECT ${RUN_COLUMNS}, event FROM runs WHERE id = $id`);
   const logsByRun = db.query<LogRow, { $id: string }>("SELECT * FROM logs WHERE run_id = $id ORDER BY id ASC");
 
   const start = (run: RunStart, status: RunStatus, finishedAt: string | null) => {
@@ -232,12 +256,15 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       $status: status,
       $startedAt: run.startedAt,
       $finishedAt: finishedAt,
+      $event: run.event ? JSON.stringify(toStoredEvent(run.event)) : null,
+      $replayOf: run.replayOf ?? null,
     });
     return id;
   };
 
   const paginate = <Row, T>(
     table: string,
+    columns: string,
     cursorColumn: string,
     filter: Filter,
     limit: number,
@@ -246,7 +273,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
   ): Page<T> => {
     const rows = db
       .query<Row, Params>(
-        `SELECT * FROM ${table} ${filter.where} ORDER BY ${cursorColumn} DESC LIMIT $limit`,
+        `SELECT ${columns} FROM ${table} ${filter.where} ORDER BY ${cursorColumn} DESC LIMIT $limit`,
       )
       .all({ ...filter.params, $limit: limit + 1 });
     const items = rows.slice(0, limit).map(map);
@@ -283,7 +310,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
         "id",
         logProject(q.project),
       );
-      return paginate<LogRow, StoredLog>("logs", "id", filter, q.limit, toLog, (l) => l.id);
+      return paginate<LogRow, StoredLog>("logs", "*", "id", filter, q.limit, toLog, (l) => l.id);
     },
     queryRuns(q) {
       const filter = buildFilter(
@@ -294,7 +321,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
         "seq",
         runExtra(q),
       );
-      return paginate<RunRow, StoredRun>("runs", "seq", filter, q.limit, toRun, (r) => r.seq);
+      return paginate<RunRow, StoredRun>("runs", RUN_COLUMNS, "seq", filter, q.limit, toRun, (r) => r.seq);
     },
     setRunRead: (id, readAt) => setReadStmt.run({ $id: id, $readAt: readAt }).changes > 0,
     markRunsRead({ project, automation, readAt }) {
@@ -328,7 +355,8 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       const row = runById.get({ $id: id });
       if (!row) return null;
       const { seq: _seq, ...run } = toRun(row);
-      return { run: run satisfies RunRecord, logs: logsByRun.all({ $id: id }).map(toLog) };
+      const event = parseEvent(row.event ?? null);
+      return { run: run satisfies RunRecord, logs: logsByRun.all({ $id: id }).map(toLog), ...(event ? { event } : {}) };
     },
     stats(sinceIso, bucketMs, project): ActivityStats {
       const scoped = project !== undefined;
@@ -378,7 +406,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       }
 
       const recentFailures = db
-        .query<RunRow, Params>(`SELECT * FROM runs WHERE status = 'failed' ${runScope} ORDER BY seq DESC LIMIT 5`)
+        .query<RunRow, Params>(`SELECT ${RUN_COLUMNS} FROM runs WHERE status = 'failed' ${runScope} ORDER BY seq DESC LIMIT 5`)
         .all(params())
         .map((row) => {
           const { seq: _seq, ...run } = toRun(row);

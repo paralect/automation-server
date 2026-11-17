@@ -1,5 +1,6 @@
 export * from "./automation";
 export * from "./event";
+export * from "./redact";
 export * from "./logger";
 export * from "./source";
 export * from "./store";

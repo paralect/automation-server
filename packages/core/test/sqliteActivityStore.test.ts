@@ -310,6 +310,66 @@ describe("run outcomes", () => {
   });
 });
 
+describe("stored event", () => {
+  const event = { project: "acme", source: "sentry", kind: "alert", externalId: "e1", receivedAt: "2026-01-01T00:00:00.000Z", payload: { title: "boom", token: "t" } };
+
+  test("startRun stores the redacted event, getRun returns it and queryRuns does not", () => {
+    const s = make();
+    const id = s.startRun(runStart({ event }));
+    expect(s.getRun(id)?.event).toEqual({ ...event, payload: { title: "boom", token: "[redacted]" } });
+    expect(s.getRun(id)?.run.hasEvent).toBe(true);
+    const [listed] = s.queryRuns({ limit: 10 }).items;
+    expect(listed).toMatchObject({ id, hasEvent: true });
+    expect(listed).not.toHaveProperty("event");
+    expect(JSON.stringify(s.stats("2025-01-01T00:00:00.000Z", 3_600_000).recentFailures)).not.toContain("boom");
+  });
+
+  test("a run without an event has hasEvent false and no event", () => {
+    const s = make();
+    const id = s.startRun(runStart());
+    expect(s.getRun(id)).not.toHaveProperty("event");
+    expect(s.getRun(id)?.run.hasEvent).toBe(false);
+  });
+
+  test("replayOf is stored and returned", () => {
+    const s = make();
+    const first = s.startRun(runStart({ event }));
+    const again = s.startRun(runStart({ event, replayOf: first }));
+    expect(s.getRun(again)?.run.replayOf).toBe(first);
+    expect(s.getRun(first)?.run).not.toHaveProperty("replayOf");
+  });
+
+  test("prune removes the event with its run", () => {
+    const s = make();
+    const id = s.startRun(runStart({ event, startedAt: "2025-12-01T00:00:00.000Z" }));
+    s.finishRun(id, { status: "failed", error: "x", finishedAt: "2025-12-01T00:00:01.000Z" });
+    s.prune("2026-01-01T00:00:00.000Z");
+    expect(s.getRun(id)).toBeNull();
+  });
+
+  test("a database from before stored events is upgraded and old runs report no event", () => {
+    const dir = mkdtempSync(join(tmpdir(), "event-"));
+    try {
+      const path = join(dir, "a.db");
+      const first = createSqliteActivityStore({ path });
+      const old = first.startRun(runStart());
+      first.close();
+      const raw = new Database(path);
+      raw.run("ALTER TABLE runs DROP COLUMN event");
+      raw.run("ALTER TABLE runs DROP COLUMN replay_of");
+      raw.run("UPDATE schema_versions SET version = 2 WHERE component = 'activity'");
+      raw.close();
+      const s = createSqliteActivityStore({ path });
+      open.push(s);
+      expect(s.getRun(old)?.run).toMatchObject({ id: old, hasEvent: false });
+      const id = s.startRun(runStart({ event }));
+      expect(s.getRun(id)?.event?.externalId).toBe("e1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("read state", () => {
   test("runs start unread and can be marked read, unread again, filtered and counted", () => {
     const s = make();
