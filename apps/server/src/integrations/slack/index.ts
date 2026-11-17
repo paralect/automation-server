@@ -5,6 +5,7 @@ import { defineModule } from "../module";
 export const slack = defineModule({
   id: "slack",
   build: () => ({}),
+  testHasSideEffects: true,
   async test({ slack }, { fetch }) {
     if (!slack.configured) return { ok: false, available: true, message: "Slack webhook URL is not set" };
     await postToSlack(slack.values.webhookUrl, "Automation server alerts are connected", { fetch });

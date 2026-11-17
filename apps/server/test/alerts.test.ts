@@ -1,5 +1,5 @@
 import { defineAutomation, createDispatcher, createSqliteActivityStore, createSqliteStore, type Automation, type Event, type Logger } from "@automation-server/core";
-import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
+import { createSqliteHealthStore, createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 
 import { createAlertNotifier } from "../src/alerts";
@@ -26,10 +26,11 @@ const setup = ({ env = { SLACK_ALERTS_WEBHOOK_URL: HOOK }, threshold = 3, slackS
   settings.project(PROJECT).apply({ set: [{ key: "slack.failureThreshold", json: String(threshold), secret: false }] });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const resolve = (project: string) => resolveConfig(settings.project(project), project === PROJECT ? env : envFor(project, {}));
-  const notify = createAlertNotifier({ resolve, activity, log, fetch, adminUrl });
+  const healthStore = createSqliteHealthStore({ path: ":memory:" });
+  const { onRunFinished: notify, notifyHealth } = createAlertNotifier({ resolve, activity, log, fetch, adminUrl, health: healthStore });
   const dispatcher = createDispatcher({ automations: () => automations, store: createSqliteStore({ path: ":memory:" }), log, activity, onRunFinished: notify });
   const automations: Automation[] = [];
-  return { slack, posted, logged, activity, notify, dispatcher, automations };
+  return { slack, posted, logged, activity, notify, notifyHealth, healthStore, settings, dispatcher, automations };
 };
 
 let failing = true;

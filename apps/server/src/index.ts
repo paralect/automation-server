@@ -10,6 +10,7 @@ import {
   createSqliteStore,
 } from "@automation-server/core";
 import {
+  createSqliteHealthStore,
   createSqliteSettingsStore,
   DEFAULT_PROJECT_ID,
   effectiveActionsRepos,
@@ -25,6 +26,7 @@ import { ENV } from "./env.server";
 import { createPosthogAdmin } from "./integrations/posthog";
 import { INTEGRATION_MODULES } from "./integrations/registry";
 import { createReplayAdmin } from "./replay";
+import { createHealthSink } from "./health";
 import { createRuntime } from "./runtime";
 
 const config = buildConfig(ENV);
@@ -56,14 +58,15 @@ const pruneTimer = setInterval(pruneOld, HOUR_MS);
 pruneTimer.unref();
 
 const resolve = (project: string) => resolveConfig(settings.project(project), envFor(project, process.env));
+const healthStore = createSqliteHealthStore({ path: config.databasePath });
+const { onRunFinished, notifyHealth } = createAlertNotifier({ resolve, activity, log, adminUrl: config.adminPublicUrl, health: healthStore });
 const runtime = createRuntime({
   modules: INTEGRATION_MODULES,
   projects: () => settings.projects().map((p) => p.id),
   resolve,
   deps: { log },
+  health: createHealthSink({ store: healthStore, notify: notifyHealth }),
 });
-
-const onRunFinished = createAlertNotifier({ resolve, activity, log, adminUrl: config.adminPublicUrl });
 
 const dispatcher = createDispatcher({
   automations: runtime.automations,
@@ -109,7 +112,7 @@ const app = createApp({
     actions,
     workflows: (project) => createWorkflowInstaller({ token: resolve(project).github.values.token }),
     adminToken: config.adminToken,
-    settings: { db: settings, env: process.env, reload, test: runtime.test },
+    settings: { db: settings, env: process.env, reload, test: runtime.test, health: healthStore.get },
     posthog: createPosthogAdmin({ resolve, scheduler }),
     replay: createReplayAdmin({ dispatcher, scheduler, jobs: (project) => runtime.project(project).jobs }),
     system: (project) => {
@@ -146,6 +149,7 @@ async function shutdown(signal: string) {
     await server.stop();
     await Promise.all([dispatcher.drain(10_000), scheduler.drain(10_000)]);
     store.close();
+    healthStore.close();
     settings.close();
     log.info("shutdown complete");
     activity.close();

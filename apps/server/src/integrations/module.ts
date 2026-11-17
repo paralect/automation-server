@@ -15,6 +15,8 @@ export type ModuleOutput = {
 export type IntegrationModule<I extends IntegrationId = IntegrationId> = {
   readonly id: I;
   build(config: ResolvedConfig, deps: ModuleDeps): ModuleOutput;
+  // The scheduled token check skips a module whose test writes to the outside world, like posting a Slack message.
+  readonly testHasSideEffects?: true;
   test?(config: ResolvedConfig, deps: ModuleDeps): Promise<ConnectionTestResult>;
 };
 

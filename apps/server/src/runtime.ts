@@ -2,6 +2,7 @@ import { errorMessage } from "@automation-server/api/errors";
 import type { Automation, Job, Logger, Source } from "@automation-server/core";
 import { INTEGRATIONS, type ConnectionTestResult, type IntegrationId, type ResolvedConfig } from "@automation-server/settings";
 
+import { createTokenHealthJob, type HealthSink } from "./health";
 import type { IntegrationModule, ModuleDeps } from "./integrations/module";
 
 type ProjectSnapshot = {
@@ -25,7 +26,7 @@ export type Runtime = {
   jobs(): readonly Job[];
   project(project: string): ProjectSnapshot;
   rebuild(): void;
-  test(project: string, id: IntegrationId): Promise<ConnectionTestResult>;
+  test(project: string, id: IntegrationId, now?: Date): Promise<ConnectionTestResult>;
 };
 
 const TEST_TIMEOUT_MS = 8_000;
@@ -39,6 +40,7 @@ export type RuntimeDeps = {
   resolve: (project: string) => ResolvedConfig;
   deps: ModuleDeps;
   testTimeoutMs?: number;
+  health?: HealthSink;
 };
 
 const withProject = (log: Logger, project: string): Logger => ({
@@ -47,8 +49,46 @@ const withProject = (log: Logger, project: string): Logger => ({
   error: (m, f) => log.error(m, { project, ...f }),
 });
 
-export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs = TEST_TIMEOUT_MS }: RuntimeDeps): Runtime {
+export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs = TEST_TIMEOUT_MS, health }: RuntimeDeps): Runtime {
   const depsFor = (project: string): ModuleDeps => ({ ...deps, log: withProject(deps.log, project) });
+
+  const probe = async (project: string, id: IntegrationId): Promise<ConnectionTestResult> => {
+    const title = INTEGRATIONS[id].title;
+    const module = modules.find((m) => m.id === id);
+    if (!module?.test) return { ok: false, available: false, message: `Connection test is not available for ${title} yet` };
+    const config = resolve(project);
+    const resolved = config[id];
+    if (!resolved.configured) {
+      return { ok: false, available: true, message: `${title} is not configured. Missing: ${resolved.missing.join(", ")}` };
+    }
+    // Modules take a fetch, not a signal, so the abort rides on a wrapped fetch and the race covers a fetch that ignores it.
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<ConnectionTestResult>((done) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        done({ ok: false, available: true, message: `Connection test timed out after ${testTimeoutMs / 1000} s` });
+      }, testTimeoutMs);
+    });
+    const attempt = (async (): Promise<ConnectionTestResult> => {
+      try {
+        return await module.test!(config, { ...depsFor(project), fetch: withSignal(deps.fetch, controller.signal) });
+      } catch (err) {
+        return { ok: false, available: true, message: `Connection test failed: ${errorMessage(err)}` };
+      }
+    })();
+    try {
+      return await Promise.race([attempt, timedOut]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const test = async (project: string, id: IntegrationId, now = new Date()): Promise<ConnectionTestResult> => {
+    const result = await probe(project, id);
+    if (health && result.available && resolve(project)[id].configured) await health.record(project, id, result, now);
+    return result;
+  };
 
   const buildProject = (project: string): ProjectSnapshot => {
     const config = resolve(project);
@@ -72,6 +112,18 @@ export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs 
       } catch (err) {
         log.error("integration build failed, skipped", { integration: module.id, error: errorMessage(err) });
       }
+    }
+    if (health) {
+      jobs.push(
+        createTokenHealthJob({
+          project,
+          integrations: () => {
+            const current = resolve(project);
+            return modules.filter((m) => m.test && !m.testHasSideEffects && current[m.id].configured).map((m) => m.id);
+          },
+          test: (id, now) => test(project, id, now),
+        }),
+      );
     }
     return { sources, automations, jobs };
   };
@@ -106,36 +158,6 @@ export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs 
         });
       }
     },
-    async test(project, id) {
-      const title = INTEGRATIONS[id].title;
-      const module = modules.find((m) => m.id === id);
-      if (!module?.test) return { ok: false, available: false, message: `Connection test is not available for ${title} yet` };
-      const config = resolve(project);
-      const resolved = config[id];
-      if (!resolved.configured) {
-        return { ok: false, available: true, message: `${title} is not configured. Missing: ${resolved.missing.join(", ")}` };
-      }
-      // Modules take a fetch, not a signal, so the abort rides on a wrapped fetch and the race covers a fetch that ignores it.
-      const controller = new AbortController();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timedOut = new Promise<ConnectionTestResult>((done) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          done({ ok: false, available: true, message: `Connection test timed out after ${testTimeoutMs / 1000} s` });
-        }, testTimeoutMs);
-      });
-      const attempt = (async (): Promise<ConnectionTestResult> => {
-        try {
-          return await module.test!(config, { ...depsFor(project), fetch: withSignal(deps.fetch, controller.signal) });
-        } catch (err) {
-          return { ok: false, available: true, message: `Connection test failed: ${errorMessage(err)}` };
-        }
-      })();
-      try {
-        return await Promise.race([attempt, timedOut]);
-      } finally {
-        clearTimeout(timer);
-      }
-    },
+    test,
   };
 }

@@ -1,5 +1,5 @@
 import { createDispatcher, createScheduler, createSqliteActivityStore, createSqliteStore, type ClaimStore, type Logger } from "@automation-server/core";
-import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
+import { createSqliteHealthStore, createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 
 import { createGithubActionsReader } from "@automation-server/api/githubActions";
@@ -10,6 +10,7 @@ import { webhookUrls } from "../src/config";
 import { createPosthogAdmin } from "../src/integrations/posthog";
 import { INTEGRATION_MODULES } from "../src/integrations/registry";
 import { createReplayAdmin } from "../src/replay";
+import { createHealthSink } from "../src/health";
 import { createRuntime } from "../src/runtime";
 
 const TOKEN = "t".repeat(40);
@@ -24,7 +25,9 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
   const { adminToken, encryptionKey, env = {}, githubFetch, workflowsFetch, claims } = options;
   const settings = createSqliteSettingsStore({ path: ":memory:", encryptionKey });
   const resolve = (p: string) => resolveConfig(settings.project(p), envFor(p, env));
-  const runtime = createRuntime({ modules: INTEGRATION_MODULES, projects: () => settings.projects().map((p) => p.id), resolve, deps: { log: quiet, fetch: githubFetch } });
+  const healthStore = createSqliteHealthStore({ path: ":memory:" });
+  const health = createHealthSink({ store: healthStore, notify: async () => {} });
+  const runtime = createRuntime({ modules: INTEGRATION_MODULES, projects: () => settings.projects().map((p) => p.id), resolve, deps: { log: quiet, fetch: githubFetch }, health });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const store = claims ?? createSqliteStore({ path: ":memory:" });
   const dispatcher = createDispatcher({ automations: runtime.automations, store, log: quiet, activity });
@@ -48,7 +51,7 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
       }),
       workflows: (project) => createWorkflowInstaller({ token: resolve(project).github.values.token, fetch: workflowsFetch }),
       adminToken,
-      settings: { db: settings, env, reload: runtime.rebuild, test: runtime.test },
+      settings: { db: settings, env, reload: runtime.rebuild, test: runtime.test, health: healthStore.get },
       posthog: createPosthogAdmin({ resolve, scheduler, fetch: githubFetch }),
       replay: createReplayAdmin({ dispatcher, scheduler, jobs: (project) => runtime.project(project).jobs }),
       system: (project) => ({
@@ -232,6 +235,20 @@ describe("settings API", () => {
     expect(JSON.stringify(res.body)).not.toContain("ghp_topsecret");
   });
 
+  test("a testConnection result is persisted and settings/get returns it as health with its expiry", async () => {
+    const githubFetch = (async (url: string | URL | Request) =>
+      new URL(String(url)).pathname === "/user"
+        ? Response.json({ login: "octo" }, { headers: { "github-authentication-token-expiration": "2026-12-01 10:00:00 UTC" } })
+        : Response.json({ private: true })) as typeof fetch;
+    const t = setup({ adminToken: TOKEN, githubFetch, env: { GITHUB_TOKEN: "ghp_x", GITHUB_REPO: "acme/widgets" } });
+    const before = (await rpc(t, "settings/get", undefined)).body.integrations.find((i: { id: string }) => i.id === "github");
+    expect(before.health).toBeUndefined();
+    await rpc(t, "settings/testConnection", { integrationId: "github" });
+    const after = (await rpc(t, "settings/get", undefined)).body.integrations.find((i: { id: string }) => i.id === "github");
+    expect(after.health).toMatchObject({ ok: true, expiresAt: "2026-12-01T10:00:00.000Z" });
+    expect(typeof after.health.checkedAt).toBe("string");
+  });
+
   test("testConnection reports a rejected token, an unconfigured integration and not-yet-available ones", async () => {
     const rejecting = (async (_url: string | URL | Request) => new Response("{}", { status: 401 })) as typeof fetch;
     const bad = setup({ adminToken: TOKEN, githubFetch: rejecting, env: { GITHUB_TOKEN: "x" } });
@@ -299,7 +316,7 @@ describe("posthog API", () => {
   test("runNow sends while the schedule is disabled and records a schedule run", async () => {
     const { t, configure, slackPosts } = posthogSetup();
     await configure();
-    expect((await rpc(t, "system")).body.jobs).toEqual([]);
+    expect((await rpc(t, "system")).body.jobs).toEqual(["token-health"]);
 
     const res = await rpc(t, "posthog/runNow");
     expect(res.body).toMatchObject({ status: "succeeded", key: expect.stringMatching(/^manual:/), message: "Report sent to Slack" });
@@ -320,9 +337,9 @@ describe("posthog API", () => {
   test("the weekly job is registered only once enabled", async () => {
     const { t, configure } = posthogSetup();
     await configure({ enabled: true, dayOfWeek: 3, hourUtc: 7 });
-    expect((await rpc(t, "system")).body.jobs).toEqual(["posthog-weekly-report"]);
+    expect((await rpc(t, "system")).body.jobs).toEqual(["posthog-weekly-report", "token-health"]);
     await configure({ enabled: false });
-    expect((await rpc(t, "system")).body.jobs).toEqual([]);
+    expect((await rpc(t, "system")).body.jobs).toEqual(["token-health"]);
   });
 
   test("testConnection runs a trivial query", async () => {
