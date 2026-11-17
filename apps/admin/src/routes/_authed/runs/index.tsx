@@ -2,13 +2,13 @@ import { useCallback } from "react"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 
-import { StatusBadge } from "@/components/badges"
+import { DryRunBadge, StatusBadge } from "@/components/badges"
 import { EnumFilter, TextFilter } from "@/components/filters"
 import { EmptyState, PageHeader, QueryError, RowsSkeleton } from "@/components/states"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { RUN_STATUSES, runsSearch, type RunsSearch } from "@/lib/filters"
+import { DRY_RUN_FILTERS, RUN_STATUSES, runsSearch, type RunsSearch } from "@/lib/filters"
 import { runsQuery, systemQuery } from "@/lib/queries"
 import { useProjectId } from "@/lib/project"
 import { formatDuration } from "@/lib/time"
@@ -42,6 +42,7 @@ function Runs() {
 
       <div className="flex flex-wrap gap-2">
         <EnumFilter label="Status" value={filters.status} options={RUN_STATUSES} onChange={(status) => update({ status })} />
+        <EnumFilter label="Dry runs" value={filters.dryRun} options={DRY_RUN_FILTERS} onChange={(dryRun) => update({ dryRun })} />
         <TextFilter label="Automation" value={filters.automation} suggestions={system.data?.automations} onChange={setAutomation} />
         <TextFilter label="Source" value={filters.source} suggestions={system.data?.sources} onChange={setSource} />
         <TextFilter label="Search" value={filters.q} onChange={setQ} className="w-56" />
@@ -76,6 +77,11 @@ function Runs() {
                         <StatusBadge status={run.status} />
                         <span className="sr-only"> open run</span>
                       </Link>
+                      {run.dryRun && (
+                        <span className="ml-1.5">
+                          <DryRunBadge />
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>{run.automation}</TableCell>
                     <TableCell className="text-xs">

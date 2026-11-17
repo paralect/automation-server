@@ -1,9 +1,9 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react"
+import { ArrowCounterClockwiseIcon, FlaskIcon } from "@phosphor-icons/react"
 import { canReplay } from "@automation-server/api/replay"
 
-import { LevelBadge, StatusBadge } from "@/components/badges"
+import { DryRunBadge, LevelBadge, StatusBadge } from "@/components/badges"
 import { JsonFields } from "@/components/json-fields"
 import { EmptyState, PageHeader, QueryError } from "@/components/states"
 import { Time } from "@/components/time"
@@ -14,6 +14,7 @@ import { LEVEL_ROW } from "@/lib/badge-styles"
 import { replayRun } from "@/lib/api.functions"
 import { errorKind, errorText } from "@/lib/errors"
 import { runQuery } from "@/lib/queries"
+import { wouldDo } from "@/lib/would-do"
 import { useProjectId } from "@/lib/project"
 import { formatDuration } from "@/lib/time"
 
@@ -35,7 +36,7 @@ function RunDetail() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const replay = useMutation({
-    mutationFn: () => replayRun({ data: { project, id } }),
+    mutationFn: (dryRun: boolean) => replayRun({ data: { project, id, dryRun } }),
     onSuccess: ({ runId }) => {
       void queryClient.invalidateQueries({ queryKey: [project, "runs"] })
       void queryClient.invalidateQueries({ queryKey: [project, "run"] })
@@ -65,25 +66,43 @@ function RunDetail() {
 
   const { run, logs, event } = data
   const replayable = canReplay(run)
+  const dryReplayable = canReplay(run, { dryRun: true })
+  const planned = wouldDo(run.outcome)
+  const replaying = replay.isPending && replay.variables === false
+  const dryRunning = replay.isPending && replay.variables === true
 
   return (
     <>
       <PageHeader title={run.automation} description={`Run ${run.id}`}>
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={run.status} />
+          {run.dryRun && <DryRunBadge />}
           <Button
             variant="outline"
             size="sm"
             disabled={!replayable.ok || replay.isPending}
             title={replayable.ok ? undefined : replayable.reason}
-            onClick={() => replay.mutate()}
+            onClick={() => replay.mutate(false)}
           >
             <ArrowCounterClockwiseIcon data-icon="inline-start" />
-            {replay.isPending ? "Replaying..." : "Replay"}
+            {replaying ? "Replaying..." : "Replay"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!dryReplayable.ok || replay.isPending}
+            title={dryReplayable.ok ? "Re-run this event, reading but writing nothing" : dryReplayable.reason}
+            onClick={() => replay.mutate(true)}
+          >
+            <FlaskIcon data-icon="inline-start" />
+            {dryRunning ? "Starting..." : "Dry run"}
           </Button>
         </div>
       </PageHeader>
       {!replayable.ok && <p className="-mt-3 text-xs text-muted-foreground">{replayable.reason}</p>}
+      {replayable.ok === false && dryReplayable.ok === false && dryReplayable.reason !== replayable.reason && (
+        <p className="-mt-3 text-xs text-muted-foreground">Dry run: {dryReplayable.reason}</p>
+      )}
       {replay.error && (
         <p role="alert" className="-mt-3 text-xs text-destructive">
           {errorText(replay.error)}
@@ -114,6 +133,29 @@ function RunDetail() {
           )}
         </CardContent>
       </Card>
+
+      {planned.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Would have done</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-2 text-xs text-muted-foreground">This was a dry run. Nothing below was written.</p>
+            <ul className="flex flex-col gap-3 text-sm">
+              {planned.map((action) => (
+                <li key={action.kind}>
+                  <p>{action.text}</p>
+                  {action.detail && (
+                    <pre className="mt-1 rounded-md bg-muted p-3 text-xs/relaxed break-words whitespace-pre-wrap text-muted-foreground">
+                      {action.detail}
+                    </pre>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {event && (
         <Card>

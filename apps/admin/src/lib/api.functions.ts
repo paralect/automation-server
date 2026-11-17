@@ -75,7 +75,7 @@ export const getRun = authed
   )
 
 export const replayRun = authedPost
-  .validator(inProject.extend({ id: entityId }))
+  .validator(inProject.extend({ id: entityId, dryRun: z.boolean().optional() }))
   .handler(({ data }) => callAutomation((api) => api.runs.replay(data), { showMessages: true }))
 
 export const listCrisp = authed.validator(inProject.extend(crispInput.shape)).handler(({ data: { q, ...rest } }) =>
