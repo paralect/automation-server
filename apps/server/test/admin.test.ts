@@ -1,4 +1,4 @@
-import { createDispatcher, createScheduler, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
+import { createDispatcher, createScheduler, createSqliteActivityStore, createSqliteStore, type ClaimStore, type Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 
@@ -20,13 +20,13 @@ const withProject = (path: string, input: unknown) =>
     ? input
     : { project: "default", ...(input as object | undefined) };
 
-function setup(options: { adminToken?: string; encryptionKey?: string; env?: Record<string, string>; githubFetch?: typeof fetch; workflowsFetch?: typeof fetch } = { adminToken: TOKEN }) {
-  const { adminToken, encryptionKey, env = {}, githubFetch, workflowsFetch } = options;
+function setup(options: { adminToken?: string; encryptionKey?: string; env?: Record<string, string>; githubFetch?: typeof fetch; workflowsFetch?: typeof fetch; claims?: ClaimStore } = { adminToken: TOKEN }) {
+  const { adminToken, encryptionKey, env = {}, githubFetch, workflowsFetch, claims } = options;
   const settings = createSqliteSettingsStore({ path: ":memory:", encryptionKey });
   const resolve = (p: string) => resolveConfig(settings.project(p), envFor(p, env));
   const runtime = createRuntime({ modules: INTEGRATION_MODULES, projects: () => settings.projects().map((p) => p.id), resolve, deps: { log: quiet, fetch: githubFetch } });
   const activity = createSqliteActivityStore({ path: ":memory:" });
-  const store = createSqliteStore({ path: ":memory:" });
+  const store = claims ?? createSqliteStore({ path: ":memory:" });
   const dispatcher = createDispatcher({ automations: runtime.automations, store, log: quiet, activity });
   const scheduler = createScheduler({ jobs: runtime.jobs, store, log: quiet, activity });
   const app = createApp({
@@ -468,13 +468,13 @@ describe("runs.replay API", () => {
   const event = { project: "default", source: "sentry", kind: "event_alert", externalId: "evt-1", receivedAt: "2026-01-01T00:00:00.000Z", payload: { data: { event: { title: "boom" } }, token: "x" } };
   const seed = (
     t: ReturnType<typeof setup>,
-    over: { status?: "running" | "succeeded" | "failed" | "duplicate"; automation?: string; source?: string; project?: string; withEvent?: boolean } = {},
+    over: { status?: "running" | "succeeded" | "failed" | "duplicate"; automation?: string; source?: string; project?: string; withEvent?: boolean; outcome?: Record<string, unknown> } = {},
   ) => {
-    const { status = "failed", automation = "sentry-to-github-issue", source = "sentry", project = "default", withEvent = true } = over;
+    const { status = "failed", automation = "sentry-to-github-issue", source = "sentry", project = "default", withEvent = true, outcome } = over;
     const run = { project, automation, source, kind: "k", externalId: "evt-1", startedAt: new Date().toISOString() };
     if (status === "duplicate") return t.activity.recordDuplicate(run);
     const id = t.activity.startRun({ ...run, ...(withEvent ? { event } : {}) });
-    if (status !== "running") t.activity.finishRun(id, { status, ...(status === "failed" ? { error: "boom" } : {}), finishedAt: new Date().toISOString() });
+    if (status !== "running") t.activity.finishRun(id, { status, ...(status === "failed" ? { error: "boom" } : {}), ...(outcome ? { outcome } : {}), finishedAt: new Date().toISOString() });
     return id;
   };
   const precondition = async (t: ReturnType<typeof setup>, id: string, message: string) => {
@@ -539,6 +539,57 @@ describe("runs.replay API", () => {
     expect(t.activity.getRun(res.body.runId)?.run).toMatchObject({ automation: "posthog-weekly-report", source: "schedule", replayOf: id });
     expect(t.activity.getRun(res.body.runId)?.run.externalId).toMatch(/^replay:/);
     await Bun.sleep(50);
+  });
+
+  test("a dry replay of a succeeded run is allowed, is marked dry and links to the original", async () => {
+    const t = setup({ adminToken: TOKEN, env });
+    const id = seed(t, { status: "succeeded" });
+    const res = await rpc(t, "runs/replay", { id, dryRun: true });
+    expect(res.status).toBe(200);
+    expect(t.activity.getRun(res.body.runId)?.run).toMatchObject({ replayOf: id, dryRun: true });
+    await Bun.sleep(50);
+  });
+
+  test("a dry replay is still refused for running and duplicate runs, scheduled jobs and runs with no event", async () => {
+    const t = setup({ adminToken: TOKEN, env });
+    const dry = async (id: string, message: string) => {
+      const res = await rpc(t, "runs/replay", { id, dryRun: true });
+      expect(res.status).toBe(412);
+      expect(res.body.message).toContain(message);
+    };
+    await dry(seed(t, { status: "running" }), "still running");
+    await dry(seed(t, { status: "duplicate" }), "duplicate");
+    await dry(seed(t, { withEvent: false }), "no stored event");
+    await dry(seed(t, { automation: "posthog-weekly-report", source: "schedule", withEvent: false }), "Scheduled jobs cannot be dry-run");
+  });
+
+  test("a claim store failure is a 502 with a clear message, not a raw 500", async () => {
+    const broken: ClaimStore = {
+      claim() {
+        throw new Error("database is locked");
+      },
+      complete() {},
+      release() {},
+      close() {},
+    };
+    const t = setup({ adminToken: TOKEN, env, claims: broken });
+    const res = await rpc(t, "runs/replay", { id: seed(t) });
+    expect(res.status).toBe(502);
+    expect(res.body.message).toContain("claim store is unavailable");
+    expect(JSON.stringify(res.body)).not.toContain("database is locked");
+  });
+
+  test("dry runs are left out of the crisp inbox and the runs list can filter them", async () => {
+    const t = setup({ adminToken: TOKEN, env });
+    const outcome = { decision: "issue" };
+    const real = seed(t, { automation: "crisp-triage", source: "crisp", status: "succeeded", outcome });
+    const dry = t.activity.startRun({ project: "default", automation: "crisp-triage", source: "crisp", kind: "k", externalId: "d", startedAt: new Date().toISOString(), dryRun: true });
+    t.activity.finishRun(dry, { status: "succeeded", finishedAt: new Date().toISOString(), outcome });
+    expect((await rpc(t, "crisp/list", {})).body.items.map((i: { id: string }) => i.id)).toEqual([real]);
+    const ids = async (dryRun?: string) => (await rpc(t, "runs/list", dryRun ? { dryRun } : {})).body.items.map((r: { id: string }) => r.id).sort();
+    expect(await ids()).toEqual([dry, real].sort());
+    expect(await ids("exclude")).toEqual([real]);
+    expect(await ids("only")).toEqual([dry]);
   });
 
   test("a scheduled job that is no longer enabled is refused", async () => {

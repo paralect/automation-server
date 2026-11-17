@@ -5,6 +5,13 @@ import type { Logger } from "./logger";
 import { drainWithTimeout, errorMessage, recordActivity, scopeFields, withFields } from "./internal";
 import { claimKey, type ClaimStore } from "./store";
 
+export class ClaimStoreError extends Error {
+  constructor(readonly cause: unknown) {
+    super(`claim store failed: ${errorMessage(cause)}`);
+    this.name = "ClaimStoreError";
+  }
+}
+
 export type ReplayRequest = {
   readonly project: string;
   readonly automation: string;
@@ -52,7 +59,7 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
   type Started =
     | { readonly status: "started"; readonly runId: string | undefined; readonly done: Promise<void> }
     | { readonly status: "duplicate"; readonly runId: string | undefined }
-    | { readonly status: "claim-failed" };
+    | { readonly status: "claim-failed"; readonly error: unknown };
 
   // Claims and records the run synchronously so callers can learn the run id before the automation finishes.
   // `original` is the event as received, `event` the one handed to the automation after prepare.
@@ -78,7 +85,7 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
       }
     } catch (err) {
       log.error("claim failed", { ...scoped, error: errorMessage(err) });
-      return { status: "claim-failed" };
+      return { status: "claim-failed", error: err };
     }
     const runId = record("startRun", scoped, (a) => a.startRun({ ...runStart(), event: original }));
     const tagged = runId ? { ...scoped, runId } : scoped;
@@ -160,7 +167,7 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
       const original = { ...event, project };
       const ready = await prepareSafely(original);
       const started = begin(automation, ready, original, replayOf, dryRun);
-      if (started.status === "claim-failed") throw new Error("claim failed");
+      if (started.status === "claim-failed") throw new ClaimStoreError(started.error);
       if (started.status === "duplicate") return { outcome: "duplicate", ...(started.runId ? { runId: started.runId } : {}) };
       track(started.done);
       return { outcome: "started", ...(started.runId ? { runId: started.runId } : {}) };

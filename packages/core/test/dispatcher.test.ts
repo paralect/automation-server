@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { defineAutomation, withDryRun, type Automation } from "../src/automation";
-import { createDispatcher } from "../src/dispatcher";
+import { ClaimStoreError, createDispatcher } from "../src/dispatcher";
 import type { Event } from "../src/event";
 import type { Logger } from "../src/logger";
 import { createSqliteActivityStore } from "../src/sqliteActivityStore";
@@ -445,6 +445,18 @@ describe("dispatcher replay", () => {
     release();
     await dispatcher.drain(1000);
     expect(activity.getRun(real.runId!)?.run.status).toBe("succeeded");
+  });
+
+  test("a claim store failure is a typed error, not a bare Error", async () => {
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const store = createSqliteStore({ path: ":memory:" });
+    store.claim = () => {
+      throw new Error("database is locked");
+    };
+    const dispatcher = createDispatcher({ automations: () => [scoped("a", async () => {})], store, log: memoryLogger().log, activity });
+    const err = await dispatcher.replay(request()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ClaimStoreError);
+    expect((err as ClaimStoreError).cause).toMatchObject({ message: "database is locked" });
   });
 
   test("an unknown automation or a different project returns unknown-automation without running anything", async () => {
