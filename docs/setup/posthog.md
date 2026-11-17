@@ -70,8 +70,10 @@ The report is posted to one Slack channel through an incoming webhook. A webhook
 6. In the next screen, pick the channel from the dropdown. For a private channel, invite the app to it first. Click **Allow**.
 7. Back on **Incoming Webhooks**, find the new row under **Webhook URLs for Your Workspace**. Click **Copy**. The URL looks like `https://hooks.slack.com/services/T000/B000/xxx`. Keep it for the admin field **Slack webhook URL**.
 
-<!-- screenshot needed: Slack app Incoming Webhooks page with the Activate switch and the Add New Webhook to Workspace button marked, webhook URLs blurred -->
-<!-- screenshot needed: Slack channel picker dialog for the webhook, workspace and channel names blurred -->
+![The Incoming Webhooks page of the Slack app: 1 the Activate switch, 2 the webhook URLs list with the Copy button, 3 the button that adds a webhook for another channel](img/posthog-05-slack-incoming-webhooks.png)
+
+The page above is an app that already has one webhook. In a new app the list is empty and the button reads **Add New Webhook to Workspace**. The URL, workspace and channel are blurred in the screenshot.
+![The Slack page that opens after Add New Webhook: 1 the channel picker, 2 Allow, which stays grey until a channel is chosen. App and workspace names are blurred](img/posthog-06-slack-channel-picker.png)
 
 Treat the URL as a secret. Anyone who has it can post to the channel. The report lists page paths and event names from your project, so pick a channel whose members may see them.
 
@@ -79,6 +81,8 @@ Treat the URL as a secret. Anyone who has it can post to the channel. The report
 
 1. Open the admin and go to **Integrations**. Find the **PostHog** card.
 2. Fill in the fields.
+
+![The PostHog form in the admin: 1 host, 2 project ID, 3 Replace the API key, 4 Enabled switch, 5 Replace the Slack webhook URL, 6 Preview report and Send now](img/admin-10-posthog-form.png)
 
 | Field | Value |
 | --- | --- |

@@ -2,6 +2,42 @@
 
 A small, self-hosted webhook server that turns events from external services into actions.
 
+## What it is for
+
+automation-server watches the tools your team already uses and does the routine work that follows an event in them. You host it yourself, connect each service by pasting a token into the admin, and the automations switch on. Typical uses:
+
+- **A new error in Sentry** becomes a GitHub issue, and Codex can open a draft pull request with a fix.
+- **A Linear task labelled `codex`** is implemented by Codex, which opens a pull request that Linear attaches to the task.
+- **A Crisp conversation tagged `triage`** is classified by an AI model. It leaves a private note, and for a bug it opens a GitHub issue or starts a fix. The customer never gets a message from the server.
+- **A weekly PostHog report** with the change in users, pageviews and top pages is posted to Slack.
+
+Nothing is merged or sent to a customer automatically. The output is always an issue, a draft pull request, a private note or a Slack message that a person reviews.
+
+The admin is the one screen you use. It shows what the server did, holds the settings of every integration, and installs the GitHub workflows.
+
+![The admin Overview: the sidebar with every page, counters for the last 24 hours, a chart of runs and the latest failures](docs/setup/img/admin-01-overview.png)
+
+![The admin Integrations page with a card for GitHub, Sentry, Linear, PostHog, OpenRouter and Crisp](docs/setup/img/admin-02-integrations.png)
+
+### Automations and workflows in one table
+
+An **automation** runs inside the server. A **workflow** is a GitHub Actions file that Codex runs in your repository, usually started by an automation.
+
+| Name | Kind | Starts when | What it does |
+| --- | --- | --- | --- |
+| `sentry-to-github-issue` | automation | A Sentry issue alert fires | Creates one GitHub issue per Sentry issue, with stack trace and breadcrumbs. |
+| `linear-label-to-pr` | automation | The trigger label is added to a Linear issue | Dispatches the `linear-implement` workflow. |
+| `crisp-triage` | automation | The trigger segment is added to a Crisp conversation | Classifies the conversation, writes a private note, and by mode opens an issue or starts a fix. |
+| `posthog-weekly-report` | scheduled job | Once a week | Posts a week-over-week PostHog report to Slack. |
+| `codex-issue-fix.yml` | workflow | A team member opens an issue, or the server dispatches it | Codex writes a fix with a regression test and opens a draft PR. |
+| `linear-implement.yml` | workflow | Dispatched by `linear-label-to-pr` | Codex implements the Linear issue and opens a PR. |
+| `codex-changelog.yml` | workflow | A push to the production branch | Codex writes a changelog note and opens a PR. |
+| `codex-seo-autopilot.yml` | workflow | Every day | Codex improves the SEO of a site and opens a PR. |
+
+How each one works and what it needs: [automations](docs/setup/README.md#what-each-automation-does) and [workflows](github-actions/README.md#the-workflows-one-by-one). To set everything up from zero, follow the [setup guides](docs/setup/README.md).
+
+## How it works
+
 Each integration plugs in at one of two points: a **source** receives and verifies webhooks from a service, and an **automation** reacts to the normalized events. Delivery, deduplication, retries and logging are handled once, in the core.
 
 ```
@@ -119,7 +155,7 @@ Server-wide settings:
 
 ## Admin dashboard
 
-`apps/admin` is a read-only dashboard for what the server did: webhooks received, automation runs, failures and logs. It also tracks GitHub Actions runs, such as the Codex workflows below, with live status, jobs and steps. It runs as its own app on port 3001 and needs `ADMIN_API_TOKEN` set on the server. Setup and the security model are in [apps/admin/README.md](apps/admin/README.md).
+`apps/admin` is the web UI of the server. It shows what the server did (webhooks received, automation runs, failures, logs), holds the settings of every integration, installs the GitHub workflows and also tracks GitHub Actions runs, such as the Codex workflows below, with live status, jobs and steps. It runs as its own app on port 3001 and needs `ADMIN_API_TOKEN` set on the server. Setup and the security model are in [apps/admin/README.md](apps/admin/README.md).
 
 ## GitHub Actions workflows
 
@@ -130,8 +166,9 @@ Ready-made GitHub Actions workflows live in [`github-actions/`](github-actions/R
 | [`codex-issue-fix.yml`](github-actions/codex-issue-fix.yml) | Opens a draft PR with a Codex-written fix for each new issue. Pairs with the Sentry integration: issues labelled `sentry` can trigger it. |
 | [`codex-seo-autopilot.yml`](github-actions/codex-seo-autopilot.yml) | Runs the [seo-autopilot](https://il.ly/skills/seo-autopilot) skill with Codex every day and opens a PR with the changes. |
 | [`codex-changelog.yml`](github-actions/codex-changelog.yml) | On every push to your production branch, Codex writes a changelog note from the pushed commits and opens a PR. |
+| [`linear-implement.yml`](github-actions/linear-implement.yml) | Started by the Linear integration when the trigger label is added to an issue. Codex implements the task and opens a PR. |
 
-Setup, secrets and caveats for each workflow are in [github-actions/README.md](github-actions/README.md).
+What each workflow does step by step, and its setup, secrets and caveats, are in [github-actions/README.md](github-actions/README.md).
 
 ## Development
 
@@ -170,7 +207,9 @@ automation-server/
 - [Architecture](docs/architecture.md)
 - [Deployment](docs/deployment.md)
 - [Adding an integration](docs/adding-an-integration.md)
+- [Setup guides with screenshots](docs/setup/README.md)
 - [Sentry integration](docs/integrations/sentry.md)
+- [Linear integration](docs/integrations/linear.md)
 - [PostHog integration](docs/integrations/posthog.md)
 - [Crisp integration](docs/integrations/crisp.md)
 - [GitHub Actions workflows](github-actions/README.md)

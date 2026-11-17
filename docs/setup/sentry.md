@@ -44,7 +44,15 @@ Every value can be saved from the admin Integrations page without a restart, or 
 
 After saving, Sentry opens the integration page. Under **Credentials** it shows the **Client Secret**. Click **Copy** next to it, then paste it into Admin, Integrations, Sentry, **Client secret** (`SENTRY_CLIENT_SECRET`). The server uses it to verify the signature of every webhook. Treat it like a password.
 
-<!-- screenshot needed: integration page Credentials section with the Client Secret blurred. Not captured because the page shows a live secret. -->
+In the admin the Sentry form looks like this.
+
+![The Sentry form in the admin: 1 webhook URL to paste into Sentry, 2 Replace the client secret, 3 optional auth token](img/admin-07-sentry-form.png)
+
+1. **Webhook URL.** Copy it with the button on the right. This is what you paste into Sentry in step 2.
+2. **Client secret.** Click **Replace**, paste the secret you just copied from Sentry, save.
+3. **Auth token.** Optional, see step 4.
+
+The Sentry page also has **Levels**, **Environments** and **Minimum event count** below. They decide which alerts become GitHub issues.
 
 ## 4. Optional: copy a token for event counts
 
@@ -55,7 +63,12 @@ The alert payload has no event count, first seen or last seen. With a token the 
 3. If the token list is empty, click **New Token** on that page. The token needs **Issue & Event: Read** from step 3.
 4. If you use Sentry outside `sentry.io` (self-hosted or a region host), set `SENTRY_API_BASE_URL` to that origin. The token is only sent there.
 
-<!-- screenshot needed: Tokens section of the integration page, blurred. Not captured because it reveals a live token. -->
+At the bottom of the integration page Sentry lists the token and the credentials.
+
+![The bottom of the Sentry integration page: 1 the Tokens table with New Token and Revoke, 2 Credentials with the Client Secret](img/sentry-07-tokens-and-credentials.png)
+
+1. **Tokens.** The table shows each token masked, with its scopes. Use **New Token** to create one. Sentry shows the full value only once, right after creating it, so copy it then.
+2. **Client Secret.** Sentry shows it only briefly after the integration is created, and afterwards it reads *hidden*. If you missed it, click **Rotate client secret** to get a new one, and save that one in the admin.
 
 ## 5. Create the issue alert
 

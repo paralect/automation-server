@@ -58,7 +58,12 @@ The Linear integration has its own target repository field, `linear.targetRepo`.
 
 Values saved in the admin win over environment variables and apply without a restart. The variable names are listed in [`apps/server/.env.example`](../../apps/server/.env.example).
 
-<!-- screenshot needed: admin Integrations page, GitHub card with Token, Issues repository and Actions repositories fields, and the Test connection button -->
+![The GitHub integration form: 1 Replace the token, 2 Issues repository, 3 Actions repositories, 4 Test connection](img/admin-05-github-form.png)
+
+1. **Token.** A saved secret shows **Set** and is never displayed again. Click **Replace**, paste the new token and save to change it. **Clear** removes it.
+2. **Issues repository.** Where Sentry alerts and Crisp triage become issues.
+3. **Actions repositories.** One `owner/name` per line. The GitHub Actions page of the admin shows runs from these.
+4. **Test connection.** Run it after **Save**.
 
 ## 3. Allow Actions to create pull requests
 
@@ -96,7 +101,9 @@ Rules for this secret.
 
 Details and the other optional secrets are in [github-actions/README.md](../../github-actions/README.md).
 
-<!-- screenshot needed: the New secret form with Name CODEX_AUTH_JSON and an empty Secret box -->
+![The New secret form: 1 the name CODEX_AUTH_JSON, 2 the Secret box that takes the whole auth.json, 3 Add secret](img/github-06-new-secret-form.png)
+
+The Secret box is empty in the screenshot on purpose. Paste the file contents there, then click **Add secret**.
 
 ## 5. Install the workflows
 
@@ -116,13 +123,23 @@ Install from the admin instead of copying files by hand.
 
 The skill folders that go with each workflow are installed by the same button.
 
-<!-- screenshot needed: admin Workflows page with the repository picker, install mode toggle and template rows -->
+![The admin Workflows page: 1 repository picker, 2 install mode, 3 secrets and variables each workflow needs, 4 status, 5 Install](img/admin-04-workflows.png)
+
+1. **Repository picker.** The repository that receives the files.
+2. **Install mode.** **Pull request** or **Direct commit**.
+3. **Repository needs.** The secrets and variables the workflow reads. Add them in the repository before the first run (step 4 above).
+4. **Status.** Installed, or Update available when the bundled template changed. A workflow that is not in the repository shows a dash.
+5. **Install.** Writes the workflow and its skill into the repository.
+
+What each workflow does is explained in [github-actions/README.md](../../github-actions/README.md#the-workflows-one-by-one).
 
 ## Check that it works
 
 - In the admin, GitHub shows a successful Test connection.
 - The Workflows page shows Installed for each template.
-- Open the repository, then the Actions tab. The installed workflows are listed on the left.
+- Open the repository, then the Actions tab. The installed workflows are listed on the left. The same runs show in the admin, under GitHub Actions.
+
+![The GitHub Actions page of the admin: 1 filters by repository, workflow and state, 2 one row per workflow run with its status, target and duration](img/admin-14-github-actions.png)
 - For Linear, add the trigger label to a test issue and watch for a `Linear implement` run on the Actions tab.
 
 ## Troubleshooting

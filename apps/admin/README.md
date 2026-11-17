@@ -1,6 +1,6 @@
 # Admin dashboard
 
-Read-only dashboard for the automation server: overview stats, logs, runs and system state. Built with TanStack Start and shadcn/ui.
+Web UI of the automation server: overview stats, logs, runs, system state, integration settings and workflow install. Screenshots of every page are in [docs/setup](../../docs/setup/README.md#the-admin-at-a-glance). Built with TanStack Start and shadcn/ui.
 
 ## Setup
 
