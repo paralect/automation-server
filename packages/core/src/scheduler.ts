@@ -1,7 +1,7 @@
 import type { ActivityStore } from "./activity";
 import type { Job } from "./job";
 import type { Logger } from "./logger";
-import { drainWithTimeout, errorMessage, recordActivity, scopeFields, withFields } from "./internal";
+import { drainWithTimeout, errorMessage, notifyRunFinished, recordActivity, scopeFields, withFields, type RunFinishedHandler } from "./internal";
 import { claimKey, type ClaimStore } from "./store";
 
 export const SCHEDULE_SOURCE = "schedule";
@@ -30,11 +30,13 @@ export type SchedulerDeps = {
   store: ClaimStore;
   log: Logger;
   activity?: ActivityStore;
+  // Called after a job run succeeded or failed. drain() waits for it.
+  onRunFinished?: RunFinishedHandler;
   now?: () => Date;
   tickMs?: number;
 };
 
-export function createScheduler({ jobs, store, log, activity, now = () => new Date(), tickMs = 60_000 }: SchedulerDeps): Scheduler {
+export function createScheduler({ jobs, store, log, activity, onRunFinished, now = () => new Date(), tickMs = 60_000 }: SchedulerDeps): Scheduler {
   const running = new Set<string>();
   const inFlight = new Set<Promise<unknown>>();
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -65,8 +67,10 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
     options.onStarted?.(runId ?? null);
     const tagged = runId ? { ...scoped, source: SCHEDULE_SOURCE, runId } : { ...scoped, source: SCHEDULE_SOURCE };
     const child = withFields(log, tagged);
-    const finish = (status: "succeeded" | "failed", error?: string) => {
-      if (runId) record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: now().toISOString() }));
+    const finish = async (status: "succeeded" | "failed", error?: string) => {
+      if (!runId) return;
+      record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: now().toISOString() }));
+      await notifyRunFinished(onRunFinished, activity, log, runId, scoped);
     };
     let error: string | undefined;
     try {
@@ -82,10 +86,10 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
     }
     if (error !== undefined) {
       log.error("job failed", { ...tagged, error });
-      finish("failed", error);
+      await finish("failed", error);
       return { status: "failed", runId: runId ?? null, error };
     }
-    finish("succeeded");
+    await finish("succeeded");
     return { status: "succeeded", runId: runId ?? null };
   };
 

@@ -168,6 +168,8 @@ const runExtra = (q: { decision?: string; unread?: boolean; dryRun?: DryRunFilte
   return where.length ? { where: where.join(" AND "), params } : undefined;
 };
 
+export const INTERRUPTED_ERROR = "interrupted by server restart";
+
 const hasColumn = (db: Database, table: string, column: string) =>
   (db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
 
@@ -245,7 +247,12 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
   );
   const setReadStmt = db.query("UPDATE runs SET read_at = $readAt WHERE id = $id");
   const interruptStmt = db.query(
-    "UPDATE runs SET status = 'failed', finished_at = $finishedAt, error = 'interrupted by server restart' WHERE status = 'running'",
+    `UPDATE runs SET status = 'failed', finished_at = $finishedAt, error = '${INTERRUPTED_ERROR}' WHERE status = 'running'`,
+  );
+  const streakRows = db.query<{ status: RunStatus; error: string | null }, Record<string, string | number | null>>(
+    `SELECT status, error FROM runs
+     WHERE automation = $automation AND dry_run = 0 AND status IN ('succeeded','failed') AND ($project IS NULL OR project = $project)
+     ORDER BY seq DESC LIMIT $limit`,
   );
   const pruneLogs = db.query("DELETE FROM logs WHERE time < $before");
   const pruneRuns = db.query("DELETE FROM runs WHERE finished_at IS NOT NULL AND finished_at < $before");
@@ -422,6 +429,20 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
           return run;
         });
       return { runs, logs, buckets, recentFailures };
+    },
+    consecutiveFailures(project, automation, cap) {
+      let streak = 0;
+      // Interrupted runs are skipped, so the page can hold more rows than the streak counts. Scan in growing pages instead of guessing a bound.
+      for (let limit = Math.max(cap * 2, 20); ; limit *= 4) {
+        const rows = streakRows.all({ $automation: automation, $project: project ?? null, $limit: limit });
+        streak = 0;
+        for (const row of rows) {
+          if (row.status === "succeeded") return streak;
+          if (row.error === INTERRUPTED_ERROR) continue;
+          if (++streak >= cap) return cap;
+        }
+        if (rows.length < limit) return streak;
+      }
     },
     failInterruptedRuns: (finishedAt) => interruptStmt.run({ $finishedAt: finishedAt }).changes,
     prune: db.transaction((beforeIso: string) => pruneLogs.run({ $before: beforeIso }).changes + pruneRuns.run({ $before: beforeIso }).changes),

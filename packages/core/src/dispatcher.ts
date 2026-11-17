@@ -2,7 +2,7 @@ import type { ActivityStore, RunOutcome } from "./activity";
 import type { Automation } from "./automation";
 import type { Event } from "./event";
 import type { Logger } from "./logger";
-import { drainWithTimeout, errorMessage, recordActivity, scopeFields, withFields } from "./internal";
+import { drainWithTimeout, errorMessage, notifyRunFinished, recordActivity, scopeFields, withFields, type RunFinishedHandler } from "./internal";
 import { claimKey, type ClaimStore } from "./store";
 
 export class ClaimStoreError extends Error {
@@ -39,9 +39,11 @@ export type DispatcherDeps = {
   log: Logger;
   prepare?: (event: Event) => Promise<Event>;
   activity?: ActivityStore;
+  // Called after a real run succeeded or failed, never for duplicates or dry runs. drain() waits for it.
+  onRunFinished?: RunFinishedHandler;
 };
 
-export function createDispatcher({ automations: getAutomations, store, log, prepare, activity }: DispatcherDeps): Dispatcher {
+export function createDispatcher({ automations: getAutomations, store, log, prepare, activity, onRunFinished }: DispatcherDeps): Dispatcher {
   const inFlight = new Set<Promise<unknown>>();
 
   const matchesSafely = (automation: Automation, event: Event): boolean => {
@@ -91,8 +93,10 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
     const tagged = runId ? { ...scoped, runId } : scoped;
     const child = withFields(log, tagged);
     let outcome: RunOutcome | undefined;
-    const finish = (status: "succeeded" | "failed", error?: string) => {
-      if (runId) record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: new Date().toISOString(), outcome }));
+    const finish = async (status: "succeeded" | "failed", error?: string) => {
+      if (!runId) return;
+      record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: new Date().toISOString(), outcome }));
+      await notifyRunFinished(onRunFinished, activity, log, runId, scoped);
     };
     const done = (async () => {
       try {
@@ -112,7 +116,7 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
           }
         }
         log.error("automation failed", { ...tagged, error: errorMessage(err) });
-        finish("failed", errorMessage(err));
+        await finish("failed", errorMessage(err));
         return;
       }
       if (!dryRun) {
@@ -122,7 +126,7 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
           log.error("complete failed", { ...tagged, error: errorMessage(err) });
         }
       }
-      finish("succeeded");
+      await finish("succeeded");
     })();
     return { status: "started", runId, done };
   };

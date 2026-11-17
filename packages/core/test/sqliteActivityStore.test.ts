@@ -510,3 +510,80 @@ describe("upgrades and damaged rows", () => {
     });
   });
 });
+
+describe("consecutiveFailures", () => {
+  const record = (s: ActivityStore, status: "succeeded" | "failed", over: Partial<RunStart> = {}, error?: string) => {
+    const id = s.startRun(runStart(over));
+    s.finishRun(id, { status, error, finishedAt: "2026-01-01T00:00:01.000Z" });
+    return id;
+  };
+  const fail = (s: ActivityStore, over: Partial<RunStart> = {}) => record(s, "failed", over, "boom");
+
+  test("counts failures newest first until the first success", () => {
+    const s = make();
+    fail(s);
+    fail(s);
+    record(s, "succeeded");
+    fail(s);
+    fail(s);
+    fail(s);
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(0);
+    expect(s.consecutiveFailures(undefined, "a", 10)).toBe(3);
+  });
+
+  test("is capped", () => {
+    const s = make();
+    for (let i = 0; i < 6; i++) fail(s, { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 3)).toBe(3);
+  });
+
+  test("a success newer than the failures resets the streak to zero", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    fail(s, { project: "acme" });
+    record(s, "succeeded", { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(0);
+  });
+
+  test("skips running, duplicate and dry runs without breaking the streak", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    s.recordDuplicate(runStart({ project: "acme" }));
+    record(s, "succeeded", { project: "acme", dryRun: true });
+    s.startRun(runStart({ project: "acme" }));
+    fail(s, { project: "acme", dryRun: true });
+    fail(s, { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(2);
+  });
+
+  test("a restart-interrupted run is skipped, not counted and not a streak breaker", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    s.startRun(runStart({ project: "acme" }));
+    s.failInterruptedRuns("2026-01-01T00:00:02.000Z");
+    fail(s, { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(2);
+  });
+
+  test("finds the success past many skipped rows", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    record(s, "succeeded", { project: "acme" });
+    for (let i = 0; i < 80; i++) s.recordDuplicate(runStart({ project: "acme" }));
+    for (let i = 0; i < 80; i++) record(s, "succeeded", { project: "acme", dryRun: true });
+    fail(s, { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(1);
+  });
+
+  test("is isolated by project and automation", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    fail(s, { project: "acme" });
+    fail(s, { project: "other" });
+    fail(s, { project: "acme", automation: "b" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(2);
+    expect(s.consecutiveFailures("other", "a", 10)).toBe(1);
+    expect(s.consecutiveFailures("acme", "b", 10)).toBe(1);
+    expect(s.consecutiveFailures("nobody", "a", 10)).toBe(0);
+  });
+});

@@ -1,4 +1,4 @@
-import type { ActivityStore } from "./activity";
+import type { ActivityStore, RunRecord } from "./activity";
 import type { Logger } from "./logger";
 
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -35,4 +35,23 @@ export async function drainWithTimeout(inFlight: Iterable<Promise<unknown>>, tim
   });
   await Promise.race([Promise.allSettled([...inFlight]), timeout]);
   clearTimeout(timer);
+}
+
+export type RunFinishedHandler = (run: RunRecord) => void | Promise<void>;
+
+// A handler failure must never turn a finished run into a failed one, so it is logged and dropped.
+export async function notifyRunFinished(
+  handler: RunFinishedHandler | undefined,
+  activity: ActivityStore | undefined,
+  log: Logger,
+  runId: string | undefined,
+  scoped: Record<string, string>,
+): Promise<void> {
+  if (!handler || !activity || !runId) return;
+  try {
+    const run = activity.getRun(runId)?.run;
+    if (run && (run.status === "succeeded" || run.status === "failed") && !run.dryRun) await handler(run);
+  } catch (err) {
+    log.warn("onRunFinished failed", { ...scoped, runId, error: errorMessage(err) });
+  }
 }
