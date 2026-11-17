@@ -21,5 +21,5 @@ export async function postToSlack(
   } catch (err) {
     return fail(err instanceof Error && err.name === "TimeoutError" ? `timed out after ${timeoutMs} ms` : err instanceof Error ? err.message : String(err));
   }
-  if (!res.ok) fail(`HTTP ${res.status} ${await res.text().catch(() => "")}`);
+  if (!res.ok) fail(`HTTP ${res.status}`);
 }

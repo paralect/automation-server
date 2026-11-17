@@ -6,6 +6,9 @@ import type { SettingWrite, SettingsStore } from "./store";
 
 export class SettingsInputError extends Error {}
 
+const withPattern = (schema: z.ZodString, field: FieldSpec): z.ZodType =>
+  field.pattern ? z.union([z.literal(""), schema.regex(new RegExp(field.pattern), field.patternHint ?? "invalid format")]) : schema;
+
 const fieldSchema = (field: FieldSpec): z.ZodType => {
   switch (field.kind) {
     case "number": {
@@ -23,11 +26,9 @@ const fieldSchema = (field: FieldSpec): z.ZodType => {
       return z.array(item.min(1).max(500)).max(100);
     }
     case "secret":
-      return z.string().max(4000);
-    default: {
-      const text = z.string().trim().max(2000);
-      return field.pattern ? z.union([z.literal(""), text.regex(new RegExp(field.pattern), "invalid format")]) : text;
-    }
+      return withPattern(z.string().max(4000), field);
+    default:
+      return withPattern(z.string().trim().max(2000), field);
   }
 };
 

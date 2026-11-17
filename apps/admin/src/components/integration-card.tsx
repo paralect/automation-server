@@ -32,6 +32,7 @@ const LOGOS: Record<string, string> = {
   linear: "/integrations/linear.svg",
   posthog: "/integrations/posthog.svg",
   crisp: "/integrations/crisp.svg",
+  slack: "/integrations/slack.svg",
 }
 
 // A white tile keeps every brand mark in its official colors on both themes.

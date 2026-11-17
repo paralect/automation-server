@@ -99,6 +99,15 @@ describe("parsers", () => {
 });
 
 describe("planUpdate", () => {
+  test("the Slack webhook must be https and a secret field honors its pattern", () => {
+    expect(() => planUpdate("slack", { values: { webhookUrl: "http://hooks.slack.com/services/T/B/x" } })).toThrow("must start with https://");
+    expect(() => planUpdate("slack", { values: { webhookUrl: "file:///etc/passwd" } })).toThrow(SettingsInputError);
+    expect(planUpdate("slack", { values: { webhookUrl: "https://hooks.slack.com/services/T/B/x" } }).set).toEqual([
+      { key: "slack.webhookUrl", json: '"https://hooks.slack.com/services/T/B/x"', secret: true },
+    ]);
+    expect(planUpdate("slack", { values: { webhookUrl: "" } }).set).toEqual([]);
+  });
+
   test("stores secrets only for non-empty strings", () => {
     const plan = planUpdate("sentry", { values: { clientSecret: "abc", authToken: "", apiBaseUrl: "https://s.example" } });
     expect(plan.set).toEqual([

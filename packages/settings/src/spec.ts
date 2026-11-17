@@ -10,6 +10,7 @@ export type FieldSpec = {
   readonly options?: readonly string[];
   readonly env?: string;
   readonly pattern?: string;
+  readonly patternHint?: string;
   readonly min?: number;
   readonly max?: number;
 };
@@ -104,6 +105,17 @@ export const INTEGRATIONS = {
       { key: "areas", label: "Product areas", kind: "list", help: "The closed list of areas the classifier picks from." },
       { key: "autofixAreas", label: "Autofix areas", kind: "list", help: "Areas whose bugs may go to the Codex fix workflow. Empty means none." },
       { key: "workflowFile", label: "Workflow file", kind: "text", default: "codex-issue-fix.yml" },
+    ],
+  },
+  slack: {
+    id: "slack",
+    title: "Slack alerts",
+    description: "Posts to a Slack channel when an automation keeps failing.",
+    fields: [
+      { key: "webhookUrl", label: "Incoming webhook URL", kind: "secret", required: true, env: "SLACK_ALERTS_WEBHOOK_URL", pattern: "^https://", patternHint: "must start with https://", help: "An incoming webhook of the channel that should receive alerts." },
+      { key: "failureThreshold", label: "Failure threshold", kind: "number", default: 3, min: 1, max: 50, help: "Alert once when an automation fails this many times in a row. It alerts again only after a success resets the streak." },
+      { key: "alertOnTokenHealth", label: "Alert on token health", kind: "boolean", default: true, help: "Also alert when a connected token stops working or is about to expire." },
+      { key: "channelLabel", label: "Channel label", kind: "text", help: "Shown in the alert text, for example #alerts." },
     ],
   },
 } as const satisfies Record<string, IntegrationSpec>;
