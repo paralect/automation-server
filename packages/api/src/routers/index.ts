@@ -2,6 +2,7 @@ import type {
   ActivityStats,
   Page,
   RunRecord,
+  StoredEvent,
   StoredLog,
   StoredRun,
 } from "@automation-server/core";
@@ -26,6 +27,7 @@ import { z } from "zod";
 
 import { adminProcedure, o } from "../index";
 import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../context";
+import { canReplay, SCHEDULE_SOURCE } from "../replay";
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
 import { DAY_MS, HOUR_MS } from "../time";
 import { WorkflowInstallError, type InstallResult, type WorkflowCheck, type WorkflowStatus } from "../workflowInstaller";
@@ -85,6 +87,24 @@ function runInProject(context: Context, project: string, id: string) {
   const found = context.activity.getRun(id);
   if (!found || found.run.project !== inProject(context, project)) throw new ORPCError("NOT_FOUND");
   return found;
+}
+
+const precondition = (message: string) => new ORPCError("PRECONDITION_FAILED", { message });
+
+async function replayEvent(context: Context, project: string, run: RunRecord, event: StoredEvent | undefined) {
+  if (!event) throw precondition("This run has no stored event");
+  const result = await context.replay.event({ project, automation: run.automation, event, replayOf: run.id });
+  if (result.outcome === "unknown-automation") throw precondition(`${run.automation} is no longer configured for this project`);
+  if (result.outcome === "duplicate") throw precondition("This event already ran successfully");
+  return result.runId;
+}
+
+async function replayJob(context: Context, project: string, run: RunRecord) {
+  const result = await context.replay.job(project, run.automation, `replay:${new Date().toISOString()}`, run.id);
+  if (result.status === "started") return result.runId;
+  throw precondition(
+    result.status === "busy" ? `${run.automation} is already running` : `${run.automation} is no longer configured for this project`,
+  );
 }
 
 function projectCall<T>(run: () => T): T {
@@ -173,9 +193,18 @@ export const appRouter = {
       .handler(({ input, context }) => context.activity.queryRuns({ ...input, project: inProject(context, input.project) })),
     get: adminProcedure
       .input(z.object({ project, id: z.string().min(1) }))
-      .output(type<{ run: RunRecord; logs: StoredLog[] }>())
-      .handler(({ input, context }) => {
-        return runInProject(context, input.project, input.id);
+      .output(type<{ run: RunRecord; logs: StoredLog[]; event?: StoredEvent }>())
+      .handler(({ input, context }) => runInProject(context, input.project, input.id)),
+    replay: adminProcedure
+      .input(z.object({ project, id: z.string().min(1) }))
+      .output(type<{ runId: string; status: "started" }>())
+      .handler(async ({ input, context }) => {
+        const { run, event } = runInProject(context, input.project, input.id);
+        const check = canReplay(run);
+        if (!check.ok) throw new ORPCError("PRECONDITION_FAILED", { message: check.reason });
+        const started = run.source === SCHEDULE_SOURCE ? await replayJob(context, input.project, run) : await replayEvent(context, input.project, run, event);
+        if (!started) throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "The replay started but its run could not be recorded" });
+        return { runId: started, status: "started" as const };
       }),
   },
 

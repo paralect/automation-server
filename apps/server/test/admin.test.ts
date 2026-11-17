@@ -9,6 +9,7 @@ import { createApp } from "../src/app";
 import { webhookUrls } from "../src/config";
 import { createPosthogAdmin } from "../src/integrations/posthog";
 import { INTEGRATION_MODULES } from "../src/integrations/registry";
+import { createReplayAdmin } from "../src/replay";
 import { createRuntime } from "../src/runtime";
 
 const TOKEN = "t".repeat(40);
@@ -26,7 +27,7 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
   const runtime = createRuntime({ modules: INTEGRATION_MODULES, projects: () => settings.projects().map((p) => p.id), resolve, deps: { log: quiet, fetch: githubFetch } });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const store = createSqliteStore({ path: ":memory:" });
-  const dispatcher = createDispatcher({ automations: runtime.automations, store, log: quiet });
+  const dispatcher = createDispatcher({ automations: runtime.automations, store, log: quiet, activity });
   const scheduler = createScheduler({ jobs: runtime.jobs, store, log: quiet, activity });
   const app = createApp({
     source: runtime.source,
@@ -49,6 +50,7 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
       adminToken,
       settings: { db: settings, env, reload: runtime.rebuild, test: runtime.test },
       posthog: createPosthogAdmin({ resolve, scheduler, fetch: githubFetch }),
+      replay: createReplayAdmin({ dispatcher, scheduler, jobs: (project) => runtime.project(project).jobs }),
       system: (project) => ({
         startedAt: new Date().toISOString(),
         sources: Object.keys(runtime.sources(project)),
@@ -105,6 +107,17 @@ describe("admin API auth", () => {
     const body = (await res.json()) as { json: { run: { id: string }; logs: { message: string }[] } };
     expect(body.json.run.id).toBe(id);
     expect(body.json.logs.map((l) => l.message)).toEqual(["hello"]);
+  });
+
+  test("runs.get returns the stored event while runs.list only flags it", async () => {
+    const t = setup();
+    const event = { project: "default", source: "s", kind: "k", externalId: "e", receivedAt: "2026-01-01T00:00:00.000Z", payload: { password: "p", title: "t" } };
+    const id = t.activity.startRun({ project: "default", automation: "a", source: "s", kind: "k", externalId: "e", startedAt: new Date().toISOString(), event });
+    const got = (await (await t.call("runs/get", { id }, TOKEN)).json()) as { json: { event: { payload: unknown } } };
+    expect(got.json.event.payload).toEqual({ password: "[redacted]", title: "t" });
+    const listed = (await (await t.call("runs/list", {}, TOKEN)).json()) as { json: { items: Record<string, unknown>[] } };
+    expect(listed.json.items[0]).toMatchObject({ hasEvent: true });
+    expect(listed.json.items[0]).not.toHaveProperty("event");
   });
 
   test("actions.list needs the token and lists configured repos", async () => {
@@ -442,5 +455,94 @@ describe("projects API", () => {
       expect((await rpc(t, path, input)).status).toBe(404);
     }
     expect((await rpc(t, "settings/get", { project: "Not A Slug" })).status).toBe(400);
+  });
+});
+
+describe("runs.replay API", () => {
+  const rpc = async (t: ReturnType<typeof setup>, path: string, input?: unknown) => {
+    const res = await t.call(path, input, TOKEN);
+    const body = (await res.json()) as { json: any };
+    return { status: res.status, body: body.json };
+  };
+  const env = { SENTRY_CLIENT_SECRET: "s", GITHUB_TOKEN: "t", GITHUB_REPO: "acme/widgets" };
+  const event = { project: "default", source: "sentry", kind: "event_alert", externalId: "evt-1", receivedAt: "2026-01-01T00:00:00.000Z", payload: { data: { event: { title: "boom" } }, token: "x" } };
+  const seed = (
+    t: ReturnType<typeof setup>,
+    over: { status?: "running" | "succeeded" | "failed" | "duplicate"; automation?: string; source?: string; project?: string; withEvent?: boolean } = {},
+  ) => {
+    const { status = "failed", automation = "sentry-to-github-issue", source = "sentry", project = "default", withEvent = true } = over;
+    const run = { project, automation, source, kind: "k", externalId: "evt-1", startedAt: new Date().toISOString() };
+    if (status === "duplicate") return t.activity.recordDuplicate(run);
+    const id = t.activity.startRun({ ...run, ...(withEvent ? { event } : {}) });
+    if (status !== "running") t.activity.finishRun(id, { status, ...(status === "failed" ? { error: "boom" } : {}), finishedAt: new Date().toISOString() });
+    return id;
+  };
+  const precondition = async (t: ReturnType<typeof setup>, id: string, message: string) => {
+    const res = await rpc(t, "runs/replay", { id });
+    expect(res.status).toBe(412);
+    expect(res.body.message).toContain(message);
+  };
+
+  test("needs the admin token", async () => {
+    expect((await setup().call("runs/replay", { id: "x" })).status).toBe(401);
+  });
+
+  test("a failed run is replayed as a new run linked to the original", async () => {
+    const t = setup({ adminToken: TOKEN, env });
+    const id = seed(t);
+    const res = await rpc(t, "runs/replay", { id });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("started");
+    const replayed = t.activity.getRun(res.body.runId);
+    expect(replayed?.run).toMatchObject({ automation: "sentry-to-github-issue", project: "default", replayOf: id });
+    expect(replayed?.event?.payload).toMatchObject({ token: "[redacted]" });
+    await Bun.sleep(50);
+  });
+
+  test("a run that is running, succeeded or a duplicate is refused with a reason", async () => {
+    const t = setup({ adminToken: TOKEN, env });
+    await precondition(t, seed(t, { status: "running" }), "still running");
+    await precondition(t, seed(t, { status: "succeeded" }), "Only failed runs");
+    await precondition(t, seed(t, { status: "duplicate" }), "duplicate");
+  });
+
+  test("a run without a stored event is refused", async () => {
+    const t = setup({ adminToken: TOKEN, env });
+    await precondition(t, seed(t, { withEvent: false }), "no stored event");
+  });
+
+  test("an automation that is no longer configured is refused", async () => {
+    const t = setup({ adminToken: TOKEN, env });
+    await precondition(t, seed(t, { automation: "gone" }), "no longer configured");
+  });
+
+  test("a run of another project is not found", async () => {
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", env });
+    await rpc(t, "projects/create", { name: "Acme" });
+    const id = seed(t, { project: "acme" });
+    expect((await rpc(t, "runs/replay", { id })).status).toBe(404);
+    expect((await rpc(t, "runs/replay", { project: "acme", id })).status).toBe(412);
+    expect((await rpc(t, "runs/replay", { id: "nope" })).status).toBe(404);
+  });
+
+  test("a failed scheduled job is re-run by name without a stored event and linked to the original", async () => {
+    const calls: string[] = [];
+    const fetch = (async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return Response.json({ results: [[1, 1, 1, 1, 1, 1]] });
+    }) as typeof globalThis.fetch;
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", githubFetch: fetch });
+    await rpc(t, "settings/update", { integrationId: "posthog", values: { enabled: true, projectId: "77", personalApiKey: "phx_k", slackWebhookUrl: "https://hooks.slack.com/services/T/B/x" } });
+    const id = seed(t, { automation: "posthog-weekly-report", source: "schedule", withEvent: false });
+    const res = await rpc(t, "runs/replay", { id });
+    expect(res.status).toBe(200);
+    expect(t.activity.getRun(res.body.runId)?.run).toMatchObject({ automation: "posthog-weekly-report", source: "schedule", replayOf: id });
+    expect(t.activity.getRun(res.body.runId)?.run.externalId).toMatch(/^replay:/);
+    await Bun.sleep(50);
+  });
+
+  test("a scheduled job that is no longer enabled is refused", async () => {
+    const t = setup({ adminToken: TOKEN, env });
+    await precondition(t, seed(t, { automation: "posthog-weekly-report", source: "schedule", withEvent: false }), "no longer configured");
   });
 });

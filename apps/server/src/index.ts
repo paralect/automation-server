@@ -23,6 +23,7 @@ import { buildConfig, webhookUrls } from "./config";
 import { ENV } from "./env.server";
 import { createPosthogAdmin } from "./integrations/posthog";
 import { INTEGRATION_MODULES } from "./integrations/registry";
+import { createReplayAdmin } from "./replay";
 import { createRuntime } from "./runtime";
 
 const config = buildConfig(ENV);
@@ -106,6 +107,7 @@ const app = createApp({
     adminToken: config.adminToken,
     settings: { db: settings, env: process.env, reload, test: runtime.test },
     posthog: createPosthogAdmin({ resolve, scheduler }),
+    replay: createReplayAdmin({ dispatcher, scheduler, jobs: (project) => runtime.project(project).jobs }),
     system: (project) => {
       const built = runtime.project(project);
       return {
