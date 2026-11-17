@@ -28,11 +28,17 @@ export type Runtime = {
   test(project: string, id: IntegrationId): Promise<ConnectionTestResult>;
 };
 
+const TEST_TIMEOUT_MS = 8_000;
+
+const withSignal = (base: typeof fetch | undefined, signal: AbortSignal): typeof fetch =>
+  ((input, init) => (base ?? fetch)(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal })) as typeof fetch;
+
 export type RuntimeDeps = {
   modules: readonly IntegrationModule[];
   projects: () => readonly string[];
   resolve: (project: string) => ResolvedConfig;
   deps: ModuleDeps;
+  testTimeoutMs?: number;
 };
 
 const withProject = (log: Logger, project: string): Logger => ({
@@ -41,7 +47,7 @@ const withProject = (log: Logger, project: string): Logger => ({
   error: (m, f) => log.error(m, { project, ...f }),
 });
 
-export function createRuntime({ modules, projects, resolve, deps }: RuntimeDeps): Runtime {
+export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs = TEST_TIMEOUT_MS }: RuntimeDeps): Runtime {
   const depsFor = (project: string): ModuleDeps => ({ ...deps, log: withProject(deps.log, project) });
 
   const buildProject = (project: string): ProjectSnapshot => {
@@ -109,10 +115,26 @@ export function createRuntime({ modules, projects, resolve, deps }: RuntimeDeps)
       if (!resolved.configured) {
         return { ok: false, available: true, message: `${title} is not configured. Missing: ${resolved.missing.join(", ")}` };
       }
+      // Modules take a fetch, not a signal, so the abort rides on a wrapped fetch and the race covers a fetch that ignores it.
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<ConnectionTestResult>((done) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          done({ ok: false, available: true, message: `Connection test timed out after ${testTimeoutMs / 1000} s` });
+        }, testTimeoutMs);
+      });
+      const attempt = (async (): Promise<ConnectionTestResult> => {
+        try {
+          return await module.test!(config, { ...depsFor(project), fetch: withSignal(deps.fetch, controller.signal) });
+        } catch (err) {
+          return { ok: false, available: true, message: `Connection test failed: ${errorMessage(err)}` };
+        }
+      })();
       try {
-        return await module.test(config, depsFor(project));
-      } catch (err) {
-        return { ok: false, available: true, message: `Connection test failed: ${errorMessage(err)}` };
+        return await Promise.race([attempt, timedOut]);
+      } finally {
+        clearTimeout(timer);
       }
     },
   };
