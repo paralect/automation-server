@@ -42,7 +42,9 @@ https://<your-host>/webhooks/<project>/linear
 
 To copy the full URL, open the admin Integrations page and open the Linear card. The card shows the URL when `PUBLIC_URL` is set on the server. Without `PUBLIC_URL` it shows only the path, and you add the host yourself.
 
-<!-- screenshot needed: admin Integrations page, Linear card showing the webhook URL and the Webhook secret, Trigger label and Target repository fields -->
+The Linear form in the admin, with every field you will touch in the next steps.
+
+![The Linear form in the admin: 1 webhook URL, 2 Replace the webhook secret, 3 trigger label, 4 target repository, 5 Test connection](img/admin-06-linear-form.png)
 
 ## 3. Create the webhook in Linear
 
@@ -92,8 +94,9 @@ Without this connection the PR still opens, but Linear does not show it on the i
 4. Open the target repository on GitHub, then **Actions**. The `linear-implement` workflow is running.
 5. When the workflow ends, a PR titled with the issue identifier opens, and Linear shows it on the issue.
 
-<!-- screenshot needed: Linear issue with the trigger label added -->
-<!-- screenshot needed: admin Runs page with a linear-label-to-pr run -->
+The Runs page of the admin lists every run. A `linear-label-to-pr` row with the status `succeeded` and the issue identifier such as `ENG-42` means the workflow was dispatched.
+
+![The Runs page with a filter row and the list of runs, including linear-label-to-pr rows](img/admin-13-runs.png)
 
 Only a newly added label triggers a run. To run the same issue again, remove the label and add it again.
 

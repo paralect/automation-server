@@ -89,13 +89,15 @@ The Web Hooks block has a Development Web Hook and a Production Web Hook. The de
 
 ## 5. Activate and install the plugin
 
-1. On the **Settings** tab, scroll to **Access** and click **Activate Plugin**.
+1. On the **Settings** tab, scroll to **Activation and visibility** and click **Activate Plugin**.
 2. Copy the **Installation Link** that appears.
 3. Open the link, pick your Crisp website and accept the scopes.
 
 The production token and the production web hook only work after this step. If you only use the development hook, skip it while testing.
 
-<!-- screenshot needed: Settings tab, Access block with Activate Plugin and the Installation Link (not captured to avoid activating the plugin) -->
+![The Settings tab of the plugin, scrolled to Activation and visibility: 1 Activate Plugin, 2 the Installation Link that appears after activation](img/crisp-09-activate-plugin.png)
+
+The screenshot shows a plugin that is not activated yet. The Installation Link stays empty until you click **Activate Plugin**.
 
 ## 6. Find the Website ID
 
@@ -115,7 +117,17 @@ The server ignores deliveries for any other website.
 
 The webhook is served once the four required fields are set. The triage runs once OpenRouter is configured too.
 
-<!-- screenshot needed: admin Integrations page, Crisp card with the four required fields filled, Save and Test connection (admin URL not reachable from the capture browser) -->
+![The Crisp form in the admin: 1 webhook URL, 2 Website ID, 3 token identifier, 4 token key, 5 signing secret, 6 trigger segment, 7 mode](img/admin-09-crisp-form.png)
+
+1. **Webhook URL.** Paste it into Crisp, step 5.
+2. **Website ID.** From step 6.
+3. **Plugin token identifier.** From the production token in step 3.
+4. **Plugin token key.** Click **Replace** and paste the token key.
+5. **Web Hooks signing secret.** Click **Replace** and paste the secret from step 5.
+6. **Trigger segment.** The tag that starts a triage. Default `triage`.
+7. **Mode.** `shadow`, `issue` or `fix`. Start with `shadow`.
+
+The fields below Mode (minimum confidence, product areas, autofix areas, workflow file) are optional and explained in [the integration page](../integrations/crisp.md#configuration).
 
 ## 8. Create the trigger segment
 
@@ -164,7 +176,11 @@ Once the Crisp integration is added, the admin sidebar shows a **Support** group
 
 The page works on every Crisp plan, including the ones that refuse API notes. Details are in [the integration page](../integrations/crisp.md#the-crisp-page-in-the-admin).
 
-<!-- screenshot needed: admin Support, Crisp page with the list and the side panel (admin URL not reachable from the capture browser; blur every summary) -->
+![The Crisp page of the admin: 1 counters per decision, 2 one row per triaged conversation](img/admin-11-crisp-list.png)
+
+Click a row to open the side panel. This one is a conversation the triage sent to the Codex fix workflow.
+
+![The side panel of a triaged conversation, with what the triage did, the reproduction, the private note and the technical details](img/admin-12-crisp-panel.png)
 
 ## 11. Test it
 
