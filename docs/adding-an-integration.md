@@ -29,7 +29,7 @@ export const notifyOnFatal = defineAutomation({
 });
 ```
 
-Return it from your module's `build`. Throwing from `run` releases the claim so the delivery can be retried.
+Return it from your module's `build`. Throwing from `run` releases the claim so the delivery can be retried. Before writing one that calls several services, read [reliability.md](reliability.md#writing-a-reliable-automation): what a failed or half-finished run leaves behind, and how to make a retry safe.
 
 ## 3. Document it
 
@@ -39,4 +39,5 @@ Add `docs/integrations/<name>.md` (setup steps, behavior, configuration table) a
 
 - Signature verified on the raw body, constant-time comparison.
 - Tests for parsing and for the automation, `bun run test` and `bun run check-types` pass.
-- No secrets or payload bodies in logs.
+- No secrets or payload bodies in logs ([what to log](observability.md#what-is-never-logged)).
+- A retry after a partial run does not repeat its side effects ([reliability.md](reliability.md#partial-runs-by-automation)).

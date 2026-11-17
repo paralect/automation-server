@@ -53,6 +53,8 @@ Dispatcher  --------------- claim (automation, externalId) in sqlite; duplicates
 Automation(s)  ------------ match the event, do the work, release the claim on failure
 ```
 
+Every run and log line is recorded and shown in the admin, see [docs/observability.md](docs/observability.md). What happens when a run fails or stops halfway, and how to retry it, is in [docs/reliability.md](docs/reliability.md).
+
 ## Integrations
 
 | Integration | Kind | What it does | Docs |
@@ -155,7 +157,7 @@ Server-wide settings:
 
 ## Admin dashboard
 
-`apps/admin` is the web UI of the server. It shows what the server did (webhooks received, automation runs, failures, logs), holds the settings of every integration, installs the GitHub workflows and also tracks GitHub Actions runs, such as the Codex workflows below, with live status, jobs and steps. It runs as its own app on port 3001 and needs `ADMIN_API_TOKEN` set on the server. Setup and the security model are in [apps/admin/README.md](apps/admin/README.md).
+`apps/admin` is the web UI of the server. It shows what the server did (webhooks received, automation runs, failures, logs), holds the settings of every integration, installs the GitHub workflows and also tracks GitHub Actions runs, such as the Codex workflows below, with live status, jobs and steps. It runs as its own app on port 3001 and needs `ADMIN_API_TOKEN` set on the server. Setup and the security model are in [apps/admin/README.md](apps/admin/README.md). How to read runs and logs is in [docs/observability.md](docs/observability.md).
 
 ## GitHub Actions workflows
 
@@ -207,6 +209,8 @@ automation-server/
 - [Architecture](docs/architecture.md)
 - [Deployment](docs/deployment.md)
 - [Adding an integration](docs/adding-an-integration.md)
+- [Observability: logs and runs](docs/observability.md)
+- [Reliability: failures, retries and partial runs](docs/reliability.md)
 - [Setup guides with screenshots](docs/setup/README.md)
 - [Sentry integration](docs/integrations/sentry.md)
 - [Linear integration](docs/integrations/linear.md)

@@ -75,7 +75,7 @@ Each integration adds an **automation**, a small job with one purpose. This is w
 
 The code-writing part is done by four GitHub Actions workflows. The server only dispatches them. They are explained one by one, with what each does and needs, in [github-actions/README.md](../../github-actions/README.md#the-workflows-one-by-one).
 
-For the exact rules of each automation (filters, deduplication, retries, limits), read its page in [docs/integrations](../integrations).
+For the exact rules of each automation (filters, deduplication, retries, limits), read its page in [docs/integrations](../integrations). How to follow a run in the admin is in [observability.md](../observability.md), and what happens when one fails or stops halfway is in [reliability.md](../reliability.md).
 
 ## Where to start
 

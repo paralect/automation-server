@@ -33,6 +33,8 @@ Everything an integration does belongs to a project: its settings, webhook sourc
 
 ## Activity store and admin API
 
+The user-facing side of this (statuses, log messages, how to trace one event) is in [observability.md](observability.md). Failure handling, claims and partial runs are in [reliability.md](reliability.md).
+
 Every log line is written to stdout and also recorded in the `logs` table. Every automation run, including duplicates, is a row in the `runs` table. Both tables live in the same sqlite file as the claims (`DATABASE_PATH`), each behind its own connection. `source`, `automation`, `externalId` and `runId` are lifted out of the log fields into indexed columns, and the full fields are kept as JSON.
 
 - Runs still `running` at startup are marked `failed` with `interrupted by server restart`.
