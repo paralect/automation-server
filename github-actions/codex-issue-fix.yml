@@ -38,11 +38,15 @@ jobs:
     # Issue text is untrusted prompt input and this job holds Codex credentials,
     # so only people with write-ish access to the repo can trigger it. Only
     # they can dispatch, too. Issues labelled crisp are skipped on open because
-    # automation-server dispatches the ones that passed its triage.
+    # automation-server dispatches the ones that passed its triage. Issues
+    # labelled sentry are skipped too: the server opens them under the token
+    # owner's identity from text anyone holding the public DSN can send, so a
+    # person reads the issue and starts the fix by hand.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
-      !contains(github.event.issue.labels.*.name, 'crisp'))
+      !contains(github.event.issue.labels.*.name, 'crisp') &&
+      !contains(github.event.issue.labels.*.name, 'sentry'))
 
     steps:
       - name: Require a private repository

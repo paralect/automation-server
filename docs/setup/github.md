@@ -118,7 +118,7 @@ Install from the admin instead of copying files by hand.
 | Template | Needed by |
 | --- | --- |
 | `linear-implement.yml` | [Linear](../integrations/linear.md) |
-| `codex-issue-fix.yml` | [Crisp](../integrations/crisp.md) in fix mode, and Sentry issues labelled `sentry` |
+| `codex-issue-fix.yml` | [Crisp](../integrations/crisp.md) in fix mode, and Sentry issues labelled `sentry` once a person dispatches them |
 | `codex-seo-autopilot.yml`, `codex-changelog.yml` | Optional, not tied to an integration |
 
 The skill folders that go with each workflow are installed by the same button.

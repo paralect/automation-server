@@ -57,7 +57,7 @@ Things every workflow has in common:
 3. For a bug it finds the root cause, prefers to write a **test that fails for the reported reason** (this is mandatory for `crisp` issues), makes the smallest fix that turns the test green, and runs the repository checks. A feature request or a vague report gets no change.
 4. The workflow pushes a branch and opens a **draft** PR whose description is Codex's own summary. If Codex made no change, the workflow comments on the issue with a link to the run log, where Codex's reasoning is.
 
-**Where the server fits.** Issues labelled `sentry` are created by the [Sentry integration](../docs/integrations/sentry.md) and take the Sentry path of the skill. Issues labelled `crisp` are created by the [Crisp integration](../docs/integrations/crisp.md) and are skipped on open: only the ones the triage routes to a fix are dispatched by the server.
+**Where the server fits.** Issues labelled `sentry` are created by the [Sentry integration](../docs/integrations/sentry.md) and are skipped on open: event text comes from anyone who holds the public DSN, so a person reads the issue and starts the fix from the Actions tab (input `issue_number`). Those runs take the Sentry path of the skill. Issues labelled `crisp` are created by the [Crisp integration](../docs/integrations/crisp.md) and are skipped on open: only the ones the triage routes to a fix are dispatched by the server.
 
 **Result.** A draft PR, or an issue comment pointing at the run log when there is none.
 
@@ -106,7 +106,7 @@ A push that only touches the changelog folder is ignored, so merging the changel
 
 Taken from another project. Codex runs the `$fix-issue` skill, which is stored in [`skills/fix-issue`](skills/fix-issue). Copy that folder to `.agents/skills/fix-issue/` in the target repository, next to the workflow in `.github/workflows/`. The workflow does not install it, Codex finds it in the checkout.
 
-The skill classifies the issue (bug, Sentry error, or too vague), finds the root cause, makes a minimal fix with a regression test, runs the checks and writes the PR body as its final message. Issues created by the [Sentry integration](../docs/integrations/sentry.md) carry the `sentry` label, so they take the Sentry path in `references/sentry.md`. Issues created by the [Crisp integration](../docs/integrations/crisp.md) carry the `crisp` label. The workflow skips them when they are opened, because the server dispatches only the ones its triage routes to a fix (input `issue_number`), and the skill must reproduce them with a failing test before it changes anything.
+The skill classifies the issue (bug, Sentry error, or too vague), finds the root cause, makes a minimal fix with a regression test, runs the checks and writes the PR body as its final message. Issues created by the [Sentry integration](../docs/integrations/sentry.md) carry the `sentry` label. The workflow skips them when they are opened, because a Sentry event can be forged by anyone with the public DSN; a person dispatches the ones worth fixing, and they take the Sentry path in `references/sentry.md`. Issues created by the [Crisp integration](../docs/integrations/crisp.md) carry the `crisp` label. The workflow skips them when they are opened, because the server dispatches only the ones its triage routes to a fix (input `issue_number`), and the skill must reproduce them with a failing test before it changes anything.
 
 The skill and the workflow are still specific to the project they came from. Before using them elsewhere, adapt:
 

@@ -1,6 +1,8 @@
 # Sentry integration
 
-Turns a Sentry issue alert into one GitHub issue, labelled `sentry`, so that a GitHub Action watching that label can pick it up from there (see [github-actions](../../github-actions/README.md)).
+Turns a Sentry issue alert into one GitHub issue, labelled `sentry`, so that a person can hand it to Codex from there (see [github-actions](../../github-actions/README.md)).
+
+The DSN is public, so anyone can send Sentry a fake error, and the issue text is theirs. `codex-issue-fix.yml` therefore skips `sentry` issues when they open. Read the issue, then run the workflow from the Actions tab with its `issue_number`.
 
 - Source: `packages/sources/src/sentry`, served at `POST /webhooks/sentry`.
 - Automation: `packages/automations/src/sentryToGithubIssue`, named `sentry-to-github-issue`.

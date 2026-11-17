@@ -35,7 +35,7 @@ const CODEX_AUTH = ["OPENAI_API_KEY", "CODEX_AUTH_JSON"] as const;
 export const TEMPLATE_META: Readonly<Record<string, TemplateMeta>> = {
   "codex-issue-fix.yml": {
     title: "Codex issue fix",
-    description: "Opens a PR with a Codex-written fix for each new issue, or for an issue the Crisp triage dispatches. Private repositories only.",
+    description: "Opens a PR with a Codex-written fix for each new team issue, or for an issue the Crisp triage or a person dispatches. Sentry issues wait for a person to start them. Private repositories only.",
     skill: "fix-issue",
     requiredSecrets: [["CODEX_AUTH_JSON"]],
     requiredVariables: [],
