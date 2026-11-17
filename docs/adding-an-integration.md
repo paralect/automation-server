@@ -39,5 +39,5 @@ Add `docs/integrations/<name>.md` (setup steps, behavior, configuration table) a
 
 - Signature verified on the raw body, constant-time comparison.
 - Tests for parsing and for the automation, `bun run test` and `bun run check-types` pass.
-- No secrets or payload bodies in logs ([what to log](observability.md#what-is-never-logged)).
+- No secrets or payload bodies in logs ([what to log](observability.md#where-it-is-stored)).
 - A retry after a partial run does not repeat its side effects ([reliability.md](reliability.md#partial-runs-by-automation)).
