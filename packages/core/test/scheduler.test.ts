@@ -129,6 +129,17 @@ describe("scheduler", () => {
     expect(runs()).toHaveLength(2);
   });
 
+  test("runNow calls onStarted with the run id while the job is still running and stores replayOf", async () => {
+    let release!: () => void;
+    const { scheduler, activity } = setup([weekly("report", () => null, () => new Promise<void>((r) => (release = r)))]);
+    const started = new Promise<string | null>((resolve) => {
+      void scheduler.runNow("report", "replay:1", { replayOf: "orig", onStarted: resolve });
+    });
+    const runId = await started;
+    expect(activity.getRun(runId!)?.run).toMatchObject({ status: "running", replayOf: "orig" });
+    release();
+  });
+
   test("runNow runs an unregistered job object and reports its run id and failure", async () => {
     const { scheduler, runs } = setup([]);
     const failing = weekly("off-schedule", () => null, async () => {

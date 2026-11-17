@@ -11,11 +11,17 @@ export type RunNowResult =
   | { readonly status: "failed"; readonly runId: string | null; readonly error: string }
   | { readonly status: "duplicate" | "busy" | "unknown-job" };
 
+export type RunNowOptions = {
+  readonly replayOf?: string;
+  // Called once the run row exists, before the job finishes, so a caller with a request timeout can answer early.
+  readonly onStarted?: (runId: string | null) => void;
+};
+
 export type Scheduler = {
   start(): void;
   stop(): void;
   tick(): Promise<void>;
-  runNow(job: string | Job, key: string): Promise<RunNowResult>;
+  runNow(job: string | Job, key: string, options?: RunNowOptions): Promise<RunNowResult>;
   drain(timeoutMs: number): Promise<void>;
 };
 
@@ -36,7 +42,7 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
   const record = <T>(what: string, scoped: Record<string, string>, fn: (activity: ActivityStore) => T) =>
     recordActivity(activity, log, what, scoped, fn);
 
-  const execute = async (job: Job, key: string, at: Date): Promise<RunNowResult> => {
+  const execute = async (job: Job, key: string, at: Date, options: RunNowOptions = {}): Promise<RunNowResult> => {
     const claim = claimKey(job.name, key, job.project);
     const scoped = scopeFields(job.name, key, job.project);
     try {
@@ -53,8 +59,10 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
         kind: "job",
         externalId: key,
         startedAt: at.toISOString(),
+        ...(options.replayOf ? { replayOf: options.replayOf } : {}),
       }),
     );
+    options.onStarted?.(runId ?? null);
     const tagged = runId ? { ...scoped, source: SCHEDULE_SOURCE, runId } : { ...scoped, source: SCHEDULE_SOURCE };
     const child = withFields(log, tagged);
     const finish = (status: "succeeded" | "failed", error?: string) => {
@@ -81,11 +89,11 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
     return { status: "succeeded", runId: runId ?? null };
   };
 
-  const guarded = async (job: Job, key: string, at: Date): Promise<RunNowResult> => {
+  const guarded = async (job: Job, key: string, at: Date, options?: RunNowOptions): Promise<RunNowResult> => {
     const slot = claimKey(job.name, "", job.project);
     if (running.has(slot)) return { status: "busy" };
     running.add(slot);
-    const work = execute(job, key, at);
+    const work = execute(job, key, at, options);
     inFlight.add(work);
     try {
       return await work;
@@ -130,10 +138,10 @@ export function createScheduler({ jobs, store, log, activity, now = () => new Da
       timer = undefined;
     },
     tick,
-    async runNow(target, key) {
+    async runNow(target, key, options) {
       const job = typeof target === "string" ? jobs().find((j) => j.name === target) : target;
       if (!job) return { status: "unknown-job" };
-      return guarded(job, key, now());
+      return guarded(job, key, now(), options);
     },
     drain: (timeoutMs) => drainWithTimeout(inFlight, timeoutMs),
   };
