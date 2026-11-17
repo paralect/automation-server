@@ -74,6 +74,10 @@ export const getRun = authed
     callAutomation((api) => api.runs.get(data), { notFoundIsExpected: true })
   )
 
+export const replayRun = authedPost
+  .validator(inProject.extend({ id: entityId }))
+  .handler(({ data }) => callAutomation((api) => api.runs.replay(data), { showMessages: true }))
+
 export const listCrisp = authed.validator(inProject.extend(crispInput.shape)).handler(({ data: { q, ...rest } }) =>
   callAutomation((api) => api.crisp.list({ ...rest, search: q }))
 )
