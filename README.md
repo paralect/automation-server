@@ -27,6 +27,8 @@ Automation(s)  ------------ match the event, do the work, release the claim on f
 | Crisp | source + action | Verifies Crisp Web Hooks (`POST /webhooks/crisp`) and, when the trigger segment is added, classifies the conversation with an LLM through OpenRouter. Posts a private note, and by mode opens a GitHub issue or dispatches the Codex fix workflow (`crisp-triage`) | [docs/integrations/crisp.md](docs/integrations/crisp.md) |
 | PostHog | scheduled job | Sends a weekly week-over-week PostHog report to Slack (`posthog-weekly-report`) | [docs/integrations/posthog.md](docs/integrations/posthog.md) |
 
+New here? Start with the [step-by-step setup guides](docs/setup/README.md) (GitHub, OpenRouter, Sentry, Linear, Crisp, PostHog), which have annotated screenshots.
+
 More are planned. See [docs/adding-an-integration.md](docs/adding-an-integration.md) to add your own.
 
 ## Quick start
