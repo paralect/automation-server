@@ -70,7 +70,6 @@ export function createOpenRouterClient(config: OpenRouterConfig) {
   }
 
   return {
-    /** One completion whose output must match `schema`. Anything else throws, never a best guess. */
     async structured<T>(request: StructuredRequest<T>): Promise<T> {
       const { $schema: _, ...schema } = z.toJSONSchema(request.schema) as Record<string, unknown>;
       const json = await call("POST", "/chat/completions", {

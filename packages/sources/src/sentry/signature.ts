@@ -2,7 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 const HEX_SHA256 = /^[0-9a-fA-F]{64}$/;
 
-// The digest must be computed over the raw bytes; re-serialized JSON will not match.
 export function verifySignature(
   rawBody: Uint8Array,
   signatureHex: string | null,

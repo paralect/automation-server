@@ -6,7 +6,6 @@ import { formatCount, formatDelta, type Pair, type Ranked, type ReportData } fro
 
 const DAY = 86_400_000;
 const TOP_EVENTS_IN_CHART = 5;
-// Slack rejects chart labels over 20 characters.
 const CHART_LABEL = 20;
 const TABLE_CELL = 60;
 
@@ -18,10 +17,6 @@ const total = (pair: Pair) => `${formatCount(pair.current)}  (${formatDelta(pair
 
 type Element = { type: string; props: Record<string, unknown>; children?: string[] };
 
-/**
- * The report as a json-render spec. It is built from the data, not by a model,
- * so the layout is the same every week.
- */
 export function buildReportSpec(data: ReportData, now: Date, title: string): Spec {
   const from = new Date(now.getTime() - 7 * DAY);
   const elements: Record<string, Element> = {};
@@ -48,7 +43,6 @@ export function buildReportSpec(data: ReportData, now: Date, title: string): Spe
   elements.pageviews = { type: "Field", props: { label: "Pageviews", value: total(data.pageviews) } };
   elements.sessions = { type: "Field", props: { label: "Sessions", value: total(data.sessions) } };
 
-  // Oldest day first. Day i of this week lines up with day i of the week before.
   const ago = [6, 5, 4, 3, 2, 1, 0];
   add("daily", {
     type: "Chart",
@@ -102,7 +96,6 @@ function rankedTable(caption: string, column: string, rows: readonly Ranked[]): 
   };
 }
 
-/** Clips names to Slack's chart label limit and keeps them distinct, since Slack drops a chart with duplicate categories. */
 function uniqueLabels(names: readonly string[]): string[] {
   const seen = new Set<string>();
   return names.map((name, i) => {
@@ -113,7 +106,6 @@ function uniqueLabels(names: readonly string[]): string[] {
   });
 }
 
-/** Block Kit for the spec. A chart Slack cannot draw falls back to a text table inside the message. */
 export function reportBlocks(spec: Spec): SlackBlock[] {
   return cardToSlackBlocks(toCard(spec) as SlackCardElement);
 }

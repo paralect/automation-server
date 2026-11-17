@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { ChecksIcon, GearIcon, WarningCircleIcon } from "@phosphor-icons/react"
 import { cn } from "cn"
 
-import { CrispPanel, CrispRow, DECISION_VIEW, MODE_COPY } from "@/components/crisp-triage"
+import { CrispPanel, CrispRow, DECISION_VIEW, isCrispMode, MODE_COPY } from "@/components/crisp-triage"
 import { TextFilter } from "@/components/filters"
 import { EmptyState, PageHeader, QueryError, RowsSkeleton } from "@/components/states"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -15,7 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { markAllCrispRead, markCrispRead, type CrispTriageItem } from "@/lib/api.functions"
 import { CRISP_DECISIONS, crispSearch, type CrispSearch } from "@/lib/filters"
 import { useProjectId } from "@/lib/project"
-import { crispQuery, crispStatsQuery, settingsQuery } from "@/lib/queries"
+import { crispKey, crispQuery, crispStatsKey, crispStatsQuery, settingsQuery } from "@/lib/queries"
 
 export const Route = createFileRoute("/_authed/crisp/")({
   validateSearch: crispSearch,
@@ -43,8 +43,8 @@ function CrispPage() {
 
   const queryClient = useQueryClient()
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: [project, "crisp"] })
-    void queryClient.invalidateQueries({ queryKey: [project, "crisp-stats"] })
+    void queryClient.invalidateQueries({ queryKey: crispKey(project) })
+    void queryClient.invalidateQueries({ queryKey: crispStatsKey(project) })
   }
   const setRead = useMutation({
     mutationFn: ({ item, read }: { item: CrispTriageItem; read: boolean }) => markCrispRead({ data: { project, id: item.id, read } }),
@@ -66,7 +66,8 @@ function CrispPage() {
     const field = crisp?.fields.find((f) => f.key === key)
     return field && "value" in field && typeof field.value === "string" ? field.value : undefined
   }
-  const mode = (value("mode") ?? "shadow") as keyof typeof MODE_COPY
+  const rawMode = value("mode")
+  const mode = rawMode !== undefined && isCrispMode(rawMode) ? rawMode : "shadow"
   const trigger = value("triggerSegment") ?? "triage"
   const llmMissing = settings.data !== undefined && integrations.find((i) => i.id === "openrouter")?.configured !== true
   const notesRefused = items.some((item) => item.outcome?.crisp.notePosted === false)
@@ -99,7 +100,7 @@ function CrispPage() {
       )}
 
       <p className="text-sm text-muted-foreground">
-        {MODE_COPY[mode] ?? MODE_COPY.shadow} Add the segment{" "}
+        {MODE_COPY[mode]} Add the segment{" "}
         <code className="rounded bg-muted px-1 py-0.5 text-xs">{trigger}</code> to a conversation in Crisp to triage it. Last{" "}
         {stats.data?.windowDays ?? 30} days.
       </p>

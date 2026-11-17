@@ -1,13 +1,10 @@
 import type { EnvSource } from "./resolve";
 
-/** The project that existed settings move into, and the only one that falls back to environment variables. */
 export const DEFAULT_PROJECT_ID = "default";
 
 export type Project = {
-  /** Stable slug used in webhook URLs and setting keys. Never changes after creation. */
   readonly id: string;
   readonly name: string;
-  /** Hostname such as `example.com`. The admin shows its favicon as the project icon. */
   readonly domain: string | null;
   readonly createdAt: string;
 };
@@ -20,7 +17,6 @@ const HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]
 
 export const isProjectId = (id: string) => PROJECT_ID.test(id);
 
-/** Only the default project reads the legacy environment variables, so a new project starts empty. */
 export const envFor = (projectId: string, env: EnvSource): EnvSource => (projectId === DEFAULT_PROJECT_ID ? env : {});
 
 export function normalizeName(input: string): string {
@@ -30,7 +26,6 @@ export function normalizeName(input: string): string {
   return name;
 }
 
-/** Accepts a hostname or a URL and keeps only the hostname. Empty means no domain. */
 export function normalizeDomain(input: string | null | undefined): string | null {
   const raw = (input ?? "").trim().toLowerCase();
   if (raw.length === 0) return null;
@@ -45,7 +40,6 @@ export function normalizeDomain(input: string | null | undefined): string | null
   return host;
 }
 
-/** A readable slug from the name, made unique against the taken ids. */
 export function projectIdFor(name: string, taken: ReadonlySet<string>): string {
   const base =
     name

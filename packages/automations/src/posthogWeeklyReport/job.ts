@@ -27,7 +27,6 @@ const clientFor = (config: PosthogReportConfig, fetch: typeof globalThis.fetch |
 
 export type GeneratedReport = { readonly text: string; readonly blocks: SlackBlock[] };
 
-/** Builds the report without sending it: mrkdwn text for previews and notifications, Block Kit for the message. */
 export async function generateReport(config: PosthogReportConfig, now: Date, { fetch }: ReportDeps = {}): Promise<GeneratedReport> {
   const data = await fetchReportData(clientFor(config, fetch));
   return {

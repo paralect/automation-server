@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 const TIMEOUT_MS = 10_000;
-/** Crisp returns up to 20 messages per request; a full page means older ones may exist. */
 const MESSAGES_PAGE_SIZE = 20;
 const MAX_MESSAGE_PAGES = 5;
 export const CRISP_API_BASE_URL = "https://api.crisp.chat/v1";
@@ -23,7 +22,7 @@ export class CrispApiError extends Error {
   }
 }
 
-const envelope = <T extends z.ZodType>(data: T) => z.object({ error: z.boolean().optional(), reason: z.string().optional(), data });
+const envelope = <T extends z.ZodType>(data: T) => z.object({ reason: z.string().optional(), data });
 
 const websiteSchema = envelope(z.object({ name: z.string().nullish(), domain: z.string().nullish() }));
 
@@ -50,8 +49,6 @@ export type CrispConversation = { readonly email: string | null; readonly segmen
 
 export type CrispClient = ReturnType<typeof createCrispClient>;
 
-// Request bodies for notes and meta follow Crisp's REST reference by name; their exact shapes are still to be
-// confirmed against a live website, so they live only here.
 export function createCrispClient(options: CrispClientOptions) {
   const base = (options.apiBaseUrl ?? CRISP_API_BASE_URL).replace(/\/+$/, "");
   const doFetch = options.fetch ?? fetch;
@@ -101,15 +98,15 @@ export function createCrispClient(options: CrispClientOptions) {
       };
     },
 
-    /** The latest messages, following `timestamp_before` back through up to five pages. */
     async messages(sessionId: string): Promise<CrispRawMessage[]> {
       const all: CrispRawMessage[] = [];
       let before: number | null = null;
       for (let page = 0; page < MAX_MESSAGE_PAGES; page++) {
         const query = before === null ? "" : `?timestamp_before=${before}`;
-        const batch = messagesSchema.parse(await call("GET", `${conversation(sessionId)}/messages${query}`)).data;
+        const batch: CrispRawMessage[] = messagesSchema.parse(await call("GET", `${conversation(sessionId)}/messages${query}`)).data;
         all.push(...batch);
-        const oldest = Math.min(...batch.map((m) => m.timestamp));
+        if (batch.length === 0) break;
+        const oldest: number = batch.reduce((min, m) => Math.min(min, m.timestamp), Infinity);
         if (batch.length < MESSAGES_PAGE_SIZE || (before !== null && oldest >= before)) break;
         before = oldest;
       }
@@ -120,7 +117,6 @@ export function createCrispClient(options: CrispClientOptions) {
       await call("POST", `${conversation(sessionId)}/message`, { type: "note", from: "operator", origin: "chat", content });
     },
 
-    /** Crisp replaces the whole list, so callers pass the existing segments plus the new ones. */
     async setSegments(sessionId: string, segments: readonly string[]): Promise<void> {
       await call("PATCH", `${conversation(sessionId)}/meta`, { segments });
     },

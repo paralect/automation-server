@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { migrate } from "./sqliteSchema";
 import type { ClaimStore } from "./store";
 
 export type SqliteStoreOptions = {
@@ -14,11 +15,13 @@ export function createSqliteStore({ path, leaseMs = 300_000, now = Date.now }: S
   const db = new Database(path);
   db.run("PRAGMA busy_timeout = 5000");
   db.run("PRAGMA journal_mode = WAL");
-  db.run(
-    "CREATE TABLE IF NOT EXISTS claims (key TEXT PRIMARY KEY, status TEXT NOT NULL CHECK (status IN ('pending','done')), claimed_at INTEGER NOT NULL)",
-  );
+  migrate(db, "claims", [
+    (db) =>
+      db.run(
+        "CREATE TABLE IF NOT EXISTS claims (key TEXT PRIMARY KEY, status TEXT NOT NULL CHECK (status IN ('pending','done')), claimed_at INTEGER NOT NULL)",
+      ),
+  ]);
 
-  // Single-statement upsert keeps claim atomic across store instances sharing a file.
   const claimStmt = db.query(
     `INSERT INTO claims (key, status, claimed_at) VALUES ($key, 'pending', $now)
      ON CONFLICT(key) DO UPDATE SET claimed_at = excluded.claimed_at

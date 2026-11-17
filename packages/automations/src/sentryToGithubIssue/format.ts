@@ -46,7 +46,6 @@ function frameLines(frame: SentryFrame): string[] {
 }
 
 function orderedFrames(ex: SentryException, maxNonInApp: number): SentryFrame[] {
-  // Sentry stores frames oldest-first, so reverse to get the most recent call first.
   const recent = [...ex.frames].reverse();
   const inApp = recent.filter((f) => f.inApp);
   const rest = recent.filter((f) => !f.inApp).slice(0, maxNonInApp);
@@ -62,7 +61,6 @@ function stackBlock(alert: SentryIssueAlert, opts: Required<FormatOptions>): str
     chars += l.length + 1;
   };
 
-  // Last exception is the innermost/most relevant, so it leads; causes follow.
   const exceptions = [...alert.exceptions].reverse();
   const total = exceptions.reduce((n, e) => n + e.frames.length, 0);
   const budget = opts.maxStackChars - NOTE_RESERVE;

@@ -27,15 +27,14 @@ import { z } from "zod";
 import { adminProcedure, o } from "../index";
 import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../context";
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
+import { DAY_MS, HOUR_MS } from "../time";
 import { WorkflowInstallError, type InstallResult, type WorkflowCheck, type WorkflowStatus } from "../workflowInstaller";
 import { WORKFLOW_TEMPLATES, type IntegrationLink } from "../workflowTemplates";
 
 export type { CrispOutcome, CrispDecision };
 
-/** Name of the automation in `packages/automations/src/crispTriage`. */
 const CRISP_TRIAGE = "crisp-triage";
 
-/** One triaged Crisp conversation: the run, and what it decided. `outcome` is null for a run that failed before deciding. */
 export type CrispTriageItem = {
   id: string;
   startedAt: string;
@@ -44,17 +43,14 @@ export type CrispTriageItem = {
   error: string | null;
   sessionId: string;
   outcome: CrispOutcome | null;
-  /** Whether an operator has opened or marked it as read. */
   read: boolean;
 };
 
 export type CrispStats = {
   windowDays: number;
   byDecision: Record<CrispDecision, number>;
-  /** Runs that ended without a decision, such as the ones that failed before classifying. */
   withoutDecision: number;
   total: number;
-  /** Conversations nobody has read yet, over all time. */
   unread: number;
 };
 
@@ -80,10 +76,15 @@ const repo = z.string().trim().regex(new RegExp(REPO_PATTERN), "Repository must 
 const project = z.string().regex(new RegExp(PROJECT_ID_PATTERN), "Unknown project");
 const projectFields = { name: z.string().max(200), domain: z.string().max(300).nullable().optional() };
 
-/** Every project-scoped procedure answers NOT_FOUND for a project that does not exist (or was just deleted). */
 function inProject(context: Context, id: string): string {
   if (!context.settings.db.getProject(id)) throw new ORPCError("NOT_FOUND", { message: `Project ${id} does not exist` });
   return id;
+}
+
+function runInProject(context: Context, project: string, id: string) {
+  const found = context.activity.getRun(id);
+  if (!found || found.run.project !== inProject(context, project)) throw new ORPCError("NOT_FOUND");
+  return found;
 }
 
 function projectCall<T>(run: () => T): T {
@@ -153,8 +154,8 @@ export const appRouter = {
     .input(z.object({ project, windowHours: z.number().int().min(1).max(168).default(24) }))
     .output(type<ActivityStats>())
     .handler(({ input, context }) => {
-      const windowMs = input.windowHours * 3_600_000;
-      const bucketMs = input.windowHours <= 24 ? 3_600_000 : 6 * 3_600_000;
+      const windowMs = input.windowHours * HOUR_MS;
+      const bucketMs = input.windowHours <= 24 ? HOUR_MS : 6 * HOUR_MS;
       return context.activity.stats(new Date(Date.now() - windowMs).toISOString(), bucketMs, inProject(context, input.project));
     }),
 
@@ -174,9 +175,7 @@ export const appRouter = {
       .input(z.object({ project, id: z.string().min(1) }))
       .output(type<{ run: RunRecord; logs: StoredLog[] }>())
       .handler(({ input, context }) => {
-        const found = context.activity.getRun(input.id);
-        if (!found || found.run.project !== inProject(context, input.project)) throw new ORPCError("NOT_FOUND");
-        return found;
+        return runInProject(context, input.project, input.id);
       }),
   },
 
@@ -205,23 +204,23 @@ export const appRouter = {
       .input(z.object({ project, windowDays: z.number().int().min(1).max(90).default(30) }))
       .output(type<CrispStats>())
       .handler(({ input, context }) => {
-        const since = new Date(Date.now() - input.windowDays * 86_400_000).toISOString();
-        const counts = context.activity.decisionCounts({ project: inProject(context, input.project), automation: CRISP_TRIAGE, sinceIso: since });
+        const since = new Date(Date.now() - input.windowDays * DAY_MS).toISOString();
+        const projectId = inProject(context, input.project);
+        const counts = context.activity.decisionCounts({ project: projectId, automation: CRISP_TRIAGE, sinceIso: since });
         const byDecision = Object.fromEntries(CRISP_DECISIONS.map((d) => [d, counts[d] ?? 0])) as Record<CrispDecision, number>;
         return {
           windowDays: input.windowDays,
           byDecision,
           withoutDecision: counts.none ?? 0,
           total: Object.values(counts).reduce((a, b) => a + b, 0),
-          unread: context.activity.unreadCount({ project: inProject(context, input.project), automation: CRISP_TRIAGE }),
+          unread: context.activity.unreadCount({ project: projectId, automation: CRISP_TRIAGE }),
         };
       }),
     markRead: adminProcedure
       .input(z.object({ project, id: z.string().min(1), read: z.boolean() }))
       .output(type<{ read: boolean }>())
       .handler(({ input, context }) => {
-        const found = context.activity.getRun(input.id);
-        if (!found || found.run.project !== inProject(context, input.project) || found.run.automation !== CRISP_TRIAGE) throw new ORPCError("NOT_FOUND");
+        if (runInProject(context, input.project, input.id).run.automation !== CRISP_TRIAGE) throw new ORPCError("NOT_FOUND");
         context.activity.setRunRead(input.id, input.read ? new Date().toISOString() : null);
         return { read: input.read };
       }),
@@ -251,12 +250,9 @@ export const appRouter = {
       .output(type<{ run: WorkflowRun; jobs: WorkflowJob[] }>())
       .handler(async ({ input, context }) => {
         const reader = context.actions(inProject(context, input.project));
-        let found: Awaited<ReturnType<typeof reader.getRun>>;
-        try {
-          found = await reader.getRun(input.repo, input.id);
-        } catch (err) {
+        const found = await reader.getRun(input.repo, input.id).catch((err: unknown) => {
           throw new ORPCError("BAD_GATEWAY", { message: err instanceof Error ? err.message : "GitHub API failed" });
-        }
+        });
         if (!found) throw new ORPCError("NOT_FOUND");
         return found;
       }),

@@ -15,7 +15,6 @@ export const CRISP_TRIAGE = "crisp-triage";
 export type CrispTriageConfig = {
   crisp: { websiteId: string; identifier: string; key: string; apiBaseUrl?: string };
   openrouter: { apiKey: string; triageModel: string; escalationModel: string; apiBaseUrl?: string };
-  /** Required for modes issue and fix. In shadow mode it is only read, to find an existing issue. */
   github: { repo: { owner: string; name: string }; token: string; apiBaseUrl?: string } | null;
   triggerSegment: string;
   autoTriage: boolean;
@@ -129,7 +128,6 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
             dispatched = true;
             log.info("dispatched workflow", { sessionId, number: created.number, workflow: config.workflowFile, repo: repoName });
           } catch (err) {
-            // The issue exists, so a retry would only find it as a duplicate. Tell the operator now, fail the run after.
             dispatchError = actionable(err, repoName, config.workflowFile);
           }
         }
@@ -151,7 +149,6 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
           segmentSet,
           note,
         });
-      // Reported before the Crisp writes, so the admin still shows the decision when one of them throws.
       report?.(outcome(null, null));
       // A free Crisp plan refuses API writes with 402. That must not fail the triage: the verdict stays in the
       // admin (and in the GitHub issue), only the Crisp copy is skipped.
@@ -167,7 +164,6 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
       };
       const noted = await paidOnly("note", () => crisp.addNote(sessionId, note));
       if (!noted) log.info("triage note not posted to crisp", { sessionId, note: scrubber(request)(note) });
-      // The triage can take a while, so merge into the segments as they are now, not as they were when it started.
       const segment = statusSegment(decision);
       const segmented = await paidOnly("segments", async () => {
         const current = await crisp.conversation(sessionId);

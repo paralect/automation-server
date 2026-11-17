@@ -18,9 +18,7 @@ export type CreateContextOptions = AdminDeps & {
   context: HonoContext;
 };
 
-export async function createContext({ context, activity, actions, workflows, system, settings, posthog, adminToken }: CreateContextOptions): Promise<ApiContext> {
+export function createContext({ context, activity, actions, workflows, system, settings, posthog, adminToken }: CreateContextOptions): ApiContext {
   const match = /^Bearer\s+(.+)$/i.exec(context.req.header("authorization") ?? "");
   return { activity, actions, workflows, system, settings, posthog, adminToken, bearer: match?.[1]?.trim() };
 }
-
-export type Context = Awaited<ReturnType<typeof createContext>>;

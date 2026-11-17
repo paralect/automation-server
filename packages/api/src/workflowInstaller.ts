@@ -1,19 +1,17 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
+import { GITHUB_API, githubErrorDetail, githubHeaders } from "./githubApi";
 import { WORKFLOW_TEMPLATES, type TemplateFile, type WorkflowTemplate } from "./workflowTemplates";
 
 export type PullRequestRef = { readonly number: number; readonly url: string };
 
-/** `installed`: every file matches the template. `differs`: the workflow exists but a file is missing or changed. */
 export type TemplateState = "installed" | "differs" | "missing";
 
 export type TemplateStatus = {
   readonly templateId: string;
   readonly state: TemplateState;
-  /** Template files that are absent or different on the default branch. */
   readonly changedFiles: string[];
-  /** Open install PR, if one exists. */
   readonly pullRequest: PullRequestRef | null;
 };
 
@@ -24,12 +22,9 @@ export type WorkflowCheck = { readonly repo: string; readonly defaultBranch: str
 export type InstallMode = "pr" | "direct";
 
 export type InstallOutcome =
-  /** The default branch already has every file. Nothing was written. */
   | "already-installed"
-  /** `direct` mode wrote the files to the default branch. */
   | "committed"
   | "pr-opened"
-  /** An install PR was already open. Its branch was brought up to date when `filesWritten` is not empty. */
   | "pr-exists";
 
 export type InstallResult = {
@@ -37,7 +32,6 @@ export type InstallResult = {
   readonly templateId: string;
   readonly mode: InstallMode;
   readonly outcome: InstallOutcome;
-  /** Branch the files were checked against or written to. */
   readonly branch: string;
   readonly filesWritten: string[];
   readonly pullRequest: PullRequestRef | null;
@@ -47,7 +41,6 @@ export type InstallRequest = { repo: string; templateId: string; mode: InstallMo
 
 export type WorkflowInstaller = {
   status(repo: string): Promise<WorkflowStatus>;
-  /** `status` for one template, so checking a single workflow costs one file read per template file. */
   check(repo: string, templateId: string): Promise<WorkflowCheck>;
   install(request: InstallRequest): Promise<InstallResult>;
 };
@@ -72,7 +65,6 @@ export type WorkflowInstallerConfig = {
 
 export const installBranch = (templateId: string) => `automation-server/install-${templateId}`;
 
-/** The blob sha git (and the contents API) reports for a file with this content. */
 export const gitBlobSha = (content: string) =>
   createHash("sha1").update(`blob ${Buffer.byteLength(content, "utf8")}\0`).update(content, "utf8").digest("hex");
 
@@ -82,12 +74,11 @@ const ghRepo = z.object({ default_branch: z.string(), owner: z.object({ login: z
 const ghContent = z.union([z.object({ sha: z.string() }), z.array(z.unknown())]);
 const ghRef = z.object({ object: z.object({ sha: z.string() }) });
 const ghPull = z.object({ number: z.number(), html_url: z.string() });
-const ghError = z.object({ message: z.string().optional() });
 
 type FileCheck = { file: TemplateFile; sha: string | null; same: boolean };
 
 export function createWorkflowInstaller(config: WorkflowInstallerConfig): WorkflowInstaller {
-  const base = (config.apiBaseUrl ?? "https://api.github.com").replace(/\/+$/, "");
+  const base = (config.apiBaseUrl ?? GITHUB_API).replace(/\/+$/, "");
   const doFetch = config.fetch ?? fetch;
   const templates = config.templates ?? WORKFLOW_TEMPLATES;
 
@@ -97,7 +88,6 @@ export function createWorkflowInstaller(config: WorkflowInstallerConfig): Workfl
     return found;
   }
 
-  /** `action` completes "The GitHub token cannot ..." in the 403/404 message. A 404 resolves to null when `missingOk`. */
   async function call(
     method: string,
     path: string,
@@ -112,10 +102,7 @@ export function createWorkflowInstaller(config: WorkflowInstallerConfig): Workfl
       res = await doFetch(`${base}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${config.token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "automation-server",
+          ...githubHeaders(config.token),
           ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -126,8 +113,7 @@ export function createWorkflowInstaller(config: WorkflowInstallerConfig): Workfl
     }
     if (res.ok) return res.json();
     if (res.status === 404 && options.missingOk) return null;
-    const parsed = ghError.safeParse(await res.json().catch(() => null));
-    const detail = parsed.success && parsed.data.message ? parsed.data.message.slice(0, 200) : "";
+    const detail = await githubErrorDetail(res);
     if (res.status === 401) throw new WorkflowInstallError("GitHub rejected the token. Replace it on the Integrations page.", "github");
     if ((res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0") {
       throw new WorkflowInstallError("GitHub API rate limit reached. Try again in a few minutes.", "github");

@@ -121,6 +121,7 @@
     "packages/settings": {
       "name": "@automation-server/settings",
       "dependencies": {
+        "@automation-server/core": "workspace:*",
         "zod": "catalog:",
       },
       "devDependencies": {

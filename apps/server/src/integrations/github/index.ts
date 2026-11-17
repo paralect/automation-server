@@ -1,6 +1,10 @@
+import { GITHUB_API, githubHeaders } from "@automation-server/api/githubApi";
+import { z } from "zod";
+
 import { defineModule } from "../module";
 
-const API = "https://api.github.com";
+const userSchema = z.object({ login: z.string().optional() });
+const repoSchema = z.object({ private: z.boolean().optional(), permissions: z.object({ push: z.boolean().optional() }).optional() });
 
 export const github = defineModule({
   id: "github",
@@ -8,19 +12,12 @@ export const github = defineModule({
   async test({ github }, { fetch: doFetch = fetch }) {
     if (!github.configured) return { ok: false, available: true, message: "GitHub token is not set" };
     const call = (path: string) =>
-      doFetch(`${API}${path}`, {
-        headers: {
-          authorization: `Bearer ${github.values.token}`,
-          accept: "application/vnd.github+json",
-          "x-github-api-version": "2022-11-28",
-          "user-agent": "automation-server",
-        },
-      });
+      doFetch(`${GITHUB_API}${path}`, { headers: githubHeaders(github.values.token) });
 
     const user = await call("/user");
     if (user.status === 401) return { ok: false, available: true, message: "GitHub rejected the token (401)" };
     if (!user.ok) return { ok: false, available: true, message: `GitHub answered ${user.status} for GET /user` };
-    const login = ((await user.json().catch(() => ({}))) as { login?: string }).login ?? "unknown";
+    const login = userSchema.safeParse(await user.json().catch(() => null)).data?.login ?? "unknown";
 
     const repo = github.values.repo;
     if (!repo) return { ok: true, available: true, message: `Token is valid for ${login}. No issues repository is set.`, details: { user: login } };
@@ -30,7 +27,7 @@ export const github = defineModule({
       return { ok: false, available: true, message: `Token is valid for ${login} but cannot see ${repo}`, details: { user: login } };
     }
     if (!res.ok) return { ok: false, available: true, message: `GitHub answered ${res.status} for ${repo}`, details: { user: login } };
-    const body = (await res.json().catch(() => ({}))) as { private?: boolean; permissions?: { push?: boolean } };
+    const body = repoSchema.safeParse(await res.json().catch(() => null)).data ?? {};
     return {
       ok: true,
       available: true,

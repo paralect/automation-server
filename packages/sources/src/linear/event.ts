@@ -15,7 +15,6 @@ export type LinearIssue = {
   readonly teamKey: string | null;
   readonly state: string | null;
   readonly labels: readonly LinearLabel[];
-  /** Ids of labels on the issue now that were not on it before this change. Never empty. */
   readonly addedLabelIds: readonly string[];
   readonly updatedAt: string;
 };

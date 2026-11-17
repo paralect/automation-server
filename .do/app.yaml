@@ -69,6 +69,7 @@ services:
       - { key: PORT, value: "3001", scope: RUN_TIME }
       - { key: AUTOMATION_SERVER_URL, value: "${server.PRIVATE_URL}", scope: RUN_TIME }
       - { key: ADMIN_EMAIL, value: admin@example.com, scope: RUN_TIME }
+      - { key: TRUST_PROXY, value: "true", scope: RUN_TIME }
       - { key: ADMIN_API_TOKEN, value: "", scope: RUN_TIME, type: SECRET }
       - { key: ADMIN_PASSWORD, value: "", scope: RUN_TIME, type: SECRET }
       - { key: SESSION_SECRET, value: "", scope: RUN_TIME, type: SECRET }

@@ -1,7 +1,3 @@
-/**
- * Process-level configuration that is not an integration setting. Integration settings (tokens, repos,
- * filters, schedules) are resolved from the settings store, then env, then defaults. See @automation-server/settings.
- */
 export type ServerConfig = {
   port: number;
   databasePath: string;

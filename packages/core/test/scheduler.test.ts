@@ -161,3 +161,60 @@ describe("scheduler", () => {
     await scheduler.drain(1000);
   });
 });
+
+describe("scheduler failures outside the job", () => {
+  const recording = () => {
+    const errors: { message: string; error: unknown }[] = [];
+    const log: Logger = { info() {}, warn() {}, error: (message, fields) => void errors.push({ message, error: fields?.error }) };
+    return { log, errors };
+  };
+  const failingComplete = () => ({ ...createSqliteStore({ path: ":memory:" }), complete: () => {
+    throw new Error("disk full");
+  } });
+
+  test("a claim store that fails to complete keeps a successful run succeeded", async () => {
+    const { log, errors } = recording();
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const scheduler = createScheduler({ jobs: () => [], store: failingComplete(), log, activity });
+    const result = await scheduler.runNow(weekly("report", () => null), "manual:1");
+    expect(result).toMatchObject({ status: "succeeded" });
+    expect(activity.queryRuns({ limit: 10 }).items.map((r) => r.status)).toEqual(["succeeded"]);
+    expect(errors.map((e) => e.error)).toEqual(["disk full"]);
+  });
+
+  test("a claim store that fails to complete does not hide why the job failed", async () => {
+    const { log, errors } = recording();
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const scheduler = createScheduler({ jobs: () => [], store: failingComplete(), log, activity });
+    const failing = weekly("report", () => null, async () => {
+      throw new Error("posthog 500");
+    });
+    expect(await scheduler.runNow(failing, "manual:1")).toMatchObject({ status: "failed", error: "posthog 500" });
+    expect(activity.queryRuns({ limit: 10 }).items[0]).toMatchObject({ status: "failed", error: "posthog 500" });
+    expect(errors.map((e) => e.error).sort()).toEqual(["disk full", "posthog 500"]);
+  });
+
+  test("a job list that throws is logged by every tick, including the one start fires, without an unhandled rejection", async () => {
+    const rejections: unknown[] = [];
+    const listener = (reason: unknown) => void rejections.push(reason);
+    process.on("unhandledRejection", listener);
+    const { log, errors } = recording();
+    const scheduler = createScheduler({
+      jobs: () => {
+        throw new Error("registry broken");
+      },
+      store: createSqliteStore({ path: ":memory:" }),
+      log,
+    });
+    try {
+      scheduler.start();
+      await scheduler.tick();
+      await Bun.sleep(10);
+    } finally {
+      scheduler.stop();
+      process.off("unhandledRejection", listener);
+    }
+    expect(rejections).toEqual([]);
+    expect(errors.map((e) => e.error)).toEqual(["registry broken", "registry broken"]);
+  });
+});

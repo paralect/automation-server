@@ -3,7 +3,6 @@ import { Hono, type Context } from "hono";
 
 export type WebhookDeps = {
   source: (project: string, name: string) => Source | undefined;
-  /** Project of the legacy `/webhooks/:source` URL, from before projects existed. */
   defaultProject: string;
   dispatcher: Dispatcher;
   log: Logger;

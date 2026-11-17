@@ -4,7 +4,8 @@ import { parseRepo } from "@automation-server/settings";
 
 import { defineModule } from "../module";
 
-const isMode = (value: string): value is Mode => (MODES as readonly string[]).includes(value);
+const MODE_SET: ReadonlySet<string> = new Set(MODES);
+const isMode = (value: string): value is Mode => MODE_SET.has(value);
 
 export const crisp = defineModule({
   id: "crisp",

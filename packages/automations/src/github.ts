@@ -63,7 +63,6 @@ export function createGithubClient(config: GithubClientConfig) {
     return res;
   }
 
-  // GitHub's own error text (never our request body or token) is what tells a permissions problem from a bad query.
   async function fail(method: string, path: string, res: Response): Promise<GithubApiError> {
     const parsed = errorBody.safeParse(await res.json().catch(() => null));
     const detail = parsed.success

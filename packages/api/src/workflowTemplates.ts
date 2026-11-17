@@ -4,12 +4,9 @@ import { WORKFLOW_SOURCES } from "./workflowTemplates.generated";
 
 export type TemplateFile = { readonly path: string; readonly content: string };
 
-/** Ties a workflow to the integration that relies on it, so setting that integration up can check for and install it. */
 export type IntegrationLink = {
   readonly integration: IntegrationId;
-  /** `true` when the integration does nothing useful without the workflow. `false` when it only adds to it. */
   readonly required: boolean;
-  /** The setting that names the repository the workflow belongs in. It can live on another integration. */
   readonly repoSetting: { readonly integration: IntegrationId; readonly key: string };
 };
 
@@ -17,11 +14,8 @@ export type WorkflowTemplate = {
   readonly id: string;
   readonly title: string;
   readonly description: string;
-  /** Workflow file inside the target repository. */
   readonly path: string;
-  /** Every file the install commits, the workflow first. */
   readonly files: readonly TemplateFile[];
-  /** Each entry is satisfied by any one of its secret names. */
   readonly requiredSecrets: readonly (readonly string[])[];
   readonly requiredVariables: readonly string[];
   readonly integration?: IntegrationLink;
@@ -30,7 +24,6 @@ export type WorkflowTemplate = {
 type TemplateMeta = {
   readonly title: string;
   readonly description: string;
-  /** Folder under github-actions/skills/ that the install copies to .agents/skills/. */
   readonly skill?: string;
   readonly requiredSecrets: readonly (readonly string[])[];
   readonly requiredVariables: readonly string[];
@@ -39,8 +32,6 @@ type TemplateMeta = {
 
 const CODEX_AUTH = ["OPENAI_API_KEY", "CODEX_AUTH_JSON"] as const;
 
-// Keyed by the file name in github-actions/. Every workflow file there needs an entry, buildTemplates throws otherwise.
-// An entry whose file is not in github-actions/ yet is not offered, so metadata can land before its workflow.
 export const TEMPLATE_META: Readonly<Record<string, TemplateMeta>> = {
   "codex-issue-fix.yml": {
     title: "Codex issue fix",

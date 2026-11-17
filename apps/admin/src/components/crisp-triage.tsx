@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
+import { ExternalLink } from "@/components/external-link"
 import { Link } from "@tanstack/react-router"
 import {
-  ArrowSquareOutIcon,
   CheckCircleIcon,
   ChatCircleDotsIcon,
   CheckIcon,
@@ -27,7 +27,6 @@ import type { CrispDecisionKey } from "@/lib/filters"
 
 type DecisionView = { label: string; icon: ComponentType<{ className?: string }>; tone: string }
 
-/** What each decision means for the team. */
 export const DECISION_VIEW: Record<CrispDecisionKey, DecisionView> = {
   fix: { label: "Fix started", icon: WrenchIcon, tone: "bg-blue-500/15 text-blue-700 dark:text-blue-400" },
   issue: { label: "Issue created", icon: GithubLogoIcon, tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
@@ -36,7 +35,6 @@ export const DECISION_VIEW: Record<CrispDecisionKey, DecisionView> = {
   drop: { label: "Dropped", icon: ProhibitIcon, tone: "bg-muted text-muted-foreground" },
 }
 
-/** Why the triage chose that, in plain words. Keys are the route names of the triage rules. */
 const RULE_WHY: Record<string, string> = {
   spam: "Looks like spam, so nothing was created.",
   duplicate: "An open GitHub issue already tracks this conversation.",
@@ -72,12 +70,13 @@ export const MODE_COPY = {
   fix: "Fix: creates GitHub issues and starts the Codex fix for eligible bugs.",
 } as const
 
+export const isCrispMode = (mode: string): mode is keyof typeof MODE_COPY => Object.hasOwn(MODE_COPY, mode)
+
 const issueLabel = (url: string) => {
   const last = url.split("/").pop() ?? ""
   return /^\d+$/.test(last) ? `issue #${last}` : "an open issue"
 }
 
-/** One line of what happened, for the list. */
 function headline(item: CrispTriageItem): string {
   const { outcome } = item
   if (!outcome) return item.status === "failed" ? "The triage failed before it decided anything" : "No details were recorded"
@@ -106,7 +105,6 @@ function DecisionBadge({ item }: { item: CrispTriageItem }) {
   )
 }
 
-/** A short result for the list: the issue number, or why nothing was created. */
 function resultText(item: CrispTriageItem): string | null {
   const o = item.outcome
   if (!o) return null
@@ -115,7 +113,6 @@ function resultText(item: CrispTriageItem): string | null {
   return null
 }
 
-/** One conversation in the list. Unread ones are bold with a dot. */
 export function CrispRow({ item, selected, onOpen }: { item: CrispTriageItem; selected: boolean; onOpen: () => void }) {
   const verdict = item.outcome?.verdict
   const result = resultText(item)
@@ -127,7 +124,6 @@ export function CrispRow({ item, selected, onOpen }: { item: CrispTriageItem; se
         aria-current={selected ? "true" : undefined}
         className={cn(
           "grid w-full grid-cols-[0.75rem_9rem_1fr_auto] items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-          // Unread rows are white, read ones gray.
           item.read ? "bg-muted hover:bg-muted/70" : "bg-background hover:bg-muted/40",
           selected && "ring-2 ring-inset ring-primary/40"
         )}
@@ -157,7 +153,6 @@ export function CrispRow({ item, selected, onOpen }: { item: CrispTriageItem; se
   )
 }
 
-/** Copies text, with a short confirmation. Falls back to a hidden textarea where the clipboard API is blocked. */
 export function CopyButton({ text, label = "Copy", className }: { text: string; label?: string; className?: string }) {
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -197,13 +192,6 @@ const Section = ({ title, action, children }: { title: string; action?: React.Re
     </div>
     {children}
   </section>
-)
-
-const ExternalLink = ({ href, children }: { href: string; children: React.ReactNode }) => (
-  <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-4">
-    {children}
-    <ArrowSquareOutIcon className="size-3" aria-hidden />
-  </a>
 )
 
 function Results({ outcome }: { outcome: CrispOutcome }) {
@@ -249,7 +237,6 @@ function Results({ outcome }: { outcome: CrispOutcome }) {
   return <ul className="flex flex-col gap-1.5 text-sm">{items}</ul>
 }
 
-/** The side panel with everything about one conversation. */
 export function CrispPanel({
   item,
   onClose,

@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createSqliteActivityStore, createSqliteStore } from "@automation-server/core";
+
 import { createSecretBox } from "../src/crypto";
 import { DEFAULT_PROJECT_ID, ProjectInputError } from "../src/projects";
 import { createSqliteSettingsStore, SecretsUnavailableError } from "../src/store";
@@ -144,5 +146,67 @@ describe("projects", () => {
     expect(db.project(p.id).all()).toEqual({});
     expect(db.deleteProject(p.id)).toBe(false);
     expect(() => db.deleteProject(DEFAULT_PROJECT_ID)).toThrow(ProjectInputError);
+  });
+});
+
+describe("shared database", () => {
+  test("a project store cannot close the shared database; only its owner can", () => {
+    const db = createSqliteSettingsStore({ path: ":memory:" });
+    const acme = db.project(db.createProject({ name: "Acme" }).id);
+    // @ts-expect-error
+    expect(acme.close).toBeUndefined();
+    acme.apply({ set: [{ key: "a", json: "1", secret: false }] });
+    expect(db.project("acme").all()).toEqual({ a: { secret: false, json: "1" } });
+    db.close();
+    expect(() => acme.all()).toThrow();
+  });
+
+  test("projects whose ids share a prefix keep their settings apart", () => {
+    const db = createSqliteSettingsStore({ path: ":memory:" });
+    const ids = ["Acme", "Acme", "Acme 2"].map((name) => db.createProject({ name }).id);
+    expect(ids).toEqual(["acme", "acme-2", "acme-2-2"]);
+    for (const id of ids) db.project(id).apply({ set: [{ key: "owner", json: JSON.stringify(id), secret: false }] });
+    for (const id of ids) expect(db.project(id).all()).toEqual({ owner: { secret: false, json: JSON.stringify(id) } });
+    db.deleteProject("acme");
+    expect(db.project("acme").all()).toEqual({});
+    expect(db.project("acme-2").all().owner?.json).toBe('"acme-2"');
+  });
+
+  test("a database from before versioned schemas keeps its projects and settings across reopens", () => {
+    const path = tempDb();
+    const old = new Database(path);
+    old.run("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, secret INTEGER NOT NULL, updated_at TEXT NOT NULL)");
+    old.run("CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, domain TEXT, created_at TEXT NOT NULL)");
+    old.run("INSERT INTO projects VALUES ('default', 'Default', NULL, '2026-01-01'), ('acme', 'Acme', 'acme.com', '2026-01-02')");
+    old.run("INSERT INTO settings VALUES ('default:sentry.levels', '[\"error\"]', 0, 'x'), ('acme:sentry.levels', '[\"warning\"]', 0, 'x')");
+    old.close();
+
+    for (let i = 0; i < 2; i++) {
+      const db = createSqliteSettingsStore({ path });
+      expect(db.projects().map((p) => p.id)).toEqual(["default", "acme"]);
+      expect(db.all()).toEqual({ "sentry.levels": { secret: false, json: '["error"]' } });
+      expect(db.project("acme").all()).toEqual({ "sentry.levels": { secret: false, json: '["warning"]' } });
+      db.close();
+    }
+  });
+
+  test("claims, activity and settings in one file each upgrade on their own, in any opening order", () => {
+    const path = tempDb();
+    const legacy = new Database(path);
+    legacy.run("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, secret INTEGER NOT NULL, updated_at TEXT NOT NULL)");
+    legacy.run("INSERT INTO settings VALUES ('sentry.levels', '[\"error\"]', 0, 'x')");
+    legacy.close();
+
+    const claims = createSqliteStore({ path });
+    const activity = createSqliteActivityStore({ path });
+    const settings = createSqliteSettingsStore({ path });
+    expect(settings.all()).toEqual({ "sentry.levels": { secret: false, json: '["error"]' } });
+    expect(claims.claim("default/job:k")).toBe(true);
+    activity.startRun({ automation: "a", source: "s", kind: "k", externalId: "e", startedAt: "2026-01-01T00:00:00.000Z" });
+    for (const s of [claims, activity, settings]) s.close();
+
+    const again = createSqliteSettingsStore({ path });
+    expect(again.all()).toEqual({ "sentry.levels": { secret: false, json: '["error"]' } });
+    again.close();
   });
 });

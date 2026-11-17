@@ -7,7 +7,6 @@ export type ReportData = {
   readonly sessions: Pair;
   readonly pages: readonly Ranked[];
   readonly events: readonly Ranked[];
-  /** Unique users per day, index 0 is the last 24 hours, 14 entries. */
   readonly dailyUsers: readonly number[];
 };
 
@@ -36,7 +35,6 @@ const rankedLines = (rows: readonly Ranked[]) =>
     ? ["No data"]
     : rows.map((r, i) => `${i + 1}. ${escapeSlack(r.name)}: ${formatCount(r.current)} (${formatDelta(r)})`);
 
-/** Slack mrkdwn. The last 7 days end at `now`, compared with the 7 days before. */
 export function buildReport(data: ReportData, now: Date, title: string): string {
   const from = new Date(now.getTime() - 7 * DAY);
   const prevFrom = new Date(now.getTime() - 14 * DAY);

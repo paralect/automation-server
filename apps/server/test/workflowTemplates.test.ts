@@ -38,7 +38,8 @@ describe("bundled workflow templates", () => {
     ]);
     for (const [, { repoSetting }] of links) {
       const field = INTEGRATIONS[repoSetting.integration].fields.find((f) => f.key === repoSetting.key);
-      expect(field).toMatchObject({ kind: "text", pattern: expect.any(String) });
+      expect(field?.kind).toBe("text");
+      expect(field && "pattern" in field ? typeof field.pattern : undefined).toBe("string");
     }
   });
 

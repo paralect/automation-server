@@ -13,9 +13,9 @@ import {
 } from "@phosphor-icons/react"
 
 import { CrispIcon } from "@/components/crisp-triage"
-import { isAdded } from "@/components/integration-card"
 import { NavUser } from "@/components/nav-user"
 import { ProjectSwitcher, ProjectSwitcherSkeleton } from "@/components/project-switcher"
+import { isAdded } from "@/lib/integration-workflows"
 import { useProjectId } from "@/lib/project"
 import { crispStatsQuery, settingsQuery } from "@/lib/queries"
 import {
@@ -43,16 +43,12 @@ const NAV = [
   { title: "System", to: "/system", icon: HeartbeatIcon },
 ] as const
 
-/**
- * Pages that exist only for an integration the project added. They sit under one "Support" heading, so a
- * future support integration adds a line here and shows up in the same place.
- */
 const SUPPORT_NAV = [{ integration: "crisp", title: "Crisp", to: "/crisp", icon: CrispIcon }] as const
 
 function SupportNav({ pathname }: { pathname: string }) {
   const project = useProjectId()
   const settings = useQuery(settingsQuery(project))
-  const added = new Set((settings.data?.integrations ?? []).filter(isAdded).map((i) => i.id as string))
+  const added = new Set<string>((settings.data?.integrations ?? []).filter(isAdded).map((i) => i.id))
   const items = SUPPORT_NAV.filter((item) => added.has(item.integration))
   const crispStats = useQuery({ ...crispStatsQuery(project), enabled: added.has("crisp") })
   const unread: Record<string, number> = { crisp: crispStats.data?.unread ?? 0 }

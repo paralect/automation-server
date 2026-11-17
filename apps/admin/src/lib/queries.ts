@@ -18,14 +18,13 @@ import {
 } from "./api.functions"
 import type { ActionState, ActionsSearch, CrispSearch, LogsSearch, RunsSearch, WindowKey } from "./filters"
 
-const retryServerErrorOnce = (count: number, error: unknown) =>
+export const retryServerErrorOnce = (count: number, error: unknown) =>
   count < 1 && error instanceof Error && error.message === "SERVER_ERROR"
 
 export const projectsQuery = () =>
   queryOptions({
     queryKey: ["projects"],
     queryFn: () => listProjects(),
-    retry: retryServerErrorOnce,
   })
 
 // Every project-scoped key starts with the project, so switching projects never shows another project's data.
@@ -34,7 +33,6 @@ export const overviewQuery = (project: string, window: WindowKey) =>
   queryOptions({
     queryKey: [project, "overview", window],
     queryFn: () => getOverview({ data: { project, window } }),
-    retry: retryServerErrorOnce,
   })
 
 export const logsQuery = (project: string, filters: LogsSearch, live: boolean) =>
@@ -44,7 +42,6 @@ export const logsQuery = (project: string, filters: LogsSearch, live: boolean) =
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: live ? 5000 : false,
-    retry: retryServerErrorOnce,
   })
 
 export const runsQuery = (project: string, filters: RunsSearch) =>
@@ -53,41 +50,36 @@ export const runsQuery = (project: string, filters: RunsSearch) =>
     queryFn: ({ pageParam }) => listRuns({ data: { ...filters, project, before: pageParam, limit: 50 } }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
-    retry: retryServerErrorOnce,
   })
 
 const CRISP_POLL_MS = 10_000
 
 export const crispQuery = (project: string, filters: CrispSearch) =>
   infiniteQueryOptions({
-    queryKey: [project, "crisp", filters],
+    queryKey: [...crispKey(project), filters],
     queryFn: ({ pageParam }) => listCrisp({ data: { ...filters, project, before: pageParam, limit: 30 } }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: CRISP_POLL_MS,
-    retry: retryServerErrorOnce,
   })
 
 export const crispStatsQuery = (project: string) =>
   queryOptions({
-    queryKey: [project, "crisp-stats"],
+    queryKey: crispStatsKey(project),
     queryFn: () => getCrispStats({ data: { project } }),
     refetchInterval: CRISP_POLL_MS,
-    retry: retryServerErrorOnce,
   })
 
 export const runQuery = (project: string, id: string) =>
   queryOptions({
     queryKey: [project, "run", id],
     queryFn: () => getRun({ data: { project, id } }),
-    retry: retryServerErrorOnce,
   })
 
 export const systemQuery = (project: string) =>
   queryOptions({
     queryKey: [project, "system"],
     queryFn: () => getSystem({ data: { project } }),
-    retry: retryServerErrorOnce,
   })
 
 export const isActiveState = (state: ActionState) => state === "queued" || state === "waiting" || state === "running"
@@ -104,7 +96,6 @@ export const actionRunsQuery = (project: string, filters: ActionsSearch) =>
     getNextPageParam: (page) => page.nextPage ?? undefined,
     refetchInterval: (query) =>
       query.state.data?.pages.some((p) => p.runs.some((r) => isActiveState(r.state))) ? ACTIVE_POLL_MS : IDLE_POLL_MS,
-    retry: retryServerErrorOnce,
   })
 
 export const actionRunQuery = (project: string, repo: string, id: number) =>
@@ -112,14 +103,12 @@ export const actionRunQuery = (project: string, repo: string, id: number) =>
     queryKey: [project, "action", repo, id],
     queryFn: () => getActionRun({ data: { project, repo, id } }),
     refetchInterval: (query) => (query.state.data && isActiveState(query.state.data.run.state) ? ACTIVE_POLL_MS : false),
-    retry: retryServerErrorOnce,
   })
 
 export const settingsQuery = (project: string) =>
   queryOptions({
     queryKey: [project, "settings"],
     queryFn: () => getSettings({ data: { project } }),
-    retry: retryServerErrorOnce,
   })
 
 export const workflowTemplatesQuery = () =>
@@ -127,19 +116,22 @@ export const workflowTemplatesQuery = () =>
     queryKey: ["workflow-templates"],
     queryFn: () => listWorkflowTemplates(),
     staleTime: Infinity,
-    retry: retryServerErrorOnce,
   })
+
+export const workflowStatusKey = (project: string, repo: string) => [project, "workflow-status", repo] as const
+export const workflowCheckKey = (project: string, repo: string) => [project, "workflow-check", repo] as const
+export const crispKey = (project: string) => [project, "crisp"] as const
+export const crispStatsKey = (project: string) => [project, "crisp-stats"] as const
 
 export const workflowStatusQuery = (project: string, repo: string) =>
   queryOptions({
-    queryKey: [project, "workflow-status", repo],
+    queryKey: workflowStatusKey(project, repo),
     queryFn: () => getWorkflowStatus({ data: { project, repo } }),
-    retry: retryServerErrorOnce,
   })
 
 export const workflowCheckQuery = (project: string, repo: string, templateId: string) =>
   queryOptions({
-    queryKey: [project, "workflow-status", repo, templateId],
+    queryKey: [...workflowCheckKey(project, repo), templateId],
     queryFn: () => checkWorkflow({ data: { project, repo, templateId } }),
     retry: false,
   })

@@ -5,7 +5,6 @@ import { CATEGORIES, SEVERITIES, UNKNOWN_AREA } from "./types";
 
 const MAX_TRANSCRIPT_CHARS = 40_000;
 
-/** Removes the customer's own address verbatim before the pattern pass, in case it has an unusual shape. */
 function scrub(text: string, email: string | undefined): string {
   const known = email ? text.split(email).join("[email]") : text;
   return redactText(known);
@@ -18,7 +17,6 @@ export function redactMessages(request: CustomerRequest): CustomerMessage[] {
 export const hasUserText = (request: CustomerRequest): boolean =>
   request.messages.some((m) => m.from === "user" && m.text.trim() !== "");
 
-/** Oldest messages are dropped first when the conversation is too long, the latest ones carry the current state. */
 export function transcript(messages: readonly CustomerMessage[]): string {
   const lines = messages.map((m) => `[${m.at}] ${m.from === "user" ? "Customer" : "Support"}: ${m.text.replace(/<\/?conversation>/gi, "")}`);
   let total = 0;

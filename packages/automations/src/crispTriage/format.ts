@@ -84,7 +84,6 @@ export type NoteInput = {
   readonly dispatchFailed?: boolean;
 };
 
-/** A private note for operators. It is never sent to the customer. */
 export function formatNote({ decision, mode, github, verdict, issueUrl, dispatched, dispatchFailed }: NoteInput): string {
   const lines = [AUTOMATION_NOTE_PREFIX];
   if (verdict) {
@@ -116,7 +115,6 @@ export function formatNote({ decision, mode, github, verdict, issueUrl, dispatch
   return lines.join("\n");
 }
 
-/** Removes the customer's address and every other personal pattern from text the classifier produced. */
 export const scrubber = (request: Pick<CustomerRequest, "customer">) => (s: string): string =>
   redactText(request.customer.email ? s.split(request.customer.email).join("[email]") : s);
 

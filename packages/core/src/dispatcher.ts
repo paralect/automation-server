@@ -2,6 +2,7 @@ import type { ActivityStore, RunOutcome } from "./activity";
 import type { Automation } from "./automation";
 import type { Event } from "./event";
 import type { Logger } from "./logger";
+import { drainWithTimeout, errorMessage, recordActivity, scopeFields, withFields } from "./internal";
 import { claimKey, type ClaimStore } from "./store";
 
 export type Dispatcher = {
@@ -10,15 +11,12 @@ export type Dispatcher = {
 };
 
 export type DispatcherDeps = {
-  /** Read once per event, so a live reload takes effect for the next event and never splits one event across two lists. */
   automations: () => readonly Automation[];
   store: ClaimStore;
   log: Logger;
   prepare?: (event: Event) => Promise<Event>;
   activity?: ActivityStore;
 };
-
-const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export function createDispatcher({ automations: getAutomations, store, log, prepare, activity }: DispatcherDeps): Dispatcher {
   const inFlight = new Set<Promise<void>>();
@@ -32,21 +30,12 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
     }
   };
 
-  const record = <T>(what: string, scoped: Record<string, string>, fn: (activity: ActivityStore) => T): T | undefined => {
-    if (!activity) return undefined;
-    try {
-      return fn(activity);
-    } catch (err) {
-      log.error(`activity ${what} failed`, { ...scoped, error: errorMessage(err) });
-      return undefined;
-    }
-  };
+  const record = <T>(what: string, scoped: Record<string, string>, fn: (activity: ActivityStore) => T) =>
+    recordActivity(activity, log, what, scoped, fn);
 
   const runOne = async (automation: Automation, event: Event): Promise<void> => {
     const key = claimKey(automation.name, event.externalId, automation.project);
-    const scoped: Record<string, string> = automation.project
-      ? { project: automation.project, automation: automation.name, externalId: event.externalId }
-      : { automation: automation.name, externalId: event.externalId };
+    const scoped = scopeFields(automation.name, event.externalId, automation.project);
     const runStart = () => ({
       ...(automation.project ? { project: automation.project } : {}),
       automation: automation.name,
@@ -67,11 +56,7 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
     }
     const runId = record("startRun", scoped, (a) => a.startRun(runStart()));
     const tagged = runId ? { ...scoped, runId } : scoped;
-    const child: Logger = {
-      info: (m, f) => log.info(m, { ...tagged, ...f }),
-      warn: (m, f) => log.warn(m, { ...tagged, ...f }),
-      error: (m, f) => log.error(m, { ...tagged, ...f }),
-    };
+    const child = withFields(log, tagged);
     let outcome: RunOutcome | undefined;
     const finish = (status: "succeeded" | "failed", error?: string) => {
       if (runId) record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: new Date().toISOString(), outcome }));
@@ -83,8 +68,6 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
           outcome = reported;
         },
       });
-      store.complete(key);
-      finish("succeeded");
     } catch (err) {
       try {
         store.release(key);
@@ -93,7 +76,14 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
       }
       log.error("automation failed", { ...tagged, error: errorMessage(err) });
       finish("failed", errorMessage(err));
+      return;
     }
+    try {
+      store.complete(key);
+    } catch (err) {
+      log.error("complete failed", { ...tagged, error: errorMessage(err) });
+    }
+    finish("succeeded");
   };
 
   const prepareSafely = async (event: Event): Promise<Event> => {
@@ -116,17 +106,13 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
               .map((a) => runOne(a, ready)),
           ),
         )
-        .then(() => undefined);
+        .then(
+          () => undefined,
+          (err: unknown) => log.error("dispatch failed", { project: event.project, externalId: event.externalId, error: errorMessage(err) }),
+        );
       inFlight.add(work);
       void work.finally(() => inFlight.delete(work));
     },
-    async drain(timeoutMs) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, timeoutMs);
-      });
-      await Promise.race([Promise.allSettled([...inFlight]), timeout]);
-      clearTimeout(timer);
-    },
+    drain: (timeoutMs) => drainWithTimeout(inFlight, timeoutMs),
   };
 }

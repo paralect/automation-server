@@ -25,7 +25,7 @@ export function EnumFilter<T extends string>({
   return (
     <Select
       value={value ?? ALL}
-      onValueChange={(next) => onChange(next === ALL ? undefined : (next as T))}
+      onValueChange={(next) => onChange(options.find((option) => option === next))}
     >
       <SelectTrigger aria-label={label} className="w-36">
         <SelectValue>{(v: string) => (v === ALL ? `Any ${label.toLowerCase()}` : v)}</SelectValue>
@@ -58,7 +58,9 @@ export function TextFilter({
   const [draft, setDraft] = useState(value ?? "")
   const listId = suggestions ? `${label}-suggestions` : undefined
 
-  useEffect(() => setDraft(value ?? ""), [value])
+  useEffect(() => {
+    setDraft(value ?? "")
+  }, [value])
   useEffect(() => {
     const next = draft.trim() || undefined
     if (next === value) return

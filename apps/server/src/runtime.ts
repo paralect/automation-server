@@ -1,3 +1,4 @@
+import { errorMessage } from "@automation-server/api/errors";
 import type { Automation, Job, Logger, Source } from "@automation-server/core";
 import { INTEGRATIONS, type ConnectionTestResult, type IntegrationId, type ResolvedConfig } from "@automation-server/settings";
 
@@ -18,16 +19,11 @@ type Snapshot = {
 const EMPTY: ProjectSnapshot = { sources: {}, automations: [], jobs: [] };
 
 export type Runtime = {
-  /** Webhook sources of one project, by source name. */
   sources(project: string): Readonly<Record<string, Source>>;
   source(project: string, name: string): Source | undefined;
-  /** Automations of every project, each tagged with its project. */
   automations(): readonly Automation[];
-  /** Jobs of every project, each tagged with its project. */
   jobs(): readonly Job[];
-  /** Automations and jobs of one project. */
   project(project: string): ProjectSnapshot;
-  /** Re-resolves every project's settings and swaps the registered sources, automations and jobs in one step. */
   rebuild(): void;
   test(project: string, id: IntegrationId): Promise<ConnectionTestResult>;
 };
@@ -38,8 +34,6 @@ export type RuntimeDeps = {
   resolve: (project: string) => ResolvedConfig;
   deps: ModuleDeps;
 };
-
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 const withProject = (log: Logger, project: string): Logger => ({
   info: (m, f) => log.info(m, { project, ...f }),
@@ -70,7 +64,7 @@ export function createRuntime({ modules, projects, resolve, deps }: RuntimeDeps)
         automations.push(...(out.automations ?? []).map((a) => ({ ...a, project })));
         jobs.push(...(out.jobs ?? []).map((j) => ({ ...j, project })));
       } catch (err) {
-        log.error("integration build failed, skipped", { integration: module.id, error: message(err) });
+        log.error("integration build failed, skipped", { integration: module.id, error: errorMessage(err) });
       }
     }
     return { sources, automations, jobs };
@@ -118,7 +112,7 @@ export function createRuntime({ modules, projects, resolve, deps }: RuntimeDeps)
       try {
         return await module.test(config, depsFor(project));
       } catch (err) {
-        return { ok: false, available: true, message: `Connection test failed: ${message(err)}` };
+        return { ok: false, available: true, message: `Connection test failed: ${errorMessage(err)}` };
       }
     },
   };
