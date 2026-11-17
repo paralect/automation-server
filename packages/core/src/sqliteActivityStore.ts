@@ -5,6 +5,7 @@ import type {
   ActivityBucket,
   ActivityStats,
   ActivityStore,
+  DryRunFilter,
   LogEntry,
   LogLevel,
   Page,
@@ -53,6 +54,7 @@ type RunRow = {
   read_at: string | null;
   replay_of: string | null;
   has_event: number;
+  dry_run: number;
   event?: string | null;
 };
 
@@ -104,11 +106,12 @@ const toRun = (row: RunRow): StoredRun => ({
   readAt: row.read_at,
   ...(row.replay_of ? { replayOf: row.replay_of } : {}),
   hasEvent: row.has_event === 1,
+  dryRun: row.dry_run === 1,
 });
 
 // The event body is left out so list pages never carry payloads.
 const RUN_COLUMNS =
-  "seq, id, project, automation, source, kind, external_id, status, started_at, finished_at, error, outcome, read_at, replay_of, (event IS NOT NULL) AS has_event";
+  "seq, id, project, automation, source, kind, external_id, status, started_at, finished_at, error, outcome, read_at, replay_of, (event IS NOT NULL) AS has_event, dry_run";
 
 const parseEvent = (raw: string | null): Event | undefined => {
   if (raw === null) return undefined;
@@ -152,8 +155,10 @@ function buildFilter(
 const logProject = (project: string | undefined): Filter | undefined =>
   project === undefined ? undefined : { where: "(project = $project OR project IS NULL)", params: { $project: project } };
 
-const runExtra = (q: { decision?: string; unread?: boolean }): Filter | undefined => {
+const runExtra = (q: { decision?: string; unread?: boolean; dryRun?: DryRunFilter }): Filter | undefined => {
   const where: string[] = [];
+  if (q.dryRun === "exclude") where.push("dry_run = 0");
+  if (q.dryRun === "only") where.push("dry_run = 1");
   const params: Params = {};
   if (q.decision !== undefined) {
     where.push("json_extract(outcome, '$.decision') = $decision");
@@ -222,6 +227,9 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       if (!hasColumn(db, "runs", "event")) db.run("ALTER TABLE runs ADD COLUMN event TEXT");
       if (!hasColumn(db, "runs", "replay_of")) db.run("ALTER TABLE runs ADD COLUMN replay_of TEXT");
     },
+    (db) => {
+      if (!hasColumn(db, "runs", "dry_run")) db.run("ALTER TABLE runs ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 0");
+    },
   ]);
 
   const insertLog = db.query(
@@ -229,8 +237,8 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
      VALUES ($time, $level, $message, $project, $source, $automation, $externalId, $runId, $fields)`,
   );
   const insertRun = db.query(
-    `INSERT INTO runs (id, project, automation, source, kind, external_id, status, started_at, finished_at, event, replay_of)
-     VALUES ($id, $project, $automation, $source, $kind, $externalId, $status, $startedAt, $finishedAt, $event, $replayOf)`,
+    `INSERT INTO runs (id, project, automation, source, kind, external_id, status, started_at, finished_at, event, replay_of, dry_run)
+     VALUES ($id, $project, $automation, $source, $kind, $externalId, $status, $startedAt, $finishedAt, $event, $replayOf, $dryRun)`,
   );
   const finishStmt = db.query(
     "UPDATE runs SET status = $status, finished_at = $finishedAt, error = $error, outcome = $outcome WHERE id = $id AND status = 'running'",
@@ -258,6 +266,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       $finishedAt: finishedAt,
       $event: run.event ? JSON.stringify(toStoredEvent(run.event)) : null,
       $replayOf: run.replayOf ?? null,
+      $dryRun: run.dryRun ? 1 : 0,
     });
     return id;
   };
@@ -327,7 +336,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
     markRunsRead({ project, automation, readAt }) {
       const scope = project === undefined ? "" : "AND project = $project";
       return db
-        .query(`UPDATE runs SET read_at = $readAt WHERE automation = $automation AND read_at IS NULL AND (outcome IS NOT NULL OR status = 'failed') ${scope}`)
+        .query(`UPDATE runs SET read_at = $readAt WHERE automation = $automation AND read_at IS NULL AND dry_run = 0 AND (outcome IS NOT NULL OR status = 'failed') ${scope}`)
         .run({ $readAt: readAt, $automation: automation, ...(project === undefined ? {} : { $project: project }) }).changes;
     },
     unreadCount({ project, automation }) {
@@ -335,7 +344,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       return (
         db
           .query<{ n: number }, Params>(
-            `SELECT COUNT(*) AS n FROM runs WHERE automation = $automation AND read_at IS NULL AND (outcome IS NOT NULL OR status = 'failed') ${scope}`,
+            `SELECT COUNT(*) AS n FROM runs WHERE automation = $automation AND read_at IS NULL AND dry_run = 0 AND (outcome IS NOT NULL OR status = 'failed') ${scope}`,
           )
           .get({ $automation: automation, ...(project === undefined ? {} : { $project: project }) })?.n ?? 0
       );
@@ -345,7 +354,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       const rows = db
         .query<{ decision: string | null; n: number }, Params>(
           `SELECT json_extract(outcome, '$.decision') AS decision, COUNT(*) AS n FROM runs
-           WHERE automation = $automation AND started_at >= $since AND (outcome IS NOT NULL OR status = 'failed') ${scope}
+           WHERE automation = $automation AND started_at >= $since AND dry_run = 0 AND (outcome IS NOT NULL OR status = 'failed') ${scope}
            GROUP BY decision`,
         )
         .all({ $automation: automation, $since: sinceIso, ...(project === undefined ? {} : { $project: project }) });
@@ -367,7 +376,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       const runs = Object.fromEntries(RUN_STATUSES.map((s) => [s, 0])) as Record<RunStatus, number>;
       for (const r of db
         .query<{ status: RunStatus; n: number }, Params>(
-          `SELECT status, COUNT(*) AS n FROM runs WHERE started_at >= $since ${runScope} GROUP BY status`,
+          `SELECT status, COUNT(*) AS n FROM runs WHERE started_at >= $since AND dry_run = 0 ${runScope} GROUP BY status`,
         )
         .all(params({ $since: sinceIso }))) {
         runs[r.status] = r.n;
@@ -385,7 +394,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       for (const r of db
         .query<{ bucket: number; status: RunStatus; n: number }, Params>(
           `SELECT (CAST(strftime('%s', started_at) AS INTEGER) * 1000) / $bucketMs AS bucket, status, COUNT(*) AS n
-           FROM runs WHERE started_at >= $since AND status IN ('succeeded','failed','duplicate') ${runScope}
+           FROM runs WHERE started_at >= $since AND dry_run = 0 AND status IN ('succeeded','failed','duplicate') ${runScope}
            GROUP BY bucket, status`,
         )
         .all(params({ $since: sinceIso, $bucketMs: bucketMs }))) {
@@ -406,7 +415,7 @@ export function createSqliteActivityStore({ path, now = Date.now, legacyProject 
       }
 
       const recentFailures = db
-        .query<RunRow, Params>(`SELECT ${RUN_COLUMNS} FROM runs WHERE status = 'failed' ${runScope} ORDER BY seq DESC LIMIT 5`)
+        .query<RunRow, Params>(`SELECT ${RUN_COLUMNS} FROM runs WHERE status = 'failed' AND dry_run = 0 ${runScope} ORDER BY seq DESC LIMIT 5`)
         .all(params())
         .map((row) => {
           const { seq: _seq, ...run } = toRun(row);

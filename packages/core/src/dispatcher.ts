@@ -10,6 +10,7 @@ export type ReplayRequest = {
   readonly automation: string;
   readonly event: Event;
   readonly replayOf: string;
+  readonly dryRun?: boolean;
 };
 
 export type ReplayResult = {
@@ -19,6 +20,7 @@ export type ReplayResult = {
 
 export type Dispatcher = {
   enqueue(event: Event): void;
+  // A dry run never touches the claim store: it writes nothing, so exactly-once does not apply, and the original run's claim (possibly `done`) must survive it.
   // Skips `matches` on purpose: the event may no longer match the automation. Resolves once the run row exists, not when the automation finishes.
   replay(request: ReplayRequest): Promise<ReplayResult>;
   drain(timeoutMs: number): Promise<void>;
@@ -54,7 +56,7 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
 
   // Claims and records the run synchronously so callers can learn the run id before the automation finishes.
   // `original` is the event as received, `event` the one handed to the automation after prepare.
-  const begin = (automation: Automation, event: Event, original: Event, replayOf?: string): Started => {
+  const begin = (automation: Automation, event: Event, original: Event, replayOf?: string, dryRun = false): Started => {
     const key = claimKey(automation.name, event.externalId, automation.project);
     const scoped = scopeFields(automation.name, event.externalId, automation.project);
     const runStart = () => ({
@@ -65,9 +67,10 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
       externalId: event.externalId,
       startedAt: new Date().toISOString(),
       ...(replayOf ? { replayOf } : {}),
+      ...(dryRun ? { dryRun } : {}),
     });
     try {
-      if (!store.claim(key)) {
+      if (!dryRun && !store.claim(key)) {
         const runId = record("recordDuplicate", scoped, (a) => a.recordDuplicate(runStart()));
         log.info("duplicate skipped", runId ? { ...scoped, runId } : scoped);
         return { status: "duplicate", runId };
@@ -87,24 +90,29 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
       try {
         await automation.run(event, {
           log: child,
+          ...(dryRun ? { dryRun } : {}),
           report: (reported) => {
             outcome = reported;
           },
         });
       } catch (err) {
-        try {
-          store.release(key);
-        } catch (releaseErr) {
-          log.error("release failed", { ...scoped, error: errorMessage(releaseErr) });
+        if (!dryRun) {
+          try {
+            store.release(key);
+          } catch (releaseErr) {
+            log.error("release failed", { ...scoped, error: errorMessage(releaseErr) });
+          }
         }
         log.error("automation failed", { ...tagged, error: errorMessage(err) });
         finish("failed", errorMessage(err));
         return;
       }
-      try {
-        store.complete(key);
-      } catch (err) {
-        log.error("complete failed", { ...tagged, error: errorMessage(err) });
+      if (!dryRun) {
+        try {
+          store.complete(key);
+        } catch (err) {
+          log.error("complete failed", { ...tagged, error: errorMessage(err) });
+        }
       }
       finish("succeeded");
     })();
@@ -145,12 +153,12 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
         );
       track(work);
     },
-    async replay({ project, automation: name, event, replayOf }) {
+    async replay({ project, automation: name, event, replayOf, dryRun }) {
       const automation = getAutomations().find((a) => a.name === name && a.project === project);
       if (!automation) return { outcome: "unknown-automation" };
       const original = { ...event, project };
       const ready = await prepareSafely(original);
-      const started = begin(automation, ready, original, replayOf);
+      const started = begin(automation, ready, original, replayOf, dryRun);
       if (started.status === "claim-failed") throw new Error("claim failed");
       if (started.status === "duplicate") return { outcome: "duplicate", ...(started.runId ? { runId: started.runId } : {}) };
       track(started.done);

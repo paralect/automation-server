@@ -4,6 +4,8 @@ import type { Logger } from "./logger";
 
 export type AutomationContext = {
   readonly log: Logger;
+  // Reads stay, writes are skipped. The automation says what it would have done through ctx.log and report.
+  readonly dryRun?: boolean;
   report?(outcome: RunOutcome): void;
 };
 

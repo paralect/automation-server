@@ -416,6 +416,37 @@ describe("dispatcher replay", () => {
     expect(again.outcome).toBe("duplicate");
   });
 
+  test("a dry run hands ctx.dryRun to the automation, marks the row, and leaves the claim state alone", async () => {
+    const seen: (boolean | undefined)[] = [];
+    const { dispatcher, activity } = withActivity([scoped("a", async (_e, ctx) => void seen.push(ctx.dryRun))]);
+    await dispatcher.replay(request());
+    await dispatcher.drain(1000);
+    const dry = await dispatcher.replay(request({ dryRun: true }));
+    await dispatcher.drain(1000);
+    expect(dry.outcome).toBe("started");
+    expect(seen).toEqual([undefined, true]);
+    expect(activity.getRun(dry.runId!)?.run).toMatchObject({ status: "succeeded", dryRun: true });
+    expect((await dispatcher.replay(request())).outcome).toBe("duplicate");
+  });
+
+  test("a failed dry run does not release the claim of a real run still in flight", async () => {
+    let release!: () => void;
+    const { dispatcher, activity } = withActivity([
+      scoped("a", (_e, ctx) => {
+        if (ctx.dryRun) throw new Error("dry boom");
+        return new Promise<void>((r) => (release = r));
+      }),
+    ]);
+    const real = await dispatcher.replay(request());
+    const dry = await dispatcher.replay(request({ dryRun: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(activity.getRun(dry.runId!)?.run).toMatchObject({ status: "failed", dryRun: true });
+    expect((await dispatcher.replay(request())).outcome).toBe("duplicate");
+    release();
+    await dispatcher.drain(1000);
+    expect(activity.getRun(real.runId!)?.run.status).toBe("succeeded");
+  });
+
   test("an unknown automation or a different project returns unknown-automation without running anything", async () => {
     let ran = 0;
     const { dispatcher } = withActivity([scoped("a", async () => void ran++)]);

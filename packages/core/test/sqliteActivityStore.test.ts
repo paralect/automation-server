@@ -370,6 +370,61 @@ describe("stored event", () => {
   });
 });
 
+describe("dry runs", () => {
+  const finished = (s: ActivityStore, over: Partial<RunStart>, status: "succeeded" | "failed" = "succeeded") => {
+    const id = s.startRun(runStart(over));
+    s.finishRun(id, { status, error: status === "failed" ? "x" : undefined, finishedAt: "2026-01-01T00:00:01.000Z", outcome: { decision: "issue" } });
+    return id;
+  };
+
+  test("are marked, listed by queryRuns, and filterable", () => {
+    const s = make();
+    const real = finished(s, { externalId: "real" });
+    const dry = finished(s, { externalId: "dry", dryRun: true });
+    expect(s.getRun(dry)?.run.dryRun).toBe(true);
+    expect(s.getRun(real)?.run.dryRun).toBe(false);
+    const ids = (dryRun?: "include" | "exclude" | "only") => s.queryRuns({ limit: 10, dryRun }).items.map((r) => r.id);
+    expect(ids().sort()).toEqual([dry, real].sort());
+    expect(ids("include").sort()).toEqual([dry, real].sort());
+    expect(ids("exclude")).toEqual([real]);
+    expect(ids("only")).toEqual([dry]);
+  });
+
+  test("never count toward stats, decisionCounts, unreadCount or markRunsRead", () => {
+    const s = make();
+    finished(s, { externalId: "real" });
+    finished(s, { externalId: "dry-ok", dryRun: true });
+    finished(s, { externalId: "dry-bad", dryRun: true }, "failed");
+    const stats = s.stats("2025-01-01T00:00:00.000Z", 3_600_000 * 24 * 365);
+    expect(stats.runs).toEqual({ running: 0, succeeded: 1, failed: 0, duplicate: 0 });
+    expect(stats.buckets.reduce((n, b) => n + b.succeeded + b.failed, 0)).toBe(1);
+    expect(stats.recentFailures).toEqual([]);
+    expect(s.decisionCounts({ automation: "a", sinceIso: "2025-01-01T00:00:00.000Z" })).toEqual({ issue: 1 });
+    expect(s.unreadCount({ automation: "a" })).toBe(1);
+    expect(s.markRunsRead({ automation: "a", readAt: "2026-01-02T00:00:00.000Z" })).toBe(1);
+  });
+
+  test("a database from before dry runs is upgraded and old runs are not dry", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dry-"));
+    try {
+      const path = join(dir, "a.db");
+      const first = createSqliteActivityStore({ path });
+      const old = first.startRun(runStart());
+      first.close();
+      const raw = new Database(path);
+      raw.run("ALTER TABLE runs DROP COLUMN dry_run");
+      raw.run("UPDATE schema_versions SET version = 3 WHERE component = 'activity'");
+      raw.close();
+      const s = createSqliteActivityStore({ path });
+      open.push(s);
+      expect(s.getRun(old)?.run.dryRun).toBe(false);
+      expect(s.getRun(s.startRun(runStart({ dryRun: true })))?.run.dryRun).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("read state", () => {
   test("runs start unread and can be marked read, unread again, filtered and counted", () => {
     const s = make();
