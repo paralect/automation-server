@@ -4,9 +4,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/paralect/automation-server/main/scripts/deploy-vps.sh | sudo bash
 #   sudo ./scripts/deploy-vps.sh            # from a checkout
 #
-# While the repository is private, raw.githubusercontent.com needs a token too, and so does the clone:
-#   curl -fsSL -H "Authorization: Bearer $TOKEN" https://raw.githubusercontent.com/paralect/automation-server/main/scripts/deploy-vps.sh \
-#     | sudo REPO_TOKEN="$TOKEN" GHCR_USER=<github-user> bash
+# From a private fork, raw.githubusercontent.com needs a token too, and so does the clone:
+#   curl -fsSL -H "Authorization: Bearer $TOKEN" https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/deploy-vps.sh \
+#     | sudo REPO_URL=https://github.com/<owner>/<repo>.git REPO_TOKEN="$TOKEN" GHCR_USER=<github-user> bash
 #
 # First run asks for the settings and writes .env. Later runs update and restart, keeping .env.
 # Every prompt can be answered ahead with an environment variable of the same name, for example
@@ -18,7 +18,7 @@
 # It is asked on the first run, defaults to build without a terminal, and can be set on a later
 # run to switch an existing install. IMAGE and IMAGE_TAG choose which image to pull, for example
 # IMAGE_TAG=sha-1a2b3c4 to pin or roll back. GHCR_USER and GHCR_TOKEN (a classic token with
-# read:packages) log in to the registry when the package is private.
+# read:packages) log in to the registry when the package is private, as a fork's is at first.
 #
 # REPO_TOKEN clones and updates a private repository. It falls back to GHCR_TOKEN, so one classic
 # token with the repo and read:packages scopes covers both. It is sent in a request header and is
@@ -81,6 +81,9 @@ confirm() {
 secret() { openssl rand -hex 32; }
 
 DEFAULT_IMAGE=ghcr.io/paralect/automation-server
+# Where the repository lived before. GitHub redirects its clone URL, but ghcr.io does not redirect
+# its image, which no longer gets updates.
+OLD_REPO=prlct/automation-server
 
 # Runs git with the token for github.com when there is one. The header travels in the environment,
 # so the token appears neither in the process list nor in .git/config. Never prompts for a password.
@@ -175,8 +178,8 @@ apply_overrides() {
   fi
 }
 
-# The package is private while the repository is, and a new package is private by default, so a
-# refused pull is the normal first-run case. Log in once, docker keeps the credentials.
+# GitHub creates a package as private, so a fork's first pull is refused until the package is made
+# public or the server logs in. Log in once, docker keeps the credentials.
 pull_image() {
   local out image registry
   if out="$(docker compose pull 2>&1)"; then return 0; fi
@@ -215,12 +218,29 @@ check_compose_version() {
   fi
 }
 
+# Moves an install from before the repository moved onto the new origin and image.
+migrate_old_repo() {
+  local url
+  url="$(git -C "$APP_DIR" remote get-url origin 2>/dev/null || true)"
+  case "$url" in
+    *github.com[/:]"$OLD_REPO" | *github.com[/:]"$OLD_REPO".git)
+      say "The repository moved to ${DEFAULT_IMAGE#ghcr.io/}, updating origin"
+      git -C "$APP_DIR" remote set-url origin "${url/$OLD_REPO/${DEFAULT_IMAGE#ghcr.io/}}"
+      ;;
+  esac
+  if [ -f "$APP_DIR/.env" ] && [ "$(env_value IMAGE)" = "ghcr.io/$OLD_REPO" ]; then
+    say "Switching IMAGE in .env to $DEFAULT_IMAGE"
+    set_env IMAGE "$DEFAULT_IMAGE"
+  fi
+}
+
 locate_checkout() {
   local here
   here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
   if [ -n "$here" ] && [ -f "$here/../docker-compose.yml" ] && [ -f "$here/../Dockerfile" ]; then
     APP_DIR="$(cd "$here/.." && pwd)"
     say "Using the checkout at $APP_DIR"
+    migrate_old_repo
     if git -C "$APP_DIR" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
       git_run -C "$APP_DIR" pull --quiet --ff-only || warn "git pull failed, deploying the code as it is."
     fi
@@ -230,6 +250,7 @@ locate_checkout() {
   command -v git >/dev/null 2>&1 || { [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null 2>&1 && apt-get update -qq && apt-get install -y -qq git >/dev/null; } || die "git is required."
   if [ -d "$APP_DIR/.git" ]; then
     say "Updating $APP_DIR"
+    migrate_old_repo
     git_run -C "$APP_DIR" fetch --quiet origin "$BRANCH"
     git_run -C "$APP_DIR" checkout --quiet "$BRANCH"
     git_run -C "$APP_DIR" pull --quiet --ff-only origin "$BRANCH"
