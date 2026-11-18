@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Installs or updates automation-server on a Linux VPS with Docker Compose.
 #
-#   curl -fsSL https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/paralect/automation-server/main/scripts/deploy-vps.sh | sudo bash
 #   sudo ./scripts/deploy-vps.sh            # from a checkout
 #
 # While the repository is private, raw.githubusercontent.com needs a token too, and so does the clone:
-#   curl -fsSL -H "Authorization: Bearer $TOKEN" https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh \
+#   curl -fsSL -H "Authorization: Bearer $TOKEN" https://raw.githubusercontent.com/paralect/automation-server/main/scripts/deploy-vps.sh \
 #     | sudo REPO_TOKEN="$TOKEN" GHCR_USER=<github-user> bash
 #
 # First run asks for the settings and writes .env. Later runs update and restart, keeping .env.
@@ -29,7 +29,7 @@
 
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/prlct/automation-server.git}"
+REPO_URL="${REPO_URL:-https://github.com/paralect/automation-server.git}"
 BRANCH="${BRANCH:-main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/automation-server}"
 
@@ -80,7 +80,7 @@ confirm() {
 
 secret() { openssl rand -hex 32; }
 
-DEFAULT_IMAGE=ghcr.io/prlct/automation-server
+DEFAULT_IMAGE=ghcr.io/paralect/automation-server
 
 # Runs git with the token for github.com when there is one. The header travels in the environment,
 # so the token appears neither in the process list nor in .git/config. Never prompts for a password.

@@ -27,7 +27,7 @@ ingress:
 services:
   - name: server
     github:
-      repo: prlct/automation-server
+      repo: paralect/automation-server
       branch: main
       deploy_on_push: true
     source_dir: /
@@ -54,7 +54,7 @@ services:
 
   - name: admin
     github:
-      repo: prlct/automation-server
+      repo: paralect/automation-server
       branch: main
       deploy_on_push: true
     source_dir: /

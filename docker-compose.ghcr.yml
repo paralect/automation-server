@@ -8,7 +8,7 @@
 
 x-image: &image
   # IMAGE_TAG is `latest` (the last build of main) or `sha-<commit>` to pin or roll back.
-  image: ${IMAGE:-ghcr.io/prlct/automation-server}:${IMAGE_TAG:-latest}
+  image: ${IMAGE:-ghcr.io/paralect/automation-server}:${IMAGE_TAG:-latest}
   restart: unless-stopped
   init: true
 

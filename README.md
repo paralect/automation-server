@@ -101,7 +101,7 @@ The server and the admin ship as one Docker image. Pick one of three setups, and
 On a fresh Ubuntu or Debian VPS, with two DNS A records pointing at it (one for webhooks, one for the admin):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/paralect/automation-server/main/scripts/deploy-vps.sh | sudo bash
 ```
 
 The script installs Docker if it is missing, clones the repository to `/opt/automation-server`, asks whether to pull the prebuilt image or build on the server, asks for the GitHub and Sentry settings, generates the admin password and secrets into `.env` (mode 600), opens ports 80 and 443 in `ufw` if it is active, and starts everything behind Traefik. At the end it prints the admin URL, the admin password and the webhook URL to paste into Sentry.
@@ -120,7 +120,7 @@ sudo /opt/automation-server/scripts/deploy-vps.sh
 
   ```bash
   export TOKEN=ghp_...
-  curl -fsSL -H "Authorization: Bearer $TOKEN" https://raw.githubusercontent.com/prlct/automation-server/main/scripts/deploy-vps.sh \
+  curl -fsSL -H "Authorization: Bearer $TOKEN" https://raw.githubusercontent.com/paralect/automation-server/main/scripts/deploy-vps.sh \
     | sudo REPO_TOKEN="$TOKEN" GHCR_USER=<github-user> GHCR_TOKEN="$TOKEN" bash
   ```
 
