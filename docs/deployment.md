@@ -47,7 +47,7 @@ Or put `COMPOSE_FILE=docker-compose.ghcr.yml` in `.env`, with `:docker-compose.t
 
 - A server that only pulls needs about 512 MB of RAM, since the stack idles around 80 MB. Building needs about 1 GB.
 - `IMAGE_TAG=sha-<commit>` in `.env` pins one build. Set it back to `latest` to follow `main`. To roll back, pin the previous commit's tag.
-- `IMAGE` in `.env` points to another registry or a fork. The default is `ghcr.io/prlct/automation-server`, and the script derives it from the repository's `origin`.
+- `IMAGE` in `.env` points to another registry or a fork. The default is `ghcr.io/paralect/automation-server`, and the script derives it from the repository's `origin`.
 - The two compose files must keep the same service settings. CI compares them, apart from `image` and `build`.
 
 **Access to the package.** A new package is private by default. Either make the package public (Package settings, Danger zone, Change visibility), or log the server in once:
