@@ -50,7 +50,7 @@ Or put `COMPOSE_FILE=docker-compose.ghcr.yml` in `.env`, with `:docker-compose.t
 - `IMAGE` in `.env` points to another registry or a fork. The default is `ghcr.io/paralect/automation-server`, and the script derives it from the repository's `origin`.
 - The two compose files must keep the same service settings. CI compares them, apart from `image` and `build`.
 
-**Access to the package.** A new package is private by default. Either make the package public (Package settings, Danger zone, Change visibility), or log the server in once:
+**Access to the package.** `ghcr.io/paralect/automation-server` is public, so pulling it needs no login. A fork publishes its own package, which GitHub creates as private. Either make it public (Package settings, Danger zone, Change visibility), or log the server in once:
 
 ```bash
 echo "$TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
@@ -58,7 +58,7 @@ echo "$TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
 
 `TOKEN` is a classic personal access token with only `read:packages`. GitHub Container Registry does not accept fine-grained tokens. Docker stores the credentials in `~/.docker/config.json` of the user that ran the login, unencrypted unless a credential helper is configured. Use a token of an account that can read nothing else that matters.
 
-**Private repository.** `git clone` and `raw.githubusercontent.com` both need a token. `scripts/deploy-vps.sh` reads it from `REPO_TOKEN` (or `GHCR_TOKEN`) and sends it in an HTTP header, so it is not stored in `.git/config`. One classic token with the `repo` and `read:packages` scopes covers the clone and the image pull. Fine-grained tokens work for the clone but not for the registry. The README has the full one-line command.
+**Private fork.** This repository is public and clones without a token. For a private fork, `git clone` and `raw.githubusercontent.com` both need one. `scripts/deploy-vps.sh` reads it from `REPO_TOKEN` (or `GHCR_TOKEN`) and sends it in an HTTP header, so it is not stored in `.git/config`. One classic token with the `repo` and `read:packages` scopes covers the clone and the image pull. Fine-grained tokens work for the clone but not for the registry. The README has the full one-line command.
 
 ## Docker Compose with Traefik (VPS)
 
