@@ -50,8 +50,8 @@ export const slack = defineModule({
       automations: [createSlackBot({ client, allowedUsers, handler: createAgentHandler(agent) })],
     };
   },
-  testHasSideEffects: true,
-  async test({ slack }, { fetch }) {
+  scheduledCheck: ({ slack }) => Boolean(slack.values.botToken),
+  async test({ slack }, { fetch }, options) {
     const { webhookUrl, botToken, channelLabel, apiBaseUrl } = slack.values;
     const parts: string[] = [];
     const details: Record<string, string> = {};
@@ -70,7 +70,8 @@ export const slack = defineModule({
       details.signingSecret = slack.values.signingSecret ? "set" : "missing";
     }
 
-    if (webhookUrl) {
+    // The daily token check only verifies the bot token. Posting the test message is for a person clicking the button.
+    if (webhookUrl && !options?.scheduled) {
       await postToSlack(webhookUrl, "Automation server alerts are connected", { fetch });
       parts.push(`Test message sent to Slack${channelLabel ? ` ${channelLabel}` : ""}`);
     }

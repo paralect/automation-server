@@ -3,7 +3,7 @@ import type { Automation, Job, Logger, Source } from "@automation-server/core";
 import { INTEGRATIONS, type ConnectionTestResult, type IntegrationId, type ResolvedConfig } from "@automation-server/settings";
 
 import { createTokenHealthJob, type HealthSink } from "./health";
-import type { IntegrationModule, ModuleDeps } from "./integrations/module";
+import type { IntegrationModule, ModuleDeps, TestOptions } from "./integrations/module";
 
 type ProjectSnapshot = {
   readonly sources: Readonly<Record<string, Source>>;
@@ -26,7 +26,7 @@ export type Runtime = {
   jobs(): readonly Job[];
   project(project: string): ProjectSnapshot;
   rebuild(): void;
-  test(project: string, id: IntegrationId, now?: Date): Promise<ConnectionTestResult>;
+  test(project: string, id: IntegrationId, now?: Date, options?: TestOptions): Promise<ConnectionTestResult>;
 };
 
 const TEST_TIMEOUT_MS = 8_000;
@@ -52,7 +52,7 @@ const withProject = (log: Logger, project: string): Logger => ({
 export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs = TEST_TIMEOUT_MS, health }: RuntimeDeps): Runtime {
   const depsFor = (project: string): ModuleDeps => ({ ...deps, log: withProject(deps.log, project) });
 
-  const probe = async (project: string, id: IntegrationId): Promise<ConnectionTestResult> => {
+  const probe = async (project: string, id: IntegrationId, options?: TestOptions): Promise<ConnectionTestResult> => {
     const title = INTEGRATIONS[id].title;
     const module = modules.find((m) => m.id === id);
     if (!module?.test) return { ok: false, available: false, message: `Connection test is not available for ${title} yet` };
@@ -72,7 +72,7 @@ export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs 
     });
     const attempt = (async (): Promise<ConnectionTestResult> => {
       try {
-        return await module.test!(config, { ...depsFor(project), fetch: withSignal(deps.fetch, controller.signal) });
+        return await module.test!(config, { ...depsFor(project), fetch: withSignal(deps.fetch, controller.signal) }, options);
       } catch (err) {
         return { ok: false, available: true, message: `Connection test failed: ${errorMessage(err)}` };
       }
@@ -84,8 +84,8 @@ export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs 
     }
   };
 
-  const test = async (project: string, id: IntegrationId, now = new Date()): Promise<ConnectionTestResult> => {
-    const result = await probe(project, id);
+  const test = async (project: string, id: IntegrationId, now = new Date(), options?: TestOptions): Promise<ConnectionTestResult> => {
+    const result = await probe(project, id, options);
     if (health && result.available && resolve(project)[id].configured) await health.record(project, id, result, now);
     return result;
   };
@@ -119,9 +119,9 @@ export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs 
           project,
           integrations: () => {
             const current = resolve(project);
-            return modules.filter((m) => m.test && !m.testHasSideEffects && current[m.id].configured).map((m) => m.id);
+            return modules.filter((m) => m.test && current[m.id].configured && (m.scheduledCheck?.(current) ?? true)).map((m) => m.id);
           },
-          test: (id, now) => test(project, id, now),
+          test: (id, now) => test(project, id, now, { scheduled: true }),
         }),
       );
     }
