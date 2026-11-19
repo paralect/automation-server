@@ -31,6 +31,7 @@ import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../c
 import { canReplay, SCHEDULE_SOURCE } from "../replay";
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
 import { DAY_MS, HOUR_MS } from "../time";
+import { SlackDirectoryError, type DirectoryFailure, type DirectoryResult } from "../slackDirectory";
 import { WorkflowInstallError, type InstallResult, type WorkflowCheck, type WorkflowStatus } from "../workflowInstaller";
 import { WORKFLOW_TEMPLATES, type IntegrationLink } from "../workflowTemplates";
 
@@ -141,6 +142,22 @@ async function workflowCall<T>(run: () => Promise<T>): Promise<T> {
     return await run();
   } catch (err) {
     if (err instanceof WorkflowInstallError) throw new ORPCError(WORKFLOW_ERROR_CODE[err.kind], { message: err.message });
+    throw err;
+  }
+}
+
+const DIRECTORY_ERROR_CODE = {
+  "no-token": "PRECONDITION_FAILED",
+  "missing-scope": "BAD_GATEWAY",
+  rejected: "BAD_GATEWAY",
+  failed: "BAD_GATEWAY",
+} as const satisfies Record<DirectoryFailure, string>;
+
+async function directoryCall<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof SlackDirectoryError) throw new ORPCError(DIRECTORY_ERROR_CODE[err.kind], { message: err.message });
     throw err;
   }
 }
@@ -369,6 +386,13 @@ export const appRouter = {
       .handler(({ input, context }) => context.settings.test(inProject(context, input.project), input.integrationId)),
   },
 
+  slack: {
+    directory: adminProcedure
+      .input(z.object({ project, kind: z.enum(["users", "channels"]), search: z.string().trim().max(100).optional(), refresh: z.boolean().optional() }))
+      .output(type<DirectoryResult>())
+      .handler(({ input, context }) => directoryCall(() => context.slackDirectory.list({ ...input, project: inProject(context, input.project) }))),
+  },
+
   posthog: {
     preview: adminProcedure
       .input(z.object({ project }))
@@ -390,6 +414,7 @@ const currentView = ({ db, env, health }: Context["settings"], project: string):
 export type AppRouter = typeof appRouter;
 export type AppRouterClient = RouterClient<typeof appRouter>;
 export type { PosthogPreview, PosthogRunResult } from "../context";
+export type { DirectoryItem, DirectoryResult } from "../slackDirectory";
 export type { ConnectionTestResult, FieldView, IntegrationView, Project, SettingsView } from "@automation-server/settings";
 export type {
   InstallMode,

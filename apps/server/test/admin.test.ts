@@ -10,6 +10,7 @@ import { webhookUrls } from "../src/config";
 import { createPosthogAdmin } from "../src/integrations/posthog";
 import { INTEGRATION_MODULES } from "../src/integrations/registry";
 import { createReplayAdmin } from "../src/replay";
+import { createSlackDirectory } from "../src/slackDirectory";
 import { createHealthSink } from "../src/health";
 import { createRuntime } from "../src/runtime";
 
@@ -21,8 +22,8 @@ const withProject = (path: string, input: unknown) =>
     ? input
     : { project: "default", ...(input as object | undefined) };
 
-function setup(options: { adminToken?: string; encryptionKey?: string; env?: Record<string, string>; githubFetch?: typeof fetch; workflowsFetch?: typeof fetch; claims?: ClaimStore } = { adminToken: TOKEN }) {
-  const { adminToken, encryptionKey, env = {}, githubFetch, workflowsFetch, claims } = options;
+function setup(options: { slackFetch?: typeof fetch; adminToken?: string; encryptionKey?: string; env?: Record<string, string>; githubFetch?: typeof fetch; workflowsFetch?: typeof fetch; claims?: ClaimStore } = { adminToken: TOKEN }) {
+  const { adminToken, encryptionKey, env = {}, githubFetch, workflowsFetch, claims, slackFetch } = options;
   const settings = createSqliteSettingsStore({ path: ":memory:", encryptionKey });
   const resolve = (p: string) => resolveConfig(settings.project(p), envFor(p, env));
   const healthStore = createSqliteHealthStore({ path: ":memory:" });
@@ -54,6 +55,7 @@ function setup(options: { adminToken?: string; encryptionKey?: string; env?: Rec
       settings: { db: settings, env, reload: runtime.rebuild, test: runtime.test, health: healthStore.get },
       posthog: createPosthogAdmin({ resolve, scheduler, fetch: githubFetch }),
       replay: createReplayAdmin({ dispatcher, scheduler, jobs: (project) => runtime.project(project).jobs }),
+      slackDirectory: createSlackDirectory({ resolve, fetch: slackFetch }),
       system: (project) => ({
         startedAt: new Date().toISOString(),
         sources: Object.keys(runtime.sources(project)),
@@ -609,5 +611,112 @@ describe("runs.replay API", () => {
   test("a scheduled job that is no longer enabled is refused", async () => {
     const t = setup({ adminToken: TOKEN, env });
     await precondition(t, seed(t, { automation: "posthog-weekly-report", source: "schedule", withEvent: false }), "no longer configured");
+  });
+});
+
+describe("slack directory API", () => {
+  const rpc = async (t: ReturnType<typeof setup>, path: string, input?: unknown) => {
+    const res = await t.call(path, input, TOKEN);
+    const body = (await res.json()) as { json: any };
+    return { status: res.status, body: body.json };
+  };
+
+  const member = (id: string, name: string, over: Record<string, unknown> = {}) => ({ id, name, real_name: name.toUpperCase(), profile: { display_name: "" }, ...over });
+
+  const slackWorld = (reply: (method: string) => unknown) => {
+    const calls: string[] = [];
+    const slackFetch = (async (url: string | URL | Request) => {
+      const method = new URL(String(url)).pathname.split("/").pop()!;
+      calls.push(method);
+      return Response.json(reply(method));
+    }) as typeof fetch;
+    return { calls, slackFetch };
+  };
+
+  const saveToken = (t: ReturnType<typeof setup>) =>
+    rpc(t, "settings/update", { integrationId: "slack", values: { botToken: "xoxb-test", signingSecret: "s" } });
+
+  test("needs the admin token", async () => {
+    expect((await setup().call("slack/directory", { kind: "users" })).status).toBe(401);
+  });
+
+  test("without a saved bot token it is a precondition failure and Slack is never called", async () => {
+    const { calls, slackFetch } = slackWorld(() => ({ ok: true, members: [] }));
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", slackFetch });
+    const res = await rpc(t, "slack/directory", { kind: "users" });
+    expect(res.status).toBe(412);
+    expect(res.body.message).toContain("Save the bot token first");
+    expect(calls).toEqual([]);
+  });
+
+  test("lists people from the saved token, without bots, and filters by search", async () => {
+    const { slackFetch } = slackWorld(() => ({
+      ok: true,
+      members: [member("U1", "alice"), member("U2", "bob"), member("U3", "carol", { is_bot: true }), member("U4", "dave", { deleted: true })],
+    }));
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", slackFetch });
+    await saveToken(t);
+    const all = await rpc(t, "slack/directory", { kind: "users" });
+    expect(all.status).toBe(200);
+    expect(all.body).toEqual({
+      items: [
+        { id: "U1", label: "ALICE", detail: "@alice" },
+        { id: "U2", label: "BOB", detail: "@bob" },
+      ],
+      truncated: false,
+    });
+    const found = await rpc(t, "slack/directory", { kind: "users", search: "@BO" });
+    expect(found.body.items.map((i: { id: string }) => i.id)).toEqual(["U2"]);
+    expect(JSON.stringify(all.body)).not.toContain("xoxb-test");
+  });
+
+  test("channels carry the bot's membership", async () => {
+    const { slackFetch } = slackWorld(() => ({ ok: true, channels: [{ id: "C1", name: "general", is_member: true }, { id: "C2", name: "random", is_member: false }] }));
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", slackFetch });
+    await saveToken(t);
+    const res = await rpc(t, "slack/directory", { kind: "channels" });
+    expect(res.body.items).toEqual([
+      { id: "C1", label: "#general", member: true },
+      { id: "C2", label: "#random", member: false },
+    ]);
+  });
+
+  test("a missing scope names the scope to add", async () => {
+    const { slackFetch } = slackWorld(() => ({ ok: false, error: "missing_scope" }));
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", slackFetch });
+    await saveToken(t);
+    const users = await rpc(t, "slack/directory", { kind: "users" });
+    expect(users.status).toBe(502);
+    expect(users.body.message).toContain("Add the users:read scope to the Slack app and reinstall it");
+    const channels = await rpc(t, "slack/directory", { kind: "channels" });
+    expect(channels.body.message).toContain("channels:read and groups:read");
+  });
+
+  test("a rejected token is reported as such and the token never appears", async () => {
+    for (const error of ["invalid_auth", "token_revoked"]) {
+      const { slackFetch } = slackWorld(() => ({ ok: false, error }));
+      const t = setup({ adminToken: TOKEN, encryptionKey: "k", slackFetch });
+      await saveToken(t);
+      const res = await rpc(t, "slack/directory", { kind: "users" });
+      expect(res.status).toBe(502);
+      expect(res.body.message).toContain("Slack rejected the bot token");
+      expect(JSON.stringify(res.body)).not.toContain("xoxb-test");
+    }
+  });
+
+  test("another project has its own token and an unknown project is not found", async () => {
+    const { calls, slackFetch } = slackWorld(() => ({ ok: true, members: [member("U1", "alice")] }));
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k", slackFetch });
+    await rpc(t, "projects/create", { name: "Acme" });
+    await saveToken(t);
+    expect((await rpc(t, "slack/directory", { project: "acme", kind: "users" })).status).toBe(412);
+    expect(calls).toEqual([]);
+    expect((await rpc(t, "slack/directory", { project: "ghost", kind: "users" })).status).toBe(404);
+    expect((await rpc(t, "slack/directory", { kind: "users" })).status).toBe(200);
+  });
+
+  test("rejects a kind it does not know", async () => {
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k" });
+    expect((await rpc(t, "slack/directory", { kind: "emoji" })).status).toBe(400);
   });
 });

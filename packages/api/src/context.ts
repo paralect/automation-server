@@ -2,6 +2,7 @@ import type { ActivityStore, ReplayRequest, ReplayResult } from "@automation-ser
 import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsDb, StoredHealth } from "@automation-server/settings";
 
 import type { ActionsReader } from "./githubActions";
+import type { SlackDirectory } from "./slackDirectory";
 import type { WorkflowInstaller } from "./workflowInstaller";
 
 export type SystemInfo = {
@@ -51,6 +52,7 @@ export type Context = {
   settings: SettingsAdmin;
   posthog: PosthogAdmin;
   replay: ReplayAdmin;
+  slackDirectory: SlackDirectory;
   adminToken: string | undefined;
   bearer: string | undefined;
 };
