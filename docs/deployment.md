@@ -95,3 +95,7 @@ Before that, edit `.do/app.yaml`: the `github.repo` of both services (your fork)
 - GitHub Actions tracking is unaffected, since it reads from GitHub.
 
 Keep `instance_count: 1` for the server. Each instance would have its own sqlite file. If you need lasting history, use the VPS option.
+
+## Verify a deployment
+
+Before a release, walk a test instance through every feature with throwaway accounts: [staging verification](staging-verification.md).
