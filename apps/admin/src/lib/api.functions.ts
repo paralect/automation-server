@@ -7,6 +7,8 @@ export type {
   CrispOutcome,
   CrispStats,
   CrispTriageItem,
+  DirectoryItem,
+  DirectoryResult,
   IntegrationLink,
   InstallMode,
   InstallOutcome,
@@ -116,6 +118,10 @@ export const updateSettings = authedPost
     })
   )
   .handler(({ data }) => callAutomation((api) => api.settings.update(data)))
+
+export const getSlackDirectory = authed
+  .validator(inProject.extend({ kind: z.enum(["users", "channels"]), search: z.string().max(100).optional(), refresh: z.boolean().optional() }))
+  .handler(({ data }) => callAutomation((api) => api.slack.directory(data), { showMessages: true }))
 
 export const testConnection = authedPost.validator(integrationInput).handler(({ data }) =>
   callAutomation((api) => api.settings.testConnection(data))
