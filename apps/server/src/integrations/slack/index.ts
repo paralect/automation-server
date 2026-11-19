@@ -1,5 +1,6 @@
 import {
   buildReadTools,
+  buildWriteTools,
   createAgent,
   createAgentHandler,
   createOpenRouterClient,
@@ -27,27 +28,54 @@ function readTools({ github, sentry, posthog, linear }: ResolvedConfig, { fetch 
   });
 }
 
+// Only a workflow the project configured for its own automations, living in the repository the bot dispatches in, may be started from Slack.
+function allowedWorkflows({ github, linear, crisp }: ResolvedConfig): string[] {
+  const repo = github.configured ? github.values.repo?.trim().toLowerCase() : undefined;
+  const files = new Set<string>();
+  if (crisp.configured) files.add(crisp.values.workflowFile);
+  if (linear.configured && linear.values.targetRepo.trim().toLowerCase() === repo) files.add(linear.values.workflowFile);
+  return [...files].filter(Boolean);
+}
+
+function workflowRefs({ linear }: ResolvedConfig): Record<string, string> {
+  if (!linear.configured) return {};
+  const { ref, workflowFile } = linear.values;
+  return ref.trim() ? { [workflowFile]: ref.trim() } : {};
+}
+
+function writeTools(config: ResolvedConfig, { fetch }: Deps) {
+  const { github, linear } = config;
+  const { apiKey } = linear.values;
+  return buildWriteTools({
+    github: github.configured && github.values.repo ? { token: github.values.token, repo: parseRepo(github.values.repo), workflowFiles: allowedWorkflows(config), workflowRefs: workflowRefs(config) } : undefined,
+    linear: apiKey ? { apiKey, triggerLabel: linear.configured ? linear.values.triggerLabel : undefined } : undefined,
+    fetch,
+  });
+}
+
 export const slack = defineModule({
   id: "slack",
-  build(config, { log, fetch }) {
+  build(config, { log, fetch, pending, project }) {
     const { slack, openrouter } = config;
     if (!slack.configured) return {};
-    const { botEnabled, botToken, signingSecret, allowedUsers = [], apiBaseUrl, agentModel } = slack.values;
+    const { botEnabled, botToken, signingSecret, allowedUsers = [], apiBaseUrl, agentModel, botName, requireApproval } = slack.values;
     if (!botEnabled || !botToken || !signingSecret) return {};
     if (allowedUsers.length === 0) log.warn("slack bot is on but no member IDs are allowed, so it will only answer with a denial");
 
-    const tools = readTools(config, { fetch });
+    const canWrite = pending !== undefined && project !== undefined;
+    if (!requireApproval) log.warn("slack bot approval is off: writes run as soon as the model proposes them");
+    const tools = [...readTools(config, { fetch }), ...(canWrite ? writeTools(config, { fetch }) : [])];
     const agent = createAgent({
       model: openrouter.configured ? createOpenRouterClient({ apiKey: openrouter.values.apiKey, fetch }) : null,
       modelName: agentModel || openrouter.values.escalationModel || "anthropic/claude-sonnet-5.5",
       tools,
     });
-    log.info("slack bot ready", { tools: tools.map((t) => t.name), model: openrouter.configured ? "configured" : "missing" });
+    log.info("slack bot ready", { tools: tools.map((t) => t.name), requireApproval, model: openrouter.configured ? "configured" : "missing" });
 
     const client = createSlackBotClient({ token: botToken, apiBaseUrl, fetch });
     return {
       sources: [createSlackSource({ signingSecret })],
-      automations: [createSlackBot({ client, allowedUsers, handler: createAgentHandler(agent) })],
+      automations: [createSlackBot({ client, allowedUsers, handler: createAgentHandler(agent, canWrite ? { pending, project, tools, requireApproval, botName } : undefined) })],
     };
   },
   scheduledCheck: ({ slack }) => Boolean(slack.values.botToken),

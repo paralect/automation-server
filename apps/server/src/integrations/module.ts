@@ -1,9 +1,13 @@
-import type { Automation, Job, Logger, Source } from "@automation-server/core";
+import type { Automation, Job, Logger, PendingActionStore, Source } from "@automation-server/core";
 import type { ConnectionTestResult, IntegrationId, ResolvedConfig } from "@automation-server/settings";
 
 export type ModuleDeps = {
   readonly log: Logger;
   readonly fetch?: typeof fetch;
+  // The project being built. Set by the runtime for every module.
+  readonly project?: string;
+  // Where proposed writes wait for approval. Without it the Slack bot offers no write tools.
+  readonly pending?: PendingActionStore;
 };
 
 export type TestOptions = { readonly scheduled?: boolean };

@@ -3,7 +3,7 @@ import { isSlackAppMention, type SlackAppMentionEvent } from "@automation-server
 import type { SlackBotOutcome } from "@automation-server/sources/slack/outcome";
 
 import { redactUntrusted, singleLine, truncate } from "../redact";
-import type { AgentResult } from "./agent";
+import type { AgentStatus, StepLog } from "./agent";
 import { escapeSlackText, type SlackBotClient } from "./client";
 import { createSlackBotLimiter, type Admission, type SlackBotLimiter } from "./limiter";
 
@@ -26,8 +26,15 @@ export type SlackBotHandlerInput = {
   readonly config: SlackBotSettings;
 };
 
+export type SlackBotStatus = AgentStatus | "executed" | "cancelled" | "expired";
+
 // The reply is posted as is, so a handler must hand back text that is already safe for Slack. Steps and status are optional, a plain reply is enough.
-export type SlackBotHandlerResult = Pick<AgentResult, "reply"> & Partial<Omit<AgentResult, "reply">>;
+export type SlackBotHandlerResult = {
+  readonly reply: string;
+  readonly steps?: readonly StepLog[];
+  readonly status?: SlackBotStatus;
+  readonly error?: string;
+};
 
 export type SlackBotHandler = (input: SlackBotHandlerInput) => Promise<SlackBotHandlerResult>;
 
@@ -54,7 +61,7 @@ function agentOutcome({ status, steps = [], error }: SlackBotHandlerResult): Sla
     status,
     stepCount: steps.length,
     toolsUsed: [...new Set(steps.map((s) => s.tool))],
-    steps: steps.map(({ tool, ok, durationMs }) => ({ tool, ok, durationMs })),
+    steps: steps.map(({ tool, ok, durationMs, stage }) => ({ tool, ok, durationMs, ...(stage ? { stage } : {}) })),
     ...(error ? { error } : {}),
   };
 }
@@ -86,7 +93,7 @@ export function createSlackBot({ client, allowedUsers, handler = echoHandler, li
           // A handler that throws must not fail the run: the person still gets an answer in the thread, and Slack must not retry into a second reply.
           result = await handler({ event, ctx, client, config }).catch(failureReply);
           for (const step of result.steps ?? []) {
-            log.info("agent step", { step: step.index, tool: step.tool, args: step.args, ok: step.ok, durationMs: step.durationMs, ...(step.error ? { error: step.error } : {}) });
+            log.info("agent step", { step: step.index, tool: step.tool, args: step.args, ok: step.ok, ...(step.stage ? { stage: step.stage } : {}), durationMs: step.durationMs, ...(step.error ? { error: step.error } : {}) });
           }
         } else {
           result = admission.reply === null ? null : { reply: admission.reply };
