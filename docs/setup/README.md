@@ -58,7 +58,7 @@ All forms work the same way:
 - **Webhook URL** (Sentry, Linear, Crisp). A read-only field with a copy button. You paste it into the other service. It needs `PUBLIC_URL` on the server to show the full address.
 - **Secret fields** (tokens, signing secrets). An empty one is an input box. Once saved it shows **Set** and the value is never displayed again. Click **Replace**, paste the new value, then **Save**. **Clear** removes it. Secrets are stored encrypted and need `SETTINGS_ENCRYPTION_KEY` on the server.
 - **Plain fields** (repository, label, model). Type the value and click **Save**. Saving applies at once, no restart.
-- **Test connection** (GitHub, Linear, PostHog, OpenRouter, Crisp, Slack alerts). Checks the saved values against the real service. Run it after every save.
+- **Test connection** (GitHub, Linear, PostHog, OpenRouter, Crisp, Slack). Checks the saved values against the real service. Run it after every save.
 
 Each guide below shows the exact form with the fields numbered in the order you fill them.
 
@@ -71,6 +71,7 @@ Each integration adds an **automation**, a small job with one purpose. This is w
 | `sentry-to-github-issue` | A Sentry issue alert fires | The server checks the alert (signature, level, environment), makes sure the issue is not already open, and creates a GitHub issue with the error, stack trace, breadcrumbs and a link back to Sentry. Secrets are scrubbed first. | A GitHub issue labelled `sentry`. With `codex-issue-fix.yml` installed, start the fix from the Actions tab to get a draft PR. | GitHub, Sentry |
 | `linear-label-to-pr` | The trigger label is added to a Linear issue | The server dispatches the `linear-implement` workflow with the issue title and description. Codex implements it in the target repository. | A pull request titled with the issue identifier, attached to the Linear issue. | GitHub, Linear |
 | `crisp-triage` | The trigger segment is added to a Crisp conversation | The server reads the conversation, strips personal data, asks an AI model (through OpenRouter) to classify it, and routes by a fixed table. It writes a private note and a `triage:` segment back into Crisp. In `issue` mode it also opens a GitHub issue, in `fix` mode it starts Codex too. The customer never gets a message. | A row on the admin Crisp page, a private note in Crisp, optionally a GitHub issue or a draft PR. | GitHub, OpenRouter, Crisp |
+| `slack-bot` | Someone tags the bot in Slack | The server checks the member against the allowlist, then an LLM answers in the thread using read tools, and can propose a change (create an issue, label a ticket, start a workflow) that runs only after the requester approves it in the thread. | A threaded reply in Slack and a run on the Runs page with every tool step. | OpenRouter, Slack bot settings, optionally GitHub, Sentry, PostHog, Linear |
 | `posthog-weekly-report` | A schedule: one day and hour per week | The server asks PostHog for this week and last week, compares users, pageviews, sessions, top pages and top events, and posts the result to Slack. | A Slack message every week. Also **Preview report** and **Send now** buttons in the admin. | PostHog, Slack |
 
 The code-writing part is done by four GitHub Actions workflows. The server only dispatches them. They are explained one by one, with what each does and needs, in [github-actions/README.md](../../github-actions/README.md#the-workflows-one-by-one).
@@ -92,6 +93,7 @@ For the exact rules of each automation (filters, deduplication, retries, limits)
 | 5 | [Crisp](crisp.md) | Marketplace plugin, Web Hooks, `triage` segment | Plugin credentials, website ID, signing secret |
 | 6 | [PostHog](posthog.md) | Personal API key, Slack webhook | Project ID, API key, Slack webhook URL |
 | 7 | [Slack alerts](slack.md) | Slack incoming webhook | Webhook URL, failure threshold |
+| 8 | [Slack bot](slack-bot.md) | Slack app, bot token, signing secret | Bot token, signing secret, allowed member IDs |
 
 ## Which service needs which
 
@@ -102,6 +104,7 @@ For the exact rules of each automation (filters, deduplication, retries, limits)
 | Crisp triage | yes | yes |
 | PostHog weekly report | no | no |
 | Slack alerts | no | no |
+| Slack bot | optional, for its tools | yes |
 
 ## Conventions in these guides
 

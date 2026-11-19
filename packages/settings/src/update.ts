@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { IntegrationHealth, StoredHealth } from "./health";
 import { resolveField, settingKey, type EnvSource, type Origin, type ResolvedConfig } from "./resolve";
 import { INTEGRATIONS, type FieldSpec, type IntegrationId } from "./spec";
 import type { SettingWrite, SettingsStore } from "./store";
@@ -93,6 +94,7 @@ export type IntegrationView = {
   readonly configured: boolean;
   readonly missing: readonly string[];
   readonly fields: FieldView[];
+  readonly health?: IntegrationHealth;
 };
 
 export type SettingsView = {
@@ -104,10 +106,12 @@ export function describeSettings(
   store: Pick<SettingsStore, "all" | "canStoreSecrets">,
   env: EnvSource,
   resolved: ResolvedConfig,
+  health: Readonly<Record<string, StoredHealth>> = {},
 ): SettingsView {
   const stored = store.all();
   const integrations = (Object.keys(INTEGRATIONS) as IntegrationId[]).map((id): IntegrationView => {
     const spec = INTEGRATIONS[id];
+    const recorded = resolved[id].configured ? health[id] : undefined;
     return {
       id,
       title: spec.title,
@@ -115,6 +119,9 @@ export function describeSettings(
       ...("webhookSource" in spec ? { webhookSource: spec.webhookSource } : {}),
       configured: resolved[id].configured,
       missing: resolved[id].missing,
+      ...(recorded
+        ? { health: { checkedAt: recorded.checkedAt, ok: recorded.ok, message: recorded.message, ...(recorded.expiresAt ? { expiresAt: recorded.expiresAt } : {}) } }
+        : {}),
       fields: (spec.fields as readonly FieldSpec[]).map((field): FieldView => {
         const { value, origin } = resolveField(id, field, stored, env);
         const secret = field.kind === "secret";
@@ -142,5 +149,6 @@ export type ConnectionTestResult = {
   readonly ok: boolean;
   readonly available: boolean;
   readonly message: string;
+  readonly expiresAt?: string;
   readonly details?: Readonly<Record<string, string>>;
 };

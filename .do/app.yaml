@@ -52,6 +52,9 @@ services:
       - { key: SENTRY_AUTH_TOKEN, value: "", scope: RUN_TIME, type: SECRET }
       - { key: GITHUB_TOKEN, value: "", scope: RUN_TIME, type: SECRET }
       - { key: SLACK_ALERTS_WEBHOOK_URL, value: "", scope: RUN_TIME, type: SECRET }
+      - { key: SLACK_BOT_TOKEN, value: "", scope: RUN_TIME, type: SECRET }
+      - { key: SLACK_SIGNING_SECRET, value: "", scope: RUN_TIME, type: SECRET }
+      - { key: LINEAR_API_KEY, value: "", scope: RUN_TIME, type: SECRET }
 
   - name: admin
     github:

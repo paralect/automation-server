@@ -29,6 +29,7 @@ An **automation** runs inside the server. A **workflow** is a GitHub Actions fil
 | `linear-label-to-pr` | automation | The trigger label is added to a Linear issue | Dispatches the `linear-implement` workflow. |
 | `crisp-triage` | automation | The trigger segment is added to a Crisp conversation | Classifies the conversation, writes a private note, and by mode opens an issue or starts a fix. |
 | `posthog-weekly-report` | scheduled job | Once a week | Posts a week-over-week PostHog report to Slack. |
+| `token-health` | scheduled job | Once a day, 06:00 UTC | Tests every configured integration, shows the result on the integration tiles and alerts on Slack when a token fails or nears expiry. See [docs/integrations/slack.md](docs/integrations/slack.md#token-health). |
 | `codex-issue-fix.yml` | workflow | A team member opens an issue, or the server dispatches it | Codex writes a fix with a regression test and opens a draft PR. |
 | `linear-implement.yml` | workflow | Dispatched by `linear-label-to-pr` | Codex implements the Linear issue and opens a PR. |
 | `codex-changelog.yml` | workflow | A push to the production branch | Codex writes a changelog note and opens a PR. |
@@ -64,9 +65,10 @@ Every run and log line is recorded and shown in the admin, see [docs/observabili
 | Linear | source + action | Verifies Linear issue webhooks (`POST /webhooks/linear`) and, when the trigger label is added, dispatches a GitHub workflow where Codex implements the task and opens a PR (`linear-label-to-pr`) | [docs/integrations/linear.md](docs/integrations/linear.md) |
 | Crisp | source + action | Verifies Crisp Web Hooks (`POST /webhooks/crisp`) and, when the trigger segment is added, classifies the conversation with an LLM through OpenRouter. Posts a private note, and by mode opens a GitHub issue or dispatches the Codex fix workflow (`crisp-triage`) | [docs/integrations/crisp.md](docs/integrations/crisp.md) |
 | PostHog | scheduled job | Sends a weekly week-over-week PostHog report to Slack (`posthog-weekly-report`) | [docs/integrations/posthog.md](docs/integrations/posthog.md) |
-| Slack alerts | notifier | Posts to a Slack incoming webhook when an automation fails N times in a row | [docs/integrations/slack.md](docs/integrations/slack.md) |
+| Slack | notifier and webhook | Posts to a Slack incoming webhook when an automation fails N times in a row | [docs/integrations/slack.md](docs/integrations/slack.md) |
+| Slack bot | webhook `/webhooks/:project/slack` | An allowed member tags the bot. An LLM through OpenRouter answers in the thread, using read tools for GitHub issues, Sentry, PostHog and Linear. It can propose creating Linear or GitHub issues, labelling a ticket and starting an allowed workflow, and runs one only after the requester replies `approve` (`slack-bot`) | [docs/integrations/slack.md](docs/integrations/slack.md#slack-bot) |
 
-New here? Start with the [step-by-step setup guides](docs/setup/README.md) (GitHub, OpenRouter, Sentry, Linear, Crisp, PostHog, Slack alerts), which have annotated screenshots.
+New here? Start with the [step-by-step setup guides](docs/setup/README.md) (GitHub, OpenRouter, Sentry, Linear, Crisp, PostHog, Slack alerts, Slack bot), which have annotated screenshots.
 
 More are planned. See [docs/adding-an-integration.md](docs/adding-an-integration.md) to add your own.
 
@@ -219,7 +221,7 @@ automation-server/
 - [Linear integration](docs/integrations/linear.md)
 - [PostHog integration](docs/integrations/posthog.md)
 - [Crisp integration](docs/integrations/crisp.md)
-- [Slack alerts](docs/integrations/slack.md)
+- [Slack](docs/integrations/slack.md)
 - [GitHub Actions workflows](github-actions/README.md)
 
 ## Contributing

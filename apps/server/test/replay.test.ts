@@ -2,7 +2,7 @@ import { canReplay } from "@automation-server/api/replay";
 import { describe, expect, test } from "bun:test";
 
 type Run = Parameters<typeof canReplay>[0];
-const run = (over: Partial<Run> = {}): Run => ({ status: "failed", source: "sentry", hasEvent: true, dryRun: false, ...over });
+const run = (over: Partial<Run> = {}): Run => ({ status: "failed", source: "sentry", automation: "sentry-to-github-issue", hasEvent: true, dryRun: false, ...over });
 
 describe("canReplay", () => {
   test("a failed run with a stored event is replayable", () => {
@@ -31,6 +31,13 @@ describe("canReplay", () => {
     const result = canReplay(run({ dryRun: true }));
     expect(result).toEqual({ ok: false, reason: expect.stringContaining("dry run") });
     expect(canReplay(run({ dryRun: true, source: "schedule", hasEvent: false })).ok).toBe(false);
+  });
+
+  test("a real replay of a Slack bot run is refused, a dry one is allowed", () => {
+    const bot = run({ source: "slack", automation: "slack-bot" });
+    expect(canReplay(bot)).toEqual({ ok: false, reason: "Slack bot runs can't be replayed, ask in Slack again" });
+    expect(canReplay({ ...bot, status: "succeeded" }).ok).toBe(false);
+    expect(canReplay(bot, { dryRun: true })).toEqual({ ok: true });
   });
 
   describe("dry run", () => {

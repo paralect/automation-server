@@ -59,7 +59,7 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
       activity,
       actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
       adminToken: undefined,
-      settings: { db: settings, env: {}, reload: runtime.rebuild, test: runtime.test },
+      settings: { db: settings, env: {}, reload: runtime.rebuild, test: runtime.test, health: () => ({}) },
       workflows: () => createWorkflowInstaller({ token: undefined }),
       posthog: {
         preview: async () => ({ ok: false as const, message: "unused" }),

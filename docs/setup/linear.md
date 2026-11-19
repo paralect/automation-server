@@ -14,8 +14,9 @@ You need a Linear workspace admin account for steps 2 and 3, because only admins
 | Admin, Integrations, Linear, **Trigger label** | Label name, for example `codex` | Linear label (step 1) |
 | Admin, Integrations, Linear, **Target repository** | `owner/name` of the repo that receives the PR | GitHub |
 | Admin, Integrations, Linear, **Workflow file**, **Ref** | Optional. Defaults are `linear-implement.yml` and the default branch | |
+| Admin, Integrations, Linear, **API key** | Optional. A personal API key (Linear Settings, Security & access). Lets the [Slack bot](slack-bot.md) search and read issues. Env: `LINEAR_API_KEY`. **Test connection** checks it with a `viewer` query | Linear |
 
-Linear has no environment variables. Everything is saved from the admin Integrations page and applies without a restart. The GitHub token comes from the GitHub integration, and the target repository needs the workflow installed first. See [Setup in docs/integrations/linear.md](../integrations/linear.md#setup).
+The only environment variable is `LINEAR_API_KEY`. Everything is saved from the admin Integrations page and applies without a restart. The GitHub token comes from the GitHub integration, and the target repository needs the workflow installed first. See [Setup in docs/integrations/linear.md](../integrations/linear.md#setup).
 
 ## 1. Create the trigger label
 
