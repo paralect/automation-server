@@ -71,7 +71,7 @@ Each integration adds an **automation**, a small job with one purpose. This is w
 | `sentry-to-github-issue` | A Sentry issue alert fires | The server checks the alert (signature, level, environment), makes sure the issue is not already open, and creates a GitHub issue with the error, stack trace, breadcrumbs and a link back to Sentry. Secrets are scrubbed first. | A GitHub issue labelled `sentry`. With `codex-issue-fix.yml` installed, start the fix from the Actions tab to get a draft PR. | GitHub, Sentry |
 | `linear-label-to-pr` | The trigger label is added to a Linear issue | The server dispatches the `linear-implement` workflow with the issue title and description. Codex implements it in the target repository. | A pull request titled with the issue identifier, attached to the Linear issue. | GitHub, Linear |
 | `crisp-triage` | The trigger segment is added to a Crisp conversation | The server reads the conversation, strips personal data, asks an AI model (through OpenRouter) to classify it, and routes by a fixed table. It writes a private note and a `triage:` segment back into Crisp. In `issue` mode it also opens a GitHub issue, in `fix` mode it starts Codex too. The customer never gets a message. | A row on the admin Crisp page, a private note in Crisp, optionally a GitHub issue or a draft PR. | GitHub, OpenRouter, Crisp |
-| `slack-bot` | Someone tags the bot in Slack | The server checks the member against the allowlist and replies in the thread. This version only repeats the message back. | A threaded reply in Slack and a run on the Runs page. | Slack bot settings |
+| `slack-bot` | Someone tags the bot in Slack | The server checks the member against the allowlist, then an LLM answers in the thread using read-only tools. | A threaded reply in Slack and a run on the Runs page with every tool step. | OpenRouter, Slack bot settings, optionally GitHub, Sentry, PostHog, Linear |
 | `posthog-weekly-report` | A schedule: one day and hour per week | The server asks PostHog for this week and last week, compares users, pageviews, sessions, top pages and top events, and posts the result to Slack. | A Slack message every week. Also **Preview report** and **Send now** buttons in the admin. | PostHog, Slack |
 
 The code-writing part is done by four GitHub Actions workflows. The server only dispatches them. They are explained one by one, with what each does and needs, in [github-actions/README.md](../../github-actions/README.md#the-workflows-one-by-one).
@@ -104,7 +104,7 @@ For the exact rules of each automation (filters, deduplication, retries, limits)
 | Crisp triage | yes | yes |
 | PostHog weekly report | no | no |
 | Slack alerts | no | no |
-| Slack bot | no | no |
+| Slack bot | optional, for its tools | yes |
 
 ## Conventions in these guides
 
