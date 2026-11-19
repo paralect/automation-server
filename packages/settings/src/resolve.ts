@@ -1,4 +1,4 @@
-import { INTEGRATIONS, INTEGRATION_IDS, type FieldSpec, type IntegrationSpec, type IntegrationId, type IntegrationValues } from "./spec";
+import { INTEGRATIONS, INTEGRATION_IDS, isListKind, type FieldSpec, type IntegrationSpec, type IntegrationId, type IntegrationValues } from "./spec";
 import type { SettingsStore } from "./store";
 
 export type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -36,6 +36,7 @@ export function parseRepo(value: string): { owner: string; name: string } {
 type Value = string | number | boolean | string[];
 
 const fromEnv = (field: FieldSpec, raw: string): Value | undefined => {
+  if (isListKind(field.kind)) return parseCsv(raw);
   switch (field.kind) {
     case "number": {
       const n = Number(raw);
@@ -43,8 +44,6 @@ const fromEnv = (field: FieldSpec, raw: string): Value | undefined => {
     }
     case "boolean":
       return /^(true|1|yes|on)$/i.test(raw.trim());
-    case "list":
-      return parseCsv(raw);
     default:
       return raw;
   }
@@ -57,13 +56,12 @@ const fromJson = (field: FieldSpec, json: string): Value | undefined => {
   } catch {
     return undefined;
   }
+  if (isListKind(field.kind)) return Array.isArray(value) && value.every((v) => typeof v === "string") ? value : undefined;
   switch (field.kind) {
     case "number":
       return typeof value === "number" ? value : undefined;
     case "boolean":
       return typeof value === "boolean" ? value : undefined;
-    case "list":
-      return Array.isArray(value) && value.every((v) => typeof v === "string") ? value : undefined;
     default:
       return typeof value === "string" ? value : undefined;
   }
@@ -96,6 +94,22 @@ export function resolveField(
   return fallback === undefined ? { value: undefined, origin: "unset" } : { value: fallback, origin: "default" };
 }
 
+const labelOf = (spec: IntegrationSpec, key: string) => {
+  const label = spec.fields.find((f) => f.key === key)?.label ?? key;
+  return label.charAt(0).toLowerCase() + label.slice(1);
+};
+
+const article = (word: string) => (/^[aeiou]/i.test(word) ? "an" : "a");
+
+// Nothing is set yet, so name every way to finish instead of one arbitrary group, for example "Add the bot token and signing secret, or an alerts webhook URL."
+function oneOfSentence(spec: IntegrationSpec, groups: readonly (readonly string[])[]): string {
+  const ways = groups.map((group, i) => {
+    const names = group.map((key) => labelOf(spec, key)).join(" and ");
+    return i === 0 ? `the ${names}` : `${article(names)} ${names}`;
+  });
+  return `Add ${ways.join(", or ")}.`;
+}
+
 export function resolveConfig(store: Pick<SettingsStore, "all">, env: EnvSource): ResolvedConfig {
   const stored = store.all();
   const out: Record<string, unknown> = {};
@@ -117,7 +131,8 @@ export function resolveConfig(store: Pick<SettingsStore, "all">, env: EnvSource)
         // The group closest to done is the one worth naming, so a half-set bot does not ask for the webhook.
         const closeness = (i: number) => gaps[i]!.length - (groups[i]!.length - gaps[i]!.length);
         const nearest = gaps.map((_, i) => i).reduce((best, i) => (closeness(i) < closeness(best) ? i : best));
-        missing.push(...gaps[nearest]!);
+        const started = gaps[nearest]!.length < groups[nearest]!.length;
+        missing.push(...(started ? gaps[nearest]! : [oneOfSentence(spec as IntegrationSpec, groups)]));
       }
     }
     out[id] = { id, configured: missing.length === 0, missing, values, origin };
