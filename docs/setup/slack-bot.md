@@ -2,7 +2,7 @@
 
 This guide creates a Slack app that your team tags in a channel. The bot reads the question (and the thread it was tagged in), asks an AI model, and lets the model look things up in the services you connected. It answers in the thread. It can also propose changes (create an issue, label a ticket, start a workflow), but it never makes one until the person who asked approves it in the thread. See [Changes and approval](#changes-and-approval).
 
-The bot answers only members you list. Everything is configured on the admin Integrations page, in the **Slack** card, next to the alert settings. The alert webhook is optional. You can run the bot without it, or the alerts without the bot.
+The bot answers only the users you choose. Everything is configured on the admin Integrations page, in the **Slack** card. The setup order is: create the app, install it, paste the bot token and signing secret and save, then choose users and channels from your live Slack directory in the admin, then invite the bot and try it. The alert webhook is optional. You can run the bot without it, or the alerts without the bot.
 
 ## What the bot can do
 
@@ -124,6 +124,9 @@ oauth_config:
       - chat:write
       - channels:history
       - groups:history
+      - users:read
+      - channels:read
+      - groups:read
 settings:
   event_subscriptions:
     request_url: https://<server>/webhooks/<project>/slack
@@ -138,38 +141,49 @@ Scopes:
 
 - `app_mentions:read` lets Slack send the bot the messages that tag it.
 - `chat:write` lets it answer.
-- `channels:history` and `groups:history` let it read the thread it was tagged in (public and private channels). If you leave them out the bot still answers, but without the earlier messages of the thread. The run log then shows `could not read the thread, answering without it`. Reinstall the app after adding scopes.
+- `channels:history` and `groups:history` let it read the thread it was tagged in (public and private channels). If you leave them out the bot still answers, but without the earlier messages of the thread. The run log then shows `could not read the thread, answering without it`.
+- `users:read`, `channels:read` and `groups:read` let the admin list the people and channels of your workspace in the pickers (`groups:read` covers private channels). The bot itself never uses them. If you leave them out, the pickers show a missing-scope hint and you can still add IDs by hand (see [Add by ID](#add-by-id)).
+
+Reinstall the app after adding scopes. Slack keeps the old token's permissions until you do.
 
 3. Click **Create**. Slack checks the request URL right away. If the server is not reachable yet or the signing secret is not saved, the check fails. Save the secrets in step 2 first, then open **Event Subscriptions** and click **Retry**. The server answers the check on its own.
 
-## 2. Copy the secrets into the admin
+## 2. Install the app and paste the tokens
 
 1. In the Slack app, open **Basic Information**, find **Signing Secret**, click **Show** and copy it.
 2. Open **Install App**, click **Install to Workspace** and allow it. Copy the **Bot User OAuth Token**, which starts with `xoxb-`.
-3. In the admin open **Integrations**, then the **Slack** card, and fill in:
+3. In the admin open **Integrations**, then the **Slack** card. The page has four sections: **Connection**, **Access**, **Alerts** and **Advanced**. Under **Connection** paste the bot token (env: `SLACK_BOT_TOKEN`) and the signing secret (env: `SLACK_SIGNING_SECRET`), and click **Save**. The pickers in **Access** stay disabled until the bot token is saved.
+
+The card also shows the **Webhook URL** to use as the Slack request URL. It needs `PUBLIC_URL` on the server.
+
+4. Click **Test connection**. It calls `auth.test` and shows the bot name and the workspace. It never shows the token, and it posts no message unless you also set the alert webhook.
+
+The daily token check also calls `auth.test` for the bot token, and alerts when it stops working. It never posts the alert webhook's test message.
+
+## 3. Choose users and channels
+
+Once the bot token is saved, the **Access** section reads your live Slack directory. Nothing is typed by hand.
+
+1. Click **Choose users**. A dialog lists the people of your workspace (no deactivated accounts, bots or Slackbot). Search by name or `@handle`, tick the people who may use the bot, click **Done**. They show as chips with their names. Remove one with its **x**.
+2. Optional: click **Choose channels** to limit where the bot answers. Public and private channels are listed, and a channel the bot has not been invited to is marked `bot not invited`. **Allowed channels** empty means the bot answers in any channel it has been invited to. With channels chosen, a mention anywhere else is ignored: no reply, no model call. It still shows as a run with the decision `channel-not-allowed`.
+3. Turn **Bot enabled** on. The route `/webhooks/<project>/slack` only exists while this is on.
+4. Click **Save**. Choosing in the dialog changes nothing until you save the page.
+
+Until at least one user is chosen the page shows `Nobody can use the bot yet. Choose at least one user.` Someone who is not chosen gets `You are not allowed to use this bot. Ask an admin to add you to the allowed users.` at most once every 10 minutes, and nothing at all in between. No model call, tool call or thread read happens for them. The check runs on every mention, so approving and cancelling a change obey it too.
+
+The other fields:
 
 | Field | Value |
 | --- | --- |
-| Bot token | The `xoxb-` token. Env: `SLACK_BOT_TOKEN`. |
-| Signing secret | The signing secret. Env: `SLACK_SIGNING_SECRET`. |
-| Bot enabled | On. The route `/webhooks/<project>/slack` only exists while this is on. |
-| Allowed users | Member IDs, one per line. Empty means nobody can use the bot. |
 | Agent model | Optional. An OpenRouter model id. Empty uses the OpenRouter escalation model. |
 | Bot name | Optional. Shown in the approval message as `@name approve`. Empty uses the name Slack reports for the bot. |
 | Require approval for changes | On by default. See [Turning approval off](#turning-approval-off). |
 
-4. Set up OpenRouter (see [OpenRouter](openrouter.md)), and any service you want the bot to read: GitHub token and issues repository, Sentry auth token, PostHog, and the Linear **API key** ([Linear](linear.md)). Each one adds its tools.
-5. Click **Save**, then **Test connection**. It calls `auth.test` and shows the bot name and the workspace. It never shows the token, and it posts no message unless you also set the alert webhook.
+Set up OpenRouter (see [OpenRouter](openrouter.md)), and any service you want the bot to read: GitHub token and issues repository, Sentry auth token, PostHog, and the Linear **API key** ([Linear](linear.md)). Each one adds its tools.
 
-The card also shows the **Webhook URL** to use as the Slack request URL. It needs `PUBLIC_URL` on the server.
+### Add by ID
 
-The daily token check also calls `auth.test` for the bot token, and alerts when it stops working. It never posts the alert webhook's test message.
-
-## 3. Find member IDs for the allowlist
-
-In Slack, open the person's profile, click the three dots (**More**) and choose **Copy member ID**. It looks like `U01ABCDEF23`. Paste one ID per line into **Allowed users**.
-
-The allowlist is the only gate. Someone who is not listed gets `You are not allowed to use this bot. Ask an admin to add your member ID.` at most once every 10 minutes, and nothing at all in between. No model call, tool call or thread read happens for them.
+The lists come from Slack's `users.list` and `conversations.list`, read with the saved bot token on the server (the token never reaches the browser). If the pickers show an error, the dialog says why, for example which scope to add. A person the list cannot return, such as someone from another workspace in a Slack Connect channel, can still be added: in the dialog type the ID in **Add by ID** and click **Add**. To copy a member ID in Slack, open the profile, click the three dots (**More**) and choose **Copy member ID** (it looks like `U01ABCDEF23`). A channel ID (`C01ABCDEF23`, or `G...` for private ones) is at the bottom of the channel's **About** tab. An ID that is saved but not in the directory shows as the raw ID with `not found`. It is kept.
 
 ## Rate limits
 
@@ -181,11 +195,11 @@ The server limits the bot in memory, per project, so a loop or a flood cannot ru
 | Member who is not allowed | The denial is sent at most once per member per 10 minutes. | The denial once, then nothing. |
 | Concurrent runs | 4 at a time per project. | One `I am busy, try again in a minute.` per member per minute, then nothing. |
 
-Normal use never reaches these limits. A dry run does not use up any allowance. A dropped mention still shows as a run on the Runs page with the decision `rate-limited`, `busy` or `denied`.
+Normal use never reaches these limits. A dry run does not use up any allowance. A dropped mention still shows as a run on the Runs page with the decision `rate-limited`, `busy`, `denied` or `channel-not-allowed`.
 
 ## 4. Invite the bot and try it
 
-Invite the bot to a channel (`/invite @Automation Bot`), then write `@Automation Bot what Linear issues mention billing?`. A listed member gets the answer in a thread under the message. To continue, reply in that thread and tag the bot again: it reads the earlier messages as context.
+Invite the bot to a channel (`/invite @Automation Bot`), then write `@Automation Bot what Linear issues mention billing?`. A chosen user gets the answer in a thread under the message. To continue, reply in that thread and tag the bot again: it reads the earlier messages as context.
 
 Each mention is a run of the `slack-bot` automation on the **Runs** page. Open one to see who asked, the channel and the reply. Every tool call is a log line `agent step` with the tool name, the redacted arguments and how long it took. The run's outcome lists the final status (`answered`, `exhausted`, `failed`, `not-configured`, `pending-approval`, `executed`, `cancelled` or `expired`), the step count and the tools used. A change shows as a step on its run: `proposed` when the bot asked for approval, then `executed` (or `cancelled`) on the run of the reply that decided it. Results shown on the run never contain tokens. Slack retries an event it thinks was not delivered in time. The server uses the event ID as the claim, so a retry is shown as a `duplicate` run and does not reply twice.
 
@@ -204,6 +218,7 @@ Each mention is a run of the `slack-bot` automation on the **Runs** page. Open o
 - **Sentry uses the first organization.** `sentry.listIssues` searches the first organization the auth token can see. A token that belongs to several organizations always reads from the same one.
 - **A `crisp` fix workflow shows only an issue number.** Starting the Crisp fix workflow passes an `issue_number` input, so the approval message shows just that number. Open the issue and read it before you approve, because the workflow works from the issue text.
 - **`requireApproval: false` removes the human check.** With it off, anyone on the allowlist, and any text the bot reads, can get issues created, labels added and allowed workflows started at once. See [Turning approval off](#turning-approval-off).
+- **The pickers show at most 200 rows and read at most 5 pages of 200 from Slack.** A larger workspace shows a note. Use the search or **Add by ID**. The server keeps each list for 60 seconds, so a new colleague can take a minute to show up. **Refresh** in the dialog skips that cache.
 - **Stored Slack events are redacted by key name and by secret shape only.** Keys such as `token`, `secret` or `key` are replaced, and values that look like a Slack, GitHub, OpenRouter, Linear or PostHog token, a bearer token, a JWT or a Slack webhook URL are replaced wherever they are. A secret in some other form, such as a password pasted in a sentence, is stored as written. Tell people not to paste secrets into Slack when they talk to the bot.
 
 ## Troubleshooting
@@ -212,7 +227,9 @@ Each mention is a run of the `slack-bot` automation on the **Runs** page. Open o
 | --- | --- |
 | Slack says the request URL did not respond | The server is not public, `PUBLIC_URL` or the slug is wrong, **Bot enabled** is off, or the signing secret is missing. |
 | `invalid_auth` in Test connection | The bot token is wrong or the app was reinstalled and the token rotated. |
-| The bot never answers | It is not in the channel, or the member ID is not in **Allowed users** (you get the denial then). |
+| The bot never answers | It is not in the channel, the channel is not in **Allowed channels** (the run shows `channel-not-allowed` and nothing is posted), or the user is not in **Allowed users** (you get the denial then). |
+| The picker says the app is missing a scope | Add `users:read`, `channels:read` and `groups:read` to the Slack app and reinstall it. Meanwhile use **Add by ID**. |
+| The picker says Slack rejected the bot token | The token is wrong, revoked or from a reinstalled app. Paste the new one under **Connection**. |
 | `channel_not_found` in the run error | The bot is not a member of that channel. Invite it. |
 | `The AI model is not configured.` | The OpenRouter API key is not set. |
 | `I could not do that: ... does not match the schema` | The Agent model does not support structured outputs. Pick another model. |

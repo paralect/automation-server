@@ -9,7 +9,7 @@ import { createSlackBotLimiter, type Admission, type SlackBotLimiter } from "./l
 
 export const SLACK_BOT = "slack-bot";
 
-export const DENIED_REPLY = "You are not allowed to use this bot. Ask an admin to add your member ID.";
+export const DENIED_REPLY = "You are not allowed to use this bot. Ask an admin to add you to the allowed users.";
 
 const MAX_ECHO_CHARS = 2000;
 const MAX_LOGGED_CHARS = 200;

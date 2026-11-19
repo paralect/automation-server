@@ -187,7 +187,7 @@ describe("slack bot over the webhook route", () => {
     await t.deliver(t.mention({ user: "UNOPE" }));
     await t.deliver(t.mention({ user: "UNOPE" }));
     await t.dispatcher.drain(1000);
-    expect(t.replies()).toEqual([{ channel: "C1", thread_ts: "100.1", text: "You are not allowed to use this bot. Ask an admin to add your member ID." }]);
+    expect(t.replies()).toEqual([{ channel: "C1", thread_ts: "100.1", text: "You are not allowed to use this bot. Ask an admin to add you to the allowed users." }]);
   });
 
   test("the bot's own messages never trigger it", async () => {
