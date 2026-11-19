@@ -25,7 +25,7 @@ The screenshots show the Crisp app in English. If your Crisp is in another langu
 | **Plugin token key** | Key of the production token | Marketplace, Tokens (step 3) |
 | **Web Hooks signing secret** | Signing secret of the plugin | Marketplace, Tokens (step 3) |
 | **Trigger segment** | Segment name, default `triage` | Crisp inbox (step 8) |
-| **Mode** | `shadow`, `issue` or `fix` | Your choice (step 9) |
+| **Mode** | `shadow`, `issue`, `fix` or `dry-run` | Your choice (step 9) |
 
 ## 1. Create the plugin
 
@@ -125,7 +125,7 @@ The webhook is served once the four required fields are set. The triage runs onc
 4. **Plugin token key.** Click **Replace** and paste the token key.
 5. **Web Hooks signing secret.** Click **Replace** and paste the secret from step 5.
 6. **Trigger segment.** The tag that starts a triage. Default `triage`.
-7. **Mode.** `shadow`, `issue` or `fix`. Start with `shadow`.
+7. **Mode.** `shadow`, `issue`, `fix` or `dry-run`. Start with `shadow`.
 
 The fields below Mode (minimum confidence, product areas, autofix areas, workflow file) are optional and explained in [the integration page](../integrations/crisp.md#configuration).
 
@@ -157,7 +157,7 @@ In the admin, Integrations, Crisp:
 
 | Field | Set it to |
 | --- | --- |
-| **Mode** | Start with `shadow`. It only reports the decision. `issue` also opens GitHub issues. `fix` also starts the Codex fix workflow. |
+| **Mode** | Start with `shadow`. It only reports the decision. `issue` also opens GitHub issues. `fix` also starts the Codex fix workflow. `dry-run` does what `fix` would but writes nothing to Crisp or GitHub, and the Runs page shows what each run would have done. |
 | **Product areas** | The closed list the classifier picks the area from. |
 | **Autofix areas** | Areas whose non-blocker bugs go to the fix workflow. Empty means no fixes. |
 | **Triage resolved conversations** | On to triage every resolved conversation without a segment. Needs the `session:set_state` event. |
@@ -197,6 +197,10 @@ Click a row to open the side panel. This one is a conversation the triage sent t
 | Delivery accepted, no run | The segment name differs from **Trigger segment**, the **Website ID** is for another website, or OpenRouter is not configured. |
 | Plugin token cannot read the website | The plugin is not installed on the website (step 5) or the scopes were not approved yet. |
 | Run fails with `402` on the note | See the next section. |
+
+### Try it without writing anything
+
+Set **Mode** to `dry-run`, or open any finished run in the admin and press **Dry run** next to Replay. Both call the model and read GitHub, but write no note, no segment and no issue. The run is marked Dry run and its page lists what it would have done. Dry runs do not appear on the Support page.
 
 ## Plans that refuse API writes
 

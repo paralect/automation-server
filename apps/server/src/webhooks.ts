@@ -60,6 +60,9 @@ export function createWebhookRoutes({ source: findSource, defaultProject, dispat
       return c.body(null, 401);
     }
 
+    const reply = source.respond?.(request);
+    if (reply) return c.json(reply.body);
+
     let result: ReturnType<Source["parse"]>;
     try {
       result = source.parse(request, new Date());

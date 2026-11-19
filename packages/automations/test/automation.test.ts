@@ -60,6 +60,18 @@ describe("sentry-to-github-issue automation", () => {
     });
   });
 
+  test("a dry run reads the open issues, writes nothing and logs the would-be issue", async () => {
+    const t = setup(happy);
+    await t.automation.run(sentryEvent(alert()), { log: t.log, dryRun: true });
+    expect(t.calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(["GET /repos/o/r/issues"]);
+    expect(t.logs).toEqual([
+      {
+        message: "dry-run: would create github issue",
+        fields: { issueId: "4501", title: "[Sentry] TypeError: x is undefined", labels: ["sentry", "level:error", "env:production"] },
+      },
+    ]);
+  });
+
   test("existing open issue means no create", async () => {
     const t = setup((c) =>
       isList(c)

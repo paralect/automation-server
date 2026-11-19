@@ -87,7 +87,7 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
   return defineAutomation({
     name: CRISP_TRIAGE,
     matches,
-    async run(event, { log, report }) {
+    async run(event, { log, report, dryRun = false }) {
       const request = event.payload.request;
       if (!request) throw new Error("The Crisp conversation could not be loaded. Check the Crisp plugin key and its scopes.");
       const sessionId = request.sessionId;
@@ -97,6 +97,7 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
       log.info("triaged", {
         sessionId,
         mode: config.mode,
+        ...(dryRun ? { dryRun } : {}),
         rule,
         decision: decision.kind,
         triageVersion: TRIAGE_VERSION,
@@ -115,25 +116,32 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
       let issueRef: { number: number; url: string } | null = null;
       let dispatched = false;
       let dispatchError: unknown;
-      if (writes && github && verdict && (decision.kind === "issue" || decision.kind === "fix")) {
+      let wouldIssue: { title: string; labels: readonly string[] } | null = null;
+      if (writes && verdict && (decision.kind === "issue" || decision.kind === "fix")) {
         const issue = formatIssue(request, verdict, decision);
-        await github.ensureLabels(issue.labels);
-        const created = await github.createIssue(issue);
-        issueUrl = created.html_url;
-        issueRef = { number: created.number, url: created.html_url };
-        log.info("created github issue", { sessionId, number: created.number, url: created.html_url });
-        if (decision.kind === "fix") {
-          try {
-            await github.dispatchWorkflow(config.workflowFile, await github.defaultBranch(), { issue_number: String(created.number) });
-            dispatched = true;
-            log.info("dispatched workflow", { sessionId, number: created.number, workflow: config.workflowFile, repo: repoName });
-          } catch (err) {
-            dispatchError = actionable(err, repoName, config.workflowFile);
+        if (dryRun) {
+          wouldIssue = { title: issue.title, labels: issue.labels };
+          log.info("dry-run: would create github issue", { sessionId, title: issue.title, labels: issue.labels });
+          if (decision.kind === "fix") log.info("dry-run: would dispatch workflow", { sessionId, workflow: config.workflowFile, repo: repoName });
+        } else if (github) {
+          await github.ensureLabels(issue.labels);
+          const created = await github.createIssue(issue);
+          issueUrl = created.html_url;
+          issueRef = { number: created.number, url: created.html_url };
+          log.info("created github issue", { sessionId, number: created.number, url: created.html_url });
+          if (decision.kind === "fix") {
+            try {
+              await github.dispatchWorkflow(config.workflowFile, await github.defaultBranch(), { issue_number: String(created.number) });
+              dispatched = true;
+              log.info("dispatched workflow", { sessionId, number: created.number, workflow: config.workflowFile, repo: repoName });
+            } catch (err) {
+              dispatchError = actionable(err, repoName, config.workflowFile);
+            }
           }
         }
       }
 
-      const note = formatNote({ decision, mode: config.mode, github: writes, verdict, issueUrl, dispatched, dispatchFailed: dispatchError !== undefined });
+      const note = formatNote({ decision, mode: config.mode, github: writes, verdict, issueUrl, dispatched, dispatchFailed: dispatchError !== undefined, dryRun });
       const outcome = (notePosted: boolean | null, segmentSet: boolean | null) =>
         buildOutcome({
           request,
@@ -148,7 +156,14 @@ export function createCrispTriage(config: CrispTriageConfig): Automation {
           notePosted,
           segmentSet,
           note,
+          ...(dryRun ? { wouldDo: { issue: wouldIssue, dispatch: wouldIssue !== null && decision.kind === "fix" } } : {}),
         });
+      if (dryRun) {
+        log.info("dry-run: would post note", { sessionId, note: scrubber(request)(note) });
+        log.info("dry-run: would set segment", { sessionId, segment: statusSegment(decision) });
+        report?.(outcome(false, false));
+        return;
+      }
       report?.(outcome(null, null));
       // A free Crisp plan refuses API writes with 402. That must not fail the triage: the verdict stays in the
       // admin (and in the GitHub issue), only the Crisp copy is skipped.

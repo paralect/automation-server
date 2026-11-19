@@ -1,4 +1,4 @@
-import { INTEGRATIONS, INTEGRATION_IDS, type FieldSpec, type IntegrationId, type IntegrationValues } from "./spec";
+import { INTEGRATIONS, INTEGRATION_IDS, type FieldSpec, type IntegrationSpec, type IntegrationId, type IntegrationValues } from "./spec";
 import type { SettingsStore } from "./store";
 
 export type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -109,6 +109,16 @@ export function resolveConfig(store: Pick<SettingsStore, "all">, env: EnvSource)
       origin[field.key] = resolved.origin;
       if (resolved.value !== undefined) values[field.key] = resolved.value;
       if (field.required && isMissing(resolved.value)) missing.push(field.key);
+    }
+    const groups = (spec as IntegrationSpec).requiredOneOf;
+    if (groups && groups.length > 0) {
+      const gaps = groups.map((group) => group.filter((key) => isMissing(values[key])));
+      if (gaps.every((gap) => gap.length > 0)) {
+        // The group closest to done is the one worth naming, so a half-set bot does not ask for the webhook.
+        const closeness = (i: number) => gaps[i]!.length - (groups[i]!.length - gaps[i]!.length);
+        const nearest = gaps.map((_, i) => i).reduce((best, i) => (closeness(i) < closeness(best) ? i : best));
+        missing.push(...gaps[nearest]!);
+      }
     }
     out[id] = { id, configured: missing.length === 0, missing, values, origin };
   }

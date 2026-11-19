@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { defineAutomation, type Automation } from "../src/automation";
-import { createDispatcher } from "../src/dispatcher";
+import { defineAutomation, withDryRun, type Automation } from "../src/automation";
+import { ClaimStoreError, createDispatcher } from "../src/dispatcher";
 import type { Event } from "../src/event";
 import type { Logger } from "../src/logger";
 import { createSqliteActivityStore } from "../src/sqliteActivityStore";
 import { createSqliteStore } from "../src/sqliteStore";
-import type { ActivityStore } from "../src/activity";
+import type { ActivityStore, RunRecord } from "../src/activity";
 
 const event = (kind = "thing", externalId = "e1"): Event => ({
   source: "test",
@@ -416,11 +416,120 @@ describe("dispatcher replay", () => {
     expect(again.outcome).toBe("duplicate");
   });
 
+  test("a dry run hands ctx.dryRun to the automation, marks the row, and leaves the claim state alone", async () => {
+    const seen: (boolean | undefined)[] = [];
+    const { dispatcher, activity } = withActivity([scoped("a", async (_e, ctx) => void seen.push(ctx.dryRun))]);
+    await dispatcher.replay(request());
+    await dispatcher.drain(1000);
+    const dry = await dispatcher.replay(request({ dryRun: true }));
+    await dispatcher.drain(1000);
+    expect(dry.outcome).toBe("started");
+    expect(seen).toEqual([undefined, true]);
+    expect(activity.getRun(dry.runId!)?.run).toMatchObject({ status: "succeeded", dryRun: true });
+    expect((await dispatcher.replay(request())).outcome).toBe("duplicate");
+  });
+
+  test("a failed dry run does not release the claim of a real run still in flight", async () => {
+    let release!: () => void;
+    const { dispatcher, activity } = withActivity([
+      scoped("a", (_e, ctx) => {
+        if (ctx.dryRun) throw new Error("dry boom");
+        return new Promise<void>((r) => (release = r));
+      }),
+    ]);
+    const real = await dispatcher.replay(request());
+    const dry = await dispatcher.replay(request({ dryRun: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(activity.getRun(dry.runId!)?.run).toMatchObject({ status: "failed", dryRun: true });
+    expect((await dispatcher.replay(request())).outcome).toBe("duplicate");
+    release();
+    await dispatcher.drain(1000);
+    expect(activity.getRun(real.runId!)?.run.status).toBe("succeeded");
+  });
+
+  test("a claim store failure is a typed error, not a bare Error", async () => {
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const store = createSqliteStore({ path: ":memory:" });
+    store.claim = () => {
+      throw new Error("database is locked");
+    };
+    const dispatcher = createDispatcher({ automations: () => [scoped("a", async () => {})], store, log: memoryLogger().log, activity });
+    const err = await dispatcher.replay(request()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ClaimStoreError);
+    expect((err as ClaimStoreError).cause).toMatchObject({ message: "database is locked" });
+  });
+
   test("an unknown automation or a different project returns unknown-automation without running anything", async () => {
     let ran = 0;
     const { dispatcher } = withActivity([scoped("a", async () => void ran++)]);
     expect(await dispatcher.replay(request({ automation: "gone" }))).toEqual({ outcome: "unknown-automation" });
     expect(await dispatcher.replay(request({ project: "other" }))).toEqual({ outcome: "unknown-automation" });
     expect(ran).toBe(0);
+  });
+});
+
+describe("withDryRun", () => {
+  test("every run of a wrapped automation is a dry run, live events included", async () => {
+    const seen: (boolean | undefined)[] = [];
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const wrapped = withDryRun({ ...auto("a", async (_e, ctx) => void seen.push(ctx.dryRun)), project: "acme" });
+    const { dispatcher } = setup([wrapped], undefined, activity);
+    dispatcher.enqueue({ ...event(), project: "acme" });
+    await dispatcher.drain(1000);
+    expect(seen).toEqual([true]);
+    expect(activity.queryRuns({ limit: 10 }).items[0]).toMatchObject({ status: "succeeded", dryRun: true });
+  });
+});
+
+describe("onRunFinished", () => {
+  const withHandler = (automations: Automation[], onRunFinished: (run: RunRecord) => void | Promise<void>) => {
+    const { log, entries } = memoryLogger();
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const dispatcher = createDispatcher({ automations: () => automations, store: createSqliteStore({ path: ":memory:" }), log, activity, onRunFinished });
+    return { dispatcher, activity, entries };
+  };
+
+  test("is called with the finished run for success and failure", async () => {
+    const seen: [string, string | null][] = [];
+    const { dispatcher } = withHandler(
+      [auto("ok", async () => {}), auto("bad", async () => Promise.reject(new Error("boom")))],
+      (run) => void seen.push([run.status, run.error]),
+    );
+    dispatcher.enqueue(event());
+    await dispatcher.drain(1000);
+    expect(seen.sort()).toEqual([["failed", "boom"], ["succeeded", null]]);
+  });
+
+  test("is not called for duplicates or dry runs", async () => {
+    const seen: string[] = [];
+    const { dispatcher } = withHandler([{ ...auto("a", async () => {}), project: "acme" }], (run) => void seen.push(run.id));
+    dispatcher.enqueue({ ...event(), project: "acme" });
+    await dispatcher.drain(1000);
+    dispatcher.enqueue({ ...event(), project: "acme" });
+    await dispatcher.drain(1000);
+    expect(seen).toHaveLength(1);
+    const first = await dispatcher.replay({ project: "acme", automation: "a", event: event(), replayOf: seen[0]!, dryRun: true });
+    await dispatcher.drain(1000);
+    expect(first.outcome).toBe("started");
+    expect(seen).toHaveLength(1);
+  });
+
+  test("drain waits for a slow handler, and a throwing handler is logged and swallowed", async () => {
+    let finished = false;
+    const slow = withHandler([auto("a", async () => {})], async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      finished = true;
+    });
+    slow.dispatcher.enqueue(event());
+    await slow.dispatcher.drain(1000);
+    expect(finished).toBe(true);
+
+    const throwing = withHandler([auto("a", async () => {})], () => {
+      throw new Error("handler broke");
+    });
+    throwing.dispatcher.enqueue(event());
+    await throwing.dispatcher.drain(1000);
+    expect(throwing.entries).toContainEqual(expect.objectContaining({ level: "warn", message: "onRunFinished failed" }));
+    expect(throwing.activity.queryRuns({ limit: 10 }).items[0]).toMatchObject({ status: "succeeded" });
   });
 });

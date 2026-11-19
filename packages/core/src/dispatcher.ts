@@ -2,14 +2,22 @@ import type { ActivityStore, RunOutcome } from "./activity";
 import type { Automation } from "./automation";
 import type { Event } from "./event";
 import type { Logger } from "./logger";
-import { drainWithTimeout, errorMessage, recordActivity, scopeFields, withFields } from "./internal";
+import { drainWithTimeout, errorMessage, notifyRunFinished, recordActivity, scopeFields, withFields, type RunFinishedHandler } from "./internal";
 import { claimKey, type ClaimStore } from "./store";
+
+export class ClaimStoreError extends Error {
+  constructor(readonly cause: unknown) {
+    super(`claim store failed: ${errorMessage(cause)}`);
+    this.name = "ClaimStoreError";
+  }
+}
 
 export type ReplayRequest = {
   readonly project: string;
   readonly automation: string;
   readonly event: Event;
   readonly replayOf: string;
+  readonly dryRun?: boolean;
 };
 
 export type ReplayResult = {
@@ -19,6 +27,7 @@ export type ReplayResult = {
 
 export type Dispatcher = {
   enqueue(event: Event): void;
+  // A dry run never touches the claim store: it writes nothing, so exactly-once does not apply, and the original run's claim (possibly `done`) must survive it.
   // Skips `matches` on purpose: the event may no longer match the automation. Resolves once the run row exists, not when the automation finishes.
   replay(request: ReplayRequest): Promise<ReplayResult>;
   drain(timeoutMs: number): Promise<void>;
@@ -30,9 +39,11 @@ export type DispatcherDeps = {
   log: Logger;
   prepare?: (event: Event) => Promise<Event>;
   activity?: ActivityStore;
+  // Called after a real run succeeded or failed, never for duplicates or dry runs. drain() waits for it.
+  onRunFinished?: RunFinishedHandler;
 };
 
-export function createDispatcher({ automations: getAutomations, store, log, prepare, activity }: DispatcherDeps): Dispatcher {
+export function createDispatcher({ automations: getAutomations, store, log, prepare, activity, onRunFinished }: DispatcherDeps): Dispatcher {
   const inFlight = new Set<Promise<unknown>>();
 
   const matchesSafely = (automation: Automation, event: Event): boolean => {
@@ -50,11 +61,12 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
   type Started =
     | { readonly status: "started"; readonly runId: string | undefined; readonly done: Promise<void> }
     | { readonly status: "duplicate"; readonly runId: string | undefined }
-    | { readonly status: "claim-failed" };
+    | { readonly status: "claim-failed"; readonly error: unknown };
 
   // Claims and records the run synchronously so callers can learn the run id before the automation finishes.
   // `original` is the event as received, `event` the one handed to the automation after prepare.
-  const begin = (automation: Automation, event: Event, original: Event, replayOf?: string): Started => {
+  const begin = (automation: Automation, event: Event, original: Event, replayOf?: string, requestedDryRun = false): Started => {
+    const dryRun = requestedDryRun || automation.dryRun === true;
     const key = claimKey(automation.name, event.externalId, automation.project);
     const scoped = scopeFields(automation.name, event.externalId, automation.project);
     const runStart = () => ({
@@ -65,48 +77,56 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
       externalId: event.externalId,
       startedAt: new Date().toISOString(),
       ...(replayOf ? { replayOf } : {}),
+      ...(dryRun ? { dryRun } : {}),
     });
     try {
-      if (!store.claim(key)) {
+      if (!dryRun && !store.claim(key)) {
         const runId = record("recordDuplicate", scoped, (a) => a.recordDuplicate(runStart()));
         log.info("duplicate skipped", runId ? { ...scoped, runId } : scoped);
         return { status: "duplicate", runId };
       }
     } catch (err) {
       log.error("claim failed", { ...scoped, error: errorMessage(err) });
-      return { status: "claim-failed" };
+      return { status: "claim-failed", error: err };
     }
     const runId = record("startRun", scoped, (a) => a.startRun({ ...runStart(), event: original }));
     const tagged = runId ? { ...scoped, runId } : scoped;
     const child = withFields(log, tagged);
     let outcome: RunOutcome | undefined;
-    const finish = (status: "succeeded" | "failed", error?: string) => {
-      if (runId) record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: new Date().toISOString(), outcome }));
+    const finish = async (status: "succeeded" | "failed", error?: string) => {
+      if (!runId) return;
+      record("finishRun", scoped, (a) => a.finishRun(runId, { status, error, finishedAt: new Date().toISOString(), outcome }));
+      await notifyRunFinished(onRunFinished, activity, log, runId, scoped);
     };
     const done = (async () => {
       try {
         await automation.run(event, {
           log: child,
+          ...(dryRun ? { dryRun } : {}),
           report: (reported) => {
             outcome = reported;
           },
         });
       } catch (err) {
-        try {
-          store.release(key);
-        } catch (releaseErr) {
-          log.error("release failed", { ...scoped, error: errorMessage(releaseErr) });
+        if (!dryRun) {
+          try {
+            store.release(key);
+          } catch (releaseErr) {
+            log.error("release failed", { ...scoped, error: errorMessage(releaseErr) });
+          }
         }
         log.error("automation failed", { ...tagged, error: errorMessage(err) });
-        finish("failed", errorMessage(err));
+        await finish("failed", errorMessage(err));
         return;
       }
-      try {
-        store.complete(key);
-      } catch (err) {
-        log.error("complete failed", { ...tagged, error: errorMessage(err) });
+      if (!dryRun) {
+        try {
+          store.complete(key);
+        } catch (err) {
+          log.error("complete failed", { ...tagged, error: errorMessage(err) });
+        }
       }
-      finish("succeeded");
+      await finish("succeeded");
     })();
     return { status: "started", runId, done };
   };
@@ -145,13 +165,13 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
         );
       track(work);
     },
-    async replay({ project, automation: name, event, replayOf }) {
+    async replay({ project, automation: name, event, replayOf, dryRun }) {
       const automation = getAutomations().find((a) => a.name === name && a.project === project);
       if (!automation) return { outcome: "unknown-automation" };
       const original = { ...event, project };
       const ready = await prepareSafely(original);
-      const started = begin(automation, ready, original, replayOf);
-      if (started.status === "claim-failed") throw new Error("claim failed");
+      const started = begin(automation, ready, original, replayOf, dryRun);
+      if (started.status === "claim-failed") throw new ClaimStoreError(started.error);
       if (started.status === "duplicate") return { outcome: "duplicate", ...(started.runId ? { runId: started.runId } : {}) };
       track(started.done);
       return { outcome: "started", ...(started.runId ? { runId: started.runId } : {}) };

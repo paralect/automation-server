@@ -74,7 +74,7 @@ export function createLinearLabelToPr(config: LinearLabelToPrConfig): Automation
   return defineAutomation({
     name: LINEAR_LABEL_TO_PR,
     matches,
-    async run(event, { log }) {
+    async run(event, { log, dryRun }) {
       const issue = event.payload;
       const { inputs, truncatedFrom } = workflowInputs(issue);
       if (truncatedFrom !== null) {
@@ -88,9 +88,18 @@ export function createLinearLabelToPr(config: LinearLabelToPrConfig): Automation
       let ref: string | null = config.ref.trim() || null;
       try {
         ref ??= await github.defaultBranch();
-        await github.dispatchWorkflow(config.workflowFile, ref, inputs);
+        if (!dryRun) await github.dispatchWorkflow(config.workflowFile, ref, inputs);
       } catch (err) {
         throw actionable(err, config, ref);
+      }
+      if (dryRun) {
+        log.info("dry-run: would dispatch workflow", {
+          identifier: issue.identifier,
+          repo: `${config.repo.owner}/${config.repo.name}`,
+          workflow: config.workflowFile,
+          ref,
+        });
+        return;
       }
       log.info("dispatched workflow", {
         identifier: issue.identifier,

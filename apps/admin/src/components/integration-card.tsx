@@ -14,8 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { IntegrationWorkflow } from "@/components/integration-workflow"
+import { Time } from "@/components/time"
 import { previewPosthogReport, runPosthogNow, testConnection, updateSettings } from "@/lib/api.functions"
 import { errorText } from "@/lib/errors"
+import { expiryLabel, expiryState, healthDot, type HealthDot } from "@/lib/health"
 import { fieldOf, isGithubReady, savedRepo, type LinkedTemplate } from "@/lib/integration-workflows"
 import { settingsQuery, systemQuery } from "@/lib/queries"
 import { useProjectId } from "@/lib/project"
@@ -32,6 +34,7 @@ const LOGOS: Record<string, string> = {
   linear: "/integrations/linear.svg",
   posthog: "/integrations/posthog.svg",
   crisp: "/integrations/crisp.svg",
+  slack: "/integrations/slack.svg",
 }
 
 // A white tile keeps every brand mark in its official colors on both themes.
@@ -52,7 +55,47 @@ export function StatusBadge({ integration }: { integration: IntegrationView }) {
   )
 }
 
+const DOT_STYLE: Record<HealthDot, { className: string; label: string }> = {
+  ok: { className: "bg-emerald-500", label: "Healthy" },
+  failed: { className: "bg-red-500", label: "Failing" },
+  unknown: { className: "bg-neutral-400", label: "Not checked yet" },
+}
+
+function HealthSummary({ health }: { health: IntegrationView["health"] }) {
+  const dot = DOT_STYLE[healthDot(health)]
+  const expiry = expiryState(health?.expiresAt, new Date())
+  const label = expiryLabel(expiry)
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        <span role="img" aria-label={dot.label} title={dot.label} className={cn("size-2 rounded-full", dot.className)} />
+        {health ? (
+          <>
+            Checked <Time iso={health.checkedAt} relativeOnly />
+          </>
+        ) : (
+          dot.label
+        )}
+      </span>
+      {label && (
+        <Badge
+          variant={expiry.kind === "expired" ? "destructive" : "outline"}
+          className={cn(expiry.kind === "expiring" && expiry.warning && "bg-amber-500/15 text-amber-700 dark:text-amber-400")}
+        >
+          {label}
+        </Badge>
+      )}
+    </div>
+  )
+}
+
 export function IntegrationCard({ integration }: { integration: IntegrationView }) {
+  const queryClient = useQueryClient()
+  const project = useProjectId()
+  const test = useMutation({
+    mutationFn: () => testConnection({ data: { project, integrationId: integration.id } }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: settingsQuery(project).queryKey }),
+  })
   const missing = integration.missing.map((key) => integration.fields.find((f) => f.key === key)?.label ?? key)
   return (
     <Card className="transition-shadow hover:ring-foreground/20">
@@ -70,8 +113,14 @@ export function IntegrationCard({ integration }: { integration: IntegrationView 
         {!integration.configured && missing.length > 0 && (
           <p className="text-xs text-muted-foreground">Missing: {missing.join(", ")}.</p>
         )}
+        {integration.configured && <HealthSummary health={integration.health} />}
+        {test.error ? (
+          <FieldError>{errorText(test.error)}</FieldError>
+        ) : (
+          test.data && <p role="status" className={cn("text-xs", !test.data.ok && "text-destructive")}>{test.data.message}</p>
+        )}
       </CardContent>
-      <CardFooter>
+      <CardFooter className="gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -81,6 +130,11 @@ export function IntegrationCard({ integration }: { integration: IntegrationView 
           <GearSixIcon />
           Configure
         </Button>
+        {integration.configured && (
+          <Button variant="ghost" size="sm" onClick={() => test.mutate()} disabled={test.isPending}>
+            {test.isPending ? "Testing..." : "Test"}
+          </Button>
+        )}
       </CardFooter>
     </Card>
   )

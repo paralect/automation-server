@@ -1,5 +1,5 @@
 import type { ActivityStore, ReplayRequest, ReplayResult } from "@automation-server/core";
-import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsDb } from "@automation-server/settings";
+import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsDb, StoredHealth } from "@automation-server/settings";
 
 import type { ActionsReader } from "./githubActions";
 import type { WorkflowInstaller } from "./workflowInstaller";
@@ -18,6 +18,7 @@ export type SettingsAdmin = {
   env: EnvSource;
   reload(): void;
   test(project: string, id: IntegrationId): Promise<ConnectionTestResult>;
+  health(project: string): Readonly<Record<string, StoredHealth>>;
 };
 
 export type PosthogPreview =

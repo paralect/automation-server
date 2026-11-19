@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import type { RunRecord } from "../src/activity";
 import type { Job } from "../src/job";
 import type { Logger } from "../src/logger";
 import { createScheduler } from "../src/scheduler";
@@ -227,5 +228,55 @@ describe("scheduler failures outside the job", () => {
     }
     expect(rejections).toEqual([]);
     expect(errors.map((e) => e.error)).toEqual(["registry broken", "registry broken"]);
+  });
+});
+
+describe("scheduler onRunFinished", () => {
+  const withHandler = (job: Job, onRunFinished: (run: RunRecord) => void | Promise<void>) => {
+    const warnings: string[] = [];
+    const log: Logger = { info() {}, warn: (m) => void warnings.push(m), error() {} };
+    const scheduler = createScheduler({
+      jobs: () => [job],
+      store: createSqliteStore({ path: ":memory:" }),
+      log,
+      activity: createSqliteActivityStore({ path: ":memory:" }),
+      onRunFinished,
+    });
+    return { scheduler, warnings };
+  };
+
+  test("is called for succeeded and failed job runs and drain waits for it", async () => {
+    const seen: string[] = [];
+    let slowDone = false;
+    const job = weekly("report", () => null, async ({ key }) => {
+      if (key === "bad") throw new Error("job broke");
+    });
+    const { scheduler } = withHandler(job, async (run) => {
+      await new Promise((r) => setTimeout(r, 20));
+      seen.push(`${run.status}:${run.externalId}`);
+      slowDone = true;
+    });
+    await scheduler.runNow(job, "good");
+    await scheduler.runNow(job, "bad");
+    expect(seen).toEqual(["succeeded:good", "failed:bad"]);
+    expect(slowDone).toBe(true);
+  });
+
+  test("a throwing handler is swallowed and does not change the run result", async () => {
+    const job = weekly("report", () => null);
+    const { scheduler, warnings } = withHandler(job, () => {
+      throw new Error("handler broke");
+    });
+    expect(await scheduler.runNow(job, "k")).toMatchObject({ status: "succeeded" });
+    expect(warnings).toEqual(["onRunFinished failed"]);
+  });
+
+  test("is not called for a duplicate occurrence", async () => {
+    let calls = 0;
+    const job = weekly("report", () => null);
+    const { scheduler } = withHandler(job, () => void calls++);
+    await scheduler.runNow(job, "k");
+    expect(await scheduler.runNow(job, "k")).toEqual({ status: "duplicate" });
+    expect(calls).toBe(1);
   });
 });

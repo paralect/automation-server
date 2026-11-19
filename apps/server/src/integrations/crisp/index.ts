@@ -1,4 +1,5 @@
 import { createCrispTriage, MODES, type Mode } from "@automation-server/automations";
+import { withDryRun } from "@automation-server/core";
 import { createCrispClient, createCrispSource, CrispApiError } from "@automation-server/sources";
 import { parseRepo } from "@automation-server/settings";
 
@@ -24,34 +25,32 @@ export const crisp = defineModule({
       log.warn("crisp conversations will not be triaged until the OpenRouter API key is set");
       return { sources: [source] };
     }
-    const mode = isMode(v.mode) ? v.mode : "shadow";
+    // dry-run previews the strongest mode, so the preview shows every write a fix run would make.
+    const dryRun = v.mode === "dry-run";
+    const mode = dryRun ? "fix" : isMode(v.mode) ? v.mode : "shadow";
     const target = github.configured && github.values.repo ? { repo: parseRepo(github.values.repo), token: github.values.token } : null;
     if (mode !== "shadow" && !target) {
-      log.warn(`crisp triage mode ${mode} needs the GitHub token and issues repository, conversations will not be triaged until they are set`);
+      log.warn(`crisp triage mode ${v.mode} needs the GitHub token and issues repository, conversations will not be triaged until they are set`);
       return { sources: [source] };
     }
-    return {
-      sources: [source],
-      automations: [
-        createCrispTriage({
-          crisp: { websiteId: v.websiteId, identifier: v.pluginIdentifier, key: v.pluginKey },
-          openrouter: {
-            apiKey: openrouter.values.apiKey,
-            triageModel: openrouter.values.triageModel,
-            escalationModel: openrouter.values.escalationModel,
-          },
-          github: target,
-          triggerSegment: v.triggerSegment,
-          autoTriage: v.autoTriage,
-          mode,
-          minConfidence: v.minConfidence,
-          areas: v.areas ?? [],
-          autofixAreas: v.autofixAreas ?? [],
-          workflowFile: v.workflowFile,
-          fetch,
-        }),
-      ],
-    };
+    const triage = createCrispTriage({
+      crisp: { websiteId: v.websiteId, identifier: v.pluginIdentifier, key: v.pluginKey },
+      openrouter: {
+        apiKey: openrouter.values.apiKey,
+        triageModel: openrouter.values.triageModel,
+        escalationModel: openrouter.values.escalationModel,
+      },
+      github: target,
+      triggerSegment: v.triggerSegment,
+      autoTriage: v.autoTriage,
+      mode,
+      minConfidence: v.minConfidence,
+      areas: v.areas ?? [],
+      autofixAreas: v.autofixAreas ?? [],
+      workflowFile: v.workflowFile,
+      fetch,
+    });
+    return { sources: [source], automations: [dryRun ? withDryRun(triage) : triage] };
   },
   async test({ crisp, openrouter }, { fetch }) {
     if (!crisp.configured) return { ok: false, available: true, message: "Crisp is not configured" };
