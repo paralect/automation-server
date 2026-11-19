@@ -6,6 +6,7 @@ export * from "./linearLabelToPr/automation";
 export * from "./openrouter";
 export * from "./posthogWeeklyReport";
 export * from "./redact";
+export * from "./slackBot/client";
 export * from "./sentryToGithubIssue/automation";
 export * from "./sentryToGithubIssue/config";
 export * from "./sentryToGithubIssue/format";
