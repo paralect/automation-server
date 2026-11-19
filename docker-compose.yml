@@ -32,6 +32,7 @@ services:
       SLACK_ALERTS_WEBHOOK_URL: ${SLACK_ALERTS_WEBHOOK_URL:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
     volumes:
       - data:/data
     ports:

@@ -2,6 +2,7 @@ export * from "./crispTriage/automation";
 export * from "./crispTriage/route";
 export * from "./crispTriage/types";
 export * from "./github";
+export * from "./linear";
 export * from "./linearLabelToPr/automation";
 export * from "./openrouter";
 export * from "./posthogWeeklyReport";

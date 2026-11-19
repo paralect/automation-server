@@ -63,6 +63,7 @@ export const INTEGRATIONS = {
       { key: "targetRepo", label: "Target repository", kind: "text", required: true, pattern: REPO_PATTERN, help: "owner/name. Must have the workflow installed." },
       { key: "workflowFile", label: "Workflow file", kind: "text", default: "linear-implement.yml" },
       { key: "ref", label: "Ref", kind: "text", default: "", help: "Branch to run the workflow on. Empty means the repository default branch." },
+      { key: "apiKey", label: "API key", kind: "secret", env: "LINEAR_API_KEY", help: "Personal API key (Settings, Security & access). Lets the Slack bot search and read issues. Leave empty to keep it off." },
     ],
   },
   posthog: {
@@ -124,6 +125,7 @@ export const INTEGRATIONS = {
       { key: "signingSecret", label: "Signing secret", kind: "secret", env: "SLACK_SIGNING_SECRET", help: "Signing Secret of your Slack app. Verifies that events come from Slack." },
       { key: "botEnabled", label: "Bot enabled", kind: "boolean", default: false, help: "Lets people tag the bot. It only answers members listed under Allowed users." },
       { key: "allowedUsers", label: "Allowed users", kind: "list", pattern: "^[UW][A-Z0-9]+$", help: "Slack member IDs (U01ABC...) allowed to use the bot. Empty means nobody." },
+      { key: "agentModel", label: "Agent model", kind: "text", help: "OpenRouter model that answers the bot. Empty uses the OpenRouter escalation model. Must support structured outputs." },
       { key: "botName", label: "Bot name", kind: "text", help: "Shown in the approval message as @name approve, for example Automation Bot." },
       { key: "apiBaseUrl", label: "API base URL", kind: "text", default: "https://slack.com/api", pattern: "^https://", patternHint: "must start with https://", help: "Change only to reach a proxy or a test double." },
     ],
