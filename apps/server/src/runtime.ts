@@ -50,7 +50,7 @@ const withProject = (log: Logger, project: string): Logger => ({
 });
 
 export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs = TEST_TIMEOUT_MS, health }: RuntimeDeps): Runtime {
-  const depsFor = (project: string): ModuleDeps => ({ ...deps, log: withProject(deps.log, project) });
+  const depsFor = (project: string): ModuleDeps => ({ ...deps, project, log: withProject(deps.log, project) });
 
   const probe = async (project: string, id: IntegrationId, options?: TestOptions): Promise<ConnectionTestResult> => {
     const title = INTEGRATIONS[id].title;

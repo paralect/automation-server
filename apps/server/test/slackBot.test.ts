@@ -1,4 +1,4 @@
-import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
+import { createDispatcher, createSqliteActivityStore, createSqlitePendingActionStore, createSqliteStore, type Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
@@ -23,7 +23,10 @@ const setup = ({
   allowed = ["UOK"],
   env = BASE_ENV,
   model = [],
-}: { botEnabled?: boolean; allowed?: string[]; env?: Record<string, string>; model?: Step[] } = {}) => {
+  withPending = false,
+  extraSettings = [],
+}: { botEnabled?: boolean; allowed?: string[]; env?: Record<string, string>; model?: Step[]; withPending?: boolean; extraSettings?: { key: string; json: string; secret: boolean }[] } = {}) => {
+  const linearWrites: string[] = [];
   const calls: SlackCall[] = [];
   const modelRequests: { system: string; user: string }[] = [];
   const withModel = model.length > 0;
@@ -47,6 +50,12 @@ const setup = ({
       return step ? Response.json({ choices: [{ message: { content: JSON.stringify(step) } }] }) : new Response("{}", { status: 500 });
     }
     if (target === "https://api.linear.app/graphql") {
+      const { query } = JSON.parse(String(init?.body)) as { query: string };
+      if (query.includes("teams(")) return Response.json({ data: { teams: { nodes: [{ id: "T1", key: "ENG" }] } } });
+      if (query.includes("issueCreate")) {
+        linearWrites.push(query);
+        return Response.json({ data: { issueCreate: { success: true, issue: { identifier: "ENG-9", title: "Billing bug", url: "https://linear.app/x/ENG-9", state: null, assignee: null } } } });
+      }
       return Response.json({
         data: { searchIssues: { nodes: [{ identifier: "ENG-1", title: "Billing <!channel> fails", url: "https://linear.app/x/ENG-1", state: { name: "Todo" }, assignee: null }] } },
       });
@@ -64,13 +73,14 @@ const setup = ({
       { key: "slack.botEnabled", json: JSON.stringify(botEnabled), secret: false },
       { key: "slack.allowedUsers", json: JSON.stringify(allowed), secret: false },
       ...(withModel ? [{ key: "openrouter.apiKey", json: JSON.stringify("sk-or-test-key-0123456789"), secret: true }] : []),
+      ...extraSettings,
     ],
   });
   const runtime = createRuntime({
     modules: [slack],
     projects: () => ["default"],
     resolve: (p) => resolveConfig(settings.project(p), envFor(p, env)),
-    deps: { log, fetch },
+    deps: { log, fetch, ...(withPending ? { pending: createSqlitePendingActionStore({ path: ":memory:" }) } : {}) },
   });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const dispatcher = createDispatcher({ automations: runtime.automations, store: createSqliteStore({ path: ":memory:" }), log, activity });
@@ -96,7 +106,7 @@ const setup = ({
   };
   const unsigned = (payload: unknown) => app.request("/webhooks/slack", { method: "POST", body: JSON.stringify(payload) });
   const replies = () => calls.filter((c) => c.method === "chat.postMessage").map((c) => c.body);
-  return { deliver, unsigned, mention, replies, calls, hookCalls, logs, dispatcher, runtime, activity, modelRequests };
+  return { deliver, unsigned, mention, replies, calls, hookCalls, logs, dispatcher, runtime, activity, modelRequests, linearWrites };
 };
 
 describe("slack bot over the webhook route", () => {
@@ -276,5 +286,49 @@ describe("slack connection test", () => {
     expect(result.message).toContain("invalid_auth");
     expect(JSON.stringify(result)).not.toContain(TOKEN);
     expect(t.calls).toEqual([]);
+  });
+});
+
+describe("slack bot changes over the webhook route", () => {
+  const writeEnv = { ...BASE_ENV, LINEAR_API_KEY: "lin_api_secretsecretsecret" };
+  const propose: Step = { type: "tool", tool: "linear.createIssue", argsJson: '{"title":"Billing bug"}', text: null };
+
+  test("without a pending store the model is not offered write tools", async () => {
+    const t = setup({ env: writeEnv, model: [{ type: "final", tool: null, argsJson: null, text: "ok" }] });
+    await t.deliver(t.mention());
+    await t.dispatcher.drain(1000);
+    expect(t.modelRequests[0]!.system).not.toContain("linear.createIssue");
+  });
+
+  test("with a pending store the write is offered, held for approval, and runs once after the requester approves", async () => {
+    const t = setup({ env: writeEnv, withPending: true, model: [propose] });
+    await t.deliver(t.mention({ text: "<@UBOT> create a ticket for the billing bug" }));
+    await t.dispatcher.drain(1000);
+    expect(t.modelRequests[0]!.system).toContain("linear.createIssue (write)");
+    expect(t.linearWrites).toHaveLength(0);
+    expect(t.replies()[0]!.text).toContain("Only <@UOK> can approve.");
+
+    await t.deliver(t.mention({ text: "<@UBOT> approve", ts: "100.2", thread_ts: "100.1" }, { event_id: "Ev2" }));
+    await t.dispatcher.drain(1000);
+    expect(t.linearWrites).toHaveLength(1);
+    expect(t.replies()[1]!.text).toBe('Done. Created Linear issue ENG-9 "Billing bug": https://linear.app/x/ENG-9');
+
+    await t.deliver(t.mention({ text: "<@UBOT> approve", ts: "100.3", thread_ts: "100.1" }, { event_id: "Ev3" }));
+    await t.dispatcher.drain(1000);
+    expect(t.linearWrites).toHaveLength(1);
+    expect(t.replies()[2]!.text).toBe("Nothing is waiting for approval in this thread.");
+  });
+
+  test("requireApproval is a Slack setting that can be switched off", async () => {
+    const off = setup({
+      env: writeEnv,
+      withPending: true,
+      model: [propose],
+      extraSettings: [{ key: "slack.requireApproval", json: "false", secret: false }],
+    });
+    await off.deliver(off.mention());
+    await off.dispatcher.drain(1000);
+    expect(off.linearWrites).toHaveLength(1);
+    expect(off.logs.some((l) => l.includes("approval is off"))).toBe(true);
   });
 });

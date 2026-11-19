@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const SLACK_AGENT_STATUSES = ["answered", "exhausted", "failed", "not-configured"] as const;
+export const SLACK_AGENT_STATUSES = ["answered", "exhausted", "failed", "not-configured", "pending-approval", "executed", "cancelled", "expired"] as const;
+export const SLACK_STEP_STAGES = ["proposed", "approved", "executed", "cancelled"] as const;
 
 const text = z.string();
 
@@ -19,7 +20,8 @@ export const slackBotOutcomeSchema = z.object({
       status: z.enum(SLACK_AGENT_STATUSES),
       stepCount: z.number(),
       toolsUsed: z.array(text),
-      steps: z.array(z.object({ tool: text, ok: z.boolean(), durationMs: z.number() })),
+      // A write is only ever proposed by the model. Its stage says how far the approval went.
+      steps: z.array(z.object({ tool: text, ok: z.boolean(), durationMs: z.number(), stage: z.enum(SLACK_STEP_STAGES).optional() })),
       error: text.optional(),
     })
     .optional(),
