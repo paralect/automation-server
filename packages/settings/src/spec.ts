@@ -21,6 +21,8 @@ export type IntegrationSpec = {
   readonly description: string;
   readonly webhookSource?: string;
   readonly fields: readonly FieldSpec[];
+  // Each inner list is one way to use the integration. It counts as configured when every field of at least one list is set, on top of the fields marked required.
+  readonly requiredOneOf?: readonly (readonly string[])[];
 };
 
 export const REPO_PATTERN = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$";
@@ -109,13 +111,21 @@ export const INTEGRATIONS = {
   },
   slack: {
     id: "slack",
-    title: "Slack alerts",
-    description: "Posts to a Slack channel when an automation keeps failing.",
+    title: "Slack",
+    description: "Alerts when an automation keeps failing, and a bot you tag in Slack.",
+    webhookSource: "slack",
+    requiredOneOf: [["webhookUrl"], ["botToken", "signingSecret"]],
     fields: [
-      { key: "webhookUrl", label: "Incoming webhook URL", kind: "secret", required: true, env: "SLACK_ALERTS_WEBHOOK_URL", pattern: "^https://", patternHint: "must start with https://", help: "An incoming webhook of the channel that should receive alerts." },
+      { key: "webhookUrl", label: "Alerts incoming webhook URL", kind: "secret", env: "SLACK_ALERTS_WEBHOOK_URL", pattern: "^https://", patternHint: "must start with https://", help: "An incoming webhook of the channel that should receive alerts. Leave empty to send no alerts." },
       { key: "failureThreshold", label: "Failure threshold", kind: "number", default: 3, min: 1, max: 50, help: "Alert once when an automation fails this many times in a row. It alerts again only after a success resets the streak." },
       { key: "alertOnTokenHealth", label: "Alert on token health", kind: "boolean", default: true, help: "Also alert when a connected token stops working or is about to expire." },
       { key: "channelLabel", label: "Channel label", kind: "text", help: "Shown in the alert text, for example #alerts." },
+      { key: "botToken", label: "Bot token", kind: "secret", env: "SLACK_BOT_TOKEN", pattern: "^xoxb-", help: "Bot User OAuth Token (xoxb-...) of your Slack app. Needed for the bot." },
+      { key: "signingSecret", label: "Signing secret", kind: "secret", env: "SLACK_SIGNING_SECRET", help: "Signing Secret of your Slack app. Verifies that events come from Slack." },
+      { key: "botEnabled", label: "Bot enabled", kind: "boolean", default: false, help: "Lets people tag the bot. It only answers members listed under Allowed users." },
+      { key: "allowedUsers", label: "Allowed users", kind: "list", pattern: "^[UW][A-Z0-9]+$", help: "Slack member IDs (U01ABC...) allowed to use the bot. Empty means nobody." },
+      { key: "botName", label: "Bot name", kind: "text", help: "Shown in the approval message as @name approve, for example Automation Bot." },
+      { key: "apiBaseUrl", label: "API base URL", kind: "text", default: "https://slack.com/api", pattern: "^https://", patternHint: "must start with https://", help: "Change only to reach a proxy or a test double." },
     ],
   },
 } as const satisfies Record<string, IntegrationSpec>;

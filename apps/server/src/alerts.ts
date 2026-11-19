@@ -76,10 +76,11 @@ export function createAlertNotifier({ resolve, activity, log, fetch, adminUrl, h
   const notifyHealth = async (project: string, integration: IntegrationId, previous: StoredHealth | undefined, current: StoredHealth, now: Date): Promise<void> => {
     try {
       const { slack } = resolve(project);
-      if (!slack.configured || !slack.values.alertOnTokenHealth) return;
+      const { webhookUrl } = slack.values;
+      if (!webhookUrl || !slack.values.alertOnTokenHealth) return;
       const kinds = healthAlerts(previous, current, now);
       if (kinds.length === 0) return;
-      await postToSlack(slack.values.webhookUrl, healthMessage(project, integration, current, kinds, now, slack.values.channelLabel), { fetch });
+      await postToSlack(webhookUrl, healthMessage(project, integration, current, kinds, now, slack.values.channelLabel), { fetch });
       if (current.expiresAt && (kinds.includes("expiring") || kinds.includes("expired"))) {
         health?.markExpiryAlerted(project, integration, kinds.includes("expired") ? `${current.expiresAt}${EXPIRED_SUFFIX}` : current.expiresAt);
       }
@@ -101,12 +102,13 @@ export function createAlertNotifier({ resolve, activity, log, fetch, adminUrl, h
     try {
       const { slack } = resolve(project);
       if (!slack.configured) return;
-      const { failureThreshold, channelLabel } = slack.values;
+      const { webhookUrl, failureThreshold, channelLabel } = slack.values;
+      if (!webhookUrl) return;
       const streak = activity.consecutiveFailures(run.project ?? undefined, run.automation, failureThreshold);
       if (streak !== failureThreshold || alerted.has(streakKey) || posting.has(streakKey)) return;
       posting.add(streakKey);
       try {
-        await postToSlack(slack.values.webhookUrl, message(run, project, streak, channelLabel), { fetch });
+        await postToSlack(webhookUrl, message(run, project, streak, channelLabel), { fetch });
         // A success that finished during the post already cleared the streak, so the alert must not be remembered.
         if (posting.has(streakKey)) {
           if (alerted.size >= MAX_TRACKED_STREAKS) alerted.delete(alerted.values().next().value as string);

@@ -7,8 +7,9 @@ export const slack = defineModule({
   build: () => ({}),
   testHasSideEffects: true,
   async test({ slack }, { fetch }) {
-    if (!slack.configured) return { ok: false, available: true, message: "Slack webhook URL is not set" };
-    await postToSlack(slack.values.webhookUrl, "Automation server alerts are connected", { fetch });
+    const { webhookUrl } = slack.values;
+    if (!webhookUrl) return { ok: false, available: true, message: "Slack webhook URL is not set" };
+    await postToSlack(webhookUrl, "Automation server alerts are connected", { fetch });
     const where = slack.values.channelLabel ? ` ${slack.values.channelLabel}` : "";
     return { ok: true, available: true, message: `Test message sent to Slack${where}` };
   },

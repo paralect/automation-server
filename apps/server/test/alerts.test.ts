@@ -134,6 +134,15 @@ describe("failure alerts", () => {
     expect(t.logged.filter((l) => l.includes("alert"))).toEqual([]);
   });
 
+  test("bot only, no webhook: failures and token health alert nowhere and nothing throws", async () => {
+    const t = setup({ env: { SLACK_BOT_TOKEN: "xoxb-1-2-secret", SLACK_SIGNING_SECRET: "signing" } });
+    t.automations.push(flaky);
+    await feed(t, ["1", "2", "3", "4"]);
+    await t.notifyHealth(PROJECT, "github", undefined, { ok: false, message: "down", checkedAt: "2026-01-01T00:00:00Z" }, new Date());
+    expect(t.posted).toEqual([]);
+    expect(t.logged.filter((l) => l.includes("alert"))).toEqual([]);
+  });
+
   test("a Slack failure does not throw, does not fail the run, and never logs the webhook url", async () => {
     const t = setup({ slackStatus: 500 });
     t.automations.push(flaky);
