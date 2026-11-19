@@ -8,5 +8,7 @@ export * from "./dispatcher";
 export * from "./sqliteStore";
 export * from "./activity";
 export * from "./sqliteActivityStore";
+export * from "./pendingActions";
+export * from "./sqlitePendingActionStore";
 export * from "./job";
 export * from "./scheduler";
