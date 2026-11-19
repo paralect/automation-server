@@ -132,8 +132,9 @@ function PickerDialog({
   const [refreshError, setRefreshError] = useState<string>()
   const debounced = useDebounced(search.trim())
   const query = useQuery(slackDirectoryQuery(project, kind, debounced))
-  const items = query.data?.items ?? []
   const error = refreshError ?? (query.error ? errorText(query.error) : undefined)
+  // A list read before the failure is stale, so it is not offered next to the error.
+  const items = error ? [] : (query.data?.items ?? [])
 
   const refresh = async () => {
     setRefreshing(true)

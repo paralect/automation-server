@@ -84,6 +84,6 @@ export function parseManualId(kind: PickerKind, text: string): ManualId {
   return { ok: true, id }
 }
 
-export const MISSING_SCOPE_HINT = "Without that scope the list stays empty. You can still add IDs by hand."
+export const MISSING_SCOPE_HINT = "Until then the list cannot load. You can still add IDs by hand."
 
 export const isMissingScope = (message: string) => /scope/i.test(message)
