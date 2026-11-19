@@ -99,4 +99,11 @@ describe("posthog weekly report job", () => {
     expect(slackError).toContain("HTTP 404");
     expect(secretsIn(String(slackError))).toEqual([]);
   });
+
+  test("a failed Slack post reports the status code and never the response body", async () => {
+    const broken = fakeFetch(() => new Response("internal detail: upstream saw token abc123", { status: 500 }));
+    const message = await postToSlack(SLACK_URL, "hi", { fetch: broken.fn }).catch((e: Error) => e.message);
+    expect(message).toBe("Slack delivery failed: HTTP 500");
+    expect(String(message)).not.toContain("internal detail");
+  });
 });

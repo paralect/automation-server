@@ -10,6 +10,7 @@ export type FieldSpec = {
   readonly options?: readonly string[];
   readonly env?: string;
   readonly pattern?: string;
+  readonly patternHint?: string;
   readonly min?: number;
   readonly max?: number;
 };
@@ -20,6 +21,8 @@ export type IntegrationSpec = {
   readonly description: string;
   readonly webhookSource?: string;
   readonly fields: readonly FieldSpec[];
+  // Each inner list is one way to use the integration. It counts as configured when every field of at least one list is set, on top of the fields marked required.
+  readonly requiredOneOf?: readonly (readonly string[])[];
 };
 
 export const REPO_PATTERN = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$";
@@ -60,6 +63,7 @@ export const INTEGRATIONS = {
       { key: "targetRepo", label: "Target repository", kind: "text", required: true, pattern: REPO_PATTERN, help: "owner/name. Must have the workflow installed." },
       { key: "workflowFile", label: "Workflow file", kind: "text", default: "linear-implement.yml" },
       { key: "ref", label: "Ref", kind: "text", default: "", help: "Branch to run the workflow on. Empty means the repository default branch." },
+      { key: "apiKey", label: "API key", kind: "secret", env: "LINEAR_API_KEY", help: "Personal API key (Settings, Security & access). Lets the Slack bot search and read issues. Leave empty to keep it off." },
     ],
   },
   posthog: {
@@ -104,6 +108,27 @@ export const INTEGRATIONS = {
       { key: "areas", label: "Product areas", kind: "list", help: "The closed list of areas the classifier picks from." },
       { key: "autofixAreas", label: "Autofix areas", kind: "list", help: "Areas whose bugs may go to the Codex fix workflow. Empty means none." },
       { key: "workflowFile", label: "Workflow file", kind: "text", default: "codex-issue-fix.yml" },
+    ],
+  },
+  slack: {
+    id: "slack",
+    title: "Slack",
+    description: "Alerts when an automation keeps failing, and a bot you tag in Slack.",
+    webhookSource: "slack",
+    requiredOneOf: [["webhookUrl"], ["botToken", "signingSecret"]],
+    fields: [
+      { key: "webhookUrl", label: "Alerts incoming webhook URL", kind: "secret", env: "SLACK_ALERTS_WEBHOOK_URL", pattern: "^https://", patternHint: "must start with https://", help: "An incoming webhook of the channel that should receive alerts. Leave empty to send no alerts." },
+      { key: "failureThreshold", label: "Failure threshold", kind: "number", default: 3, min: 1, max: 50, help: "Alert once when an automation fails this many times in a row. It alerts again only after a success resets the streak." },
+      { key: "alertOnTokenHealth", label: "Alert on token health", kind: "boolean", default: true, help: "Also alert when a connected token stops working or is about to expire." },
+      { key: "channelLabel", label: "Channel label", kind: "text", help: "Shown in the alert text, for example #alerts." },
+      { key: "botToken", label: "Bot token", kind: "secret", env: "SLACK_BOT_TOKEN", pattern: "^xoxb-", help: "Bot User OAuth Token (xoxb-...) of your Slack app. Needed for the bot." },
+      { key: "signingSecret", label: "Signing secret", kind: "secret", env: "SLACK_SIGNING_SECRET", help: "Signing Secret of your Slack app. Verifies that events come from Slack." },
+      { key: "botEnabled", label: "Bot enabled", kind: "boolean", default: false, help: "Lets people tag the bot. It only answers members listed under Allowed users." },
+      { key: "allowedUsers", label: "Allowed users", kind: "list", pattern: "^[UW][A-Z0-9]+$", help: "Slack member IDs (U01ABC...) allowed to use the bot. Empty means nobody." },
+      { key: "requireApproval", label: "Require approval for changes", kind: "boolean", default: true, help: "When on, the bot shows the exact arguments of every change it wants to make and runs it only after the requester replies approve in the thread. Turn it off only if you accept that anyone on the allowlist, and any text the bot reads, can steer it into creating issues and starting workflows." },
+      { key: "agentModel", label: "Agent model", kind: "text", help: "OpenRouter model that answers the bot. Empty uses the OpenRouter escalation model. Must support structured outputs." },
+      { key: "botName", label: "Bot name", kind: "text", help: "Shown in the approval message as @name approve, for example Automation Bot." },
+      { key: "apiBaseUrl", label: "API base URL", kind: "text", default: "https://slack.com/api", pattern: "^https://", patternHint: "must start with https://", help: "Change only to reach a proxy or a test double." },
     ],
   },
 } as const satisfies Record<string, IntegrationSpec>;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { redactText } from "./redact";
+import { redactUntrusted } from "./redact";
 
 const API = "https://openrouter.ai/api/v1";
 const TIMEOUT_MS = 90_000;
@@ -34,7 +34,7 @@ const completion = z.object({
 });
 const errorBody = z.object({ error: z.object({ message: z.string().optional() }).optional() });
 const keyInfo = z.object({
-  data: z.object({ label: z.string().nullish(), limit: z.number().nullish(), usage: z.number().nullish() }),
+  data: z.object({ label: z.string().nullish(), limit: z.number().nullish(), usage: z.number().nullish(), expires_at: z.string().nullish() }),
 });
 
 export type OpenRouterClient = ReturnType<typeof createOpenRouterClient>;
@@ -55,6 +55,7 @@ export function createOpenRouterClient(config: OpenRouterConfig) {
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(TIMEOUT_MS),
+        redirect: "error",
       });
     } catch {
       throw new Error(`OpenRouter ${method} ${path} failed: network error`);
@@ -63,7 +64,7 @@ export function createOpenRouterClient(config: OpenRouterConfig) {
     if (!res.ok) {
       const parsed = errorBody.safeParse(json);
       const detail = parsed.success ? (parsed.data.error?.message ?? "") : "";
-      const safe = redactText(detail.split(config.apiKey).join("[redacted]")).slice(0, 300);
+      const safe = redactUntrusted(detail.split(config.apiKey).join("[redacted]")).slice(0, 300);
       throw new OpenRouterError(`OpenRouter ${method} ${path} failed with status ${res.status}${safe ? `: ${safe}` : ""}`, res.status);
     }
     return json;
@@ -97,9 +98,9 @@ export function createOpenRouterClient(config: OpenRouterConfig) {
       return parsed.data;
     },
 
-    async key(): Promise<{ label: string | null; limit: number | null; usage: number | null }> {
+    async key(): Promise<{ label: string | null; limit: number | null; usage: number | null; expiresAt: string | null }> {
       const { data } = keyInfo.parse(await call("GET", "/key"));
-      return { label: data.label ?? null, limit: data.limit ?? null, usage: data.usage ?? null };
+      return { label: data.label ?? null, limit: data.limit ?? null, usage: data.usage ?? null, expiresAt: data.expires_at ?? null };
     },
   };
 }

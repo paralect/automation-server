@@ -5,7 +5,7 @@ import type { Event } from "../src/event";
 import type { Logger } from "../src/logger";
 import { createSqliteActivityStore } from "../src/sqliteActivityStore";
 import { createSqliteStore } from "../src/sqliteStore";
-import type { ActivityStore } from "../src/activity";
+import type { ActivityStore, RunRecord } from "../src/activity";
 
 const event = (kind = "thing", externalId = "e1"): Event => ({
   source: "test",
@@ -478,5 +478,58 @@ describe("withDryRun", () => {
     await dispatcher.drain(1000);
     expect(seen).toEqual([true]);
     expect(activity.queryRuns({ limit: 10 }).items[0]).toMatchObject({ status: "succeeded", dryRun: true });
+  });
+});
+
+describe("onRunFinished", () => {
+  const withHandler = (automations: Automation[], onRunFinished: (run: RunRecord) => void | Promise<void>) => {
+    const { log, entries } = memoryLogger();
+    const activity = createSqliteActivityStore({ path: ":memory:" });
+    const dispatcher = createDispatcher({ automations: () => automations, store: createSqliteStore({ path: ":memory:" }), log, activity, onRunFinished });
+    return { dispatcher, activity, entries };
+  };
+
+  test("is called with the finished run for success and failure", async () => {
+    const seen: [string, string | null][] = [];
+    const { dispatcher } = withHandler(
+      [auto("ok", async () => {}), auto("bad", async () => Promise.reject(new Error("boom")))],
+      (run) => void seen.push([run.status, run.error]),
+    );
+    dispatcher.enqueue(event());
+    await dispatcher.drain(1000);
+    expect(seen.sort()).toEqual([["failed", "boom"], ["succeeded", null]]);
+  });
+
+  test("is not called for duplicates or dry runs", async () => {
+    const seen: string[] = [];
+    const { dispatcher } = withHandler([{ ...auto("a", async () => {}), project: "acme" }], (run) => void seen.push(run.id));
+    dispatcher.enqueue({ ...event(), project: "acme" });
+    await dispatcher.drain(1000);
+    dispatcher.enqueue({ ...event(), project: "acme" });
+    await dispatcher.drain(1000);
+    expect(seen).toHaveLength(1);
+    const first = await dispatcher.replay({ project: "acme", automation: "a", event: event(), replayOf: seen[0]!, dryRun: true });
+    await dispatcher.drain(1000);
+    expect(first.outcome).toBe("started");
+    expect(seen).toHaveLength(1);
+  });
+
+  test("drain waits for a slow handler, and a throwing handler is logged and swallowed", async () => {
+    let finished = false;
+    const slow = withHandler([auto("a", async () => {})], async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      finished = true;
+    });
+    slow.dispatcher.enqueue(event());
+    await slow.dispatcher.drain(1000);
+    expect(finished).toBe(true);
+
+    const throwing = withHandler([auto("a", async () => {})], () => {
+      throw new Error("handler broke");
+    });
+    throwing.dispatcher.enqueue(event());
+    await throwing.dispatcher.drain(1000);
+    expect(throwing.entries).toContainEqual(expect.objectContaining({ level: "warn", message: "onRunFinished failed" }));
+    expect(throwing.activity.queryRuns({ limit: 10 }).items[0]).toMatchObject({ status: "succeeded" });
   });
 });

@@ -101,7 +101,7 @@ export const getActionRun = authed.validator(inProject.extend(actionRunInput.sha
 )
 
 type IntegrationId = IntegrationView["id"]
-const INTEGRATION_IDS = ["github", "sentry", "linear", "posthog", "openrouter", "crisp"] as const satisfies readonly IntegrationId[]
+const INTEGRATION_IDS = ["github", "sentry", "linear", "posthog", "openrouter", "crisp", "slack"] as const satisfies readonly IntegrationId[]
 const allIntegrationIds: [Exclude<IntegrationId, (typeof INTEGRATION_IDS)[number]>] extends [never] ? true : never = true
 void allIntegrationIds
 const integrationInput = inProject.extend({ integrationId: z.enum(INTEGRATION_IDS) })

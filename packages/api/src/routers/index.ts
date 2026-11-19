@@ -381,10 +381,10 @@ export const appRouter = {
   },
 };
 
-const currentView = ({ db, env }: Context["settings"], project: string): SettingsView => {
+const currentView = ({ db, env, health }: Context["settings"], project: string): SettingsView => {
   const store = db.project(project);
   const scopedEnv = envFor(project, env);
-  return describeSettings(store, scopedEnv, resolveConfig(store, scopedEnv));
+  return describeSettings(store, scopedEnv, resolveConfig(store, scopedEnv), health(project));
 };
 
 export type AppRouter = typeof appRouter;

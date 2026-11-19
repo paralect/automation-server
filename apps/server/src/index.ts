@@ -7,9 +7,11 @@ import {
   createLogger,
   createScheduler,
   createSqliteActivityStore,
+  createSqlitePendingActionStore,
   createSqliteStore,
 } from "@automation-server/core";
 import {
+  createSqliteHealthStore,
   createSqliteSettingsStore,
   DEFAULT_PROJECT_ID,
   effectiveActionsRepos,
@@ -18,18 +20,21 @@ import {
   resolveConfig,
 } from "@automation-server/settings";
 
+import { createAlertNotifier } from "./alerts";
 import { createApp } from "./app";
 import { buildConfig, webhookUrls } from "./config";
 import { ENV } from "./env.server";
 import { createPosthogAdmin } from "./integrations/posthog";
 import { INTEGRATION_MODULES } from "./integrations/registry";
 import { createReplayAdmin } from "./replay";
+import { createHealthSink } from "./health";
 import { createRuntime } from "./runtime";
 
 const config = buildConfig(ENV);
 
 const store = createSqliteStore({ path: config.databasePath });
 const activity = createSqliteActivityStore({ path: config.databasePath, legacyProject: DEFAULT_PROJECT_ID });
+const pending = createSqlitePendingActionStore({ path: config.databasePath });
 const settings = createSqliteSettingsStore({ path: config.databasePath, encryptionKey: config.encryptionKey });
 const startedAt = new Date().toISOString();
 
@@ -49,17 +54,25 @@ const pruneOld = () => {
   } catch (err) {
     log.error("activity prune failed", { error: errorMessage(err) });
   }
+  try {
+    pending.prune(new Date(Date.now() - config.retentionDays * DAY_MS).toISOString());
+  } catch (err) {
+    log.error("pending action prune failed", { error: errorMessage(err) });
+  }
 };
 pruneOld();
 const pruneTimer = setInterval(pruneOld, HOUR_MS);
 pruneTimer.unref();
 
 const resolve = (project: string) => resolveConfig(settings.project(project), envFor(project, process.env));
+const healthStore = createSqliteHealthStore({ path: config.databasePath });
+const { onRunFinished, notifyHealth } = createAlertNotifier({ resolve, activity, log, adminUrl: config.adminPublicUrl, health: healthStore });
 const runtime = createRuntime({
   modules: INTEGRATION_MODULES,
   projects: () => settings.projects().map((p) => p.id),
   resolve,
-  deps: { log },
+  deps: { log, pending },
+  health: createHealthSink({ store: healthStore, notify: notifyHealth }),
 });
 
 const dispatcher = createDispatcher({
@@ -67,10 +80,11 @@ const dispatcher = createDispatcher({
   store,
   log,
   activity,
+  onRunFinished,
   prepare: (event) => runtime.source(event.project ?? DEFAULT_PROJECT_ID, event.source)?.enrich?.(event) ?? Promise.resolve(event),
 });
 
-const scheduler = createScheduler({ jobs: runtime.jobs, store, log, activity });
+const scheduler = createScheduler({ jobs: runtime.jobs, store, log, activity, onRunFinished });
 
 // One reader per project, kept while its token and repositories stay the same so its cache survives.
 const actionsReaders = new Map<string, { key: string; reader: ActionsReader }>();
@@ -105,7 +119,7 @@ const app = createApp({
     actions,
     workflows: (project) => createWorkflowInstaller({ token: resolve(project).github.values.token }),
     adminToken: config.adminToken,
-    settings: { db: settings, env: process.env, reload, test: runtime.test },
+    settings: { db: settings, env: process.env, reload, test: runtime.test, health: healthStore.get },
     posthog: createPosthogAdmin({ resolve, scheduler }),
     replay: createReplayAdmin({ dispatcher, scheduler, jobs: (project) => runtime.project(project).jobs }),
     system: (project) => {
@@ -142,6 +156,8 @@ async function shutdown(signal: string) {
     await server.stop();
     await Promise.all([dispatcher.drain(10_000), scheduler.drain(10_000)]);
     store.close();
+    healthStore.close();
+    pending.close();
     settings.close();
     log.info("shutdown complete");
     activity.close();

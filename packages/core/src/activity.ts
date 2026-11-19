@@ -107,6 +107,9 @@ export interface ActivityStore {
   unreadCount(query: { project?: string; automation: string }): number;
   getRun(id: string): { run: RunRecord; logs: StoredLog[]; event?: StoredEvent } | null;
   stats(sinceIso: string, bucketMs: number, project?: string): ActivityStats;
+  // Failed runs in a row, newest first, ending at the first success or at `cap`. `running`, `duplicate`, dry runs and runs killed by a restart are skipped, not counted and not streak breakers.
+  // An undefined project means no project filter, as in queryRuns.
+  consecutiveFailures(project: string | undefined, automation: string, cap: number): number;
   failInterruptedRuns(finishedAt: string): number;
   prune(beforeIso: string): number;
   close(): void;

@@ -66,7 +66,7 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
     actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
     workflows: () => createWorkflowInstaller({ token: undefined }),
     adminToken: undefined,
-    settings: { db: settings, env, reload: runtime.rebuild, test: runtime.test },
+    settings: { db: settings, env, reload: runtime.rebuild, test: runtime.test, health: () => ({}) },
     posthog: {
       preview: async () => ({ ok: false as const, message: "unused" }),
       runNow: async () => ({ status: "busy" as const, message: "unused" }),
