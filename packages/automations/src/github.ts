@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { redactText } from "./redact";
+import { redactUntrusted } from "./redact";
 
 export type GithubClientConfig = {
   repo: { owner: string; name: string };
@@ -12,6 +12,17 @@ export type GithubClientConfig = {
 export type GithubLabel = { name: string; color?: string; description?: string };
 export type CreatedIssue = { number: number; html_url: string };
 
+export type GithubIssueSummary = {
+  readonly number: number;
+  readonly title: string;
+  readonly state: string;
+  readonly url: string;
+  readonly labels: readonly string[];
+  readonly isPullRequest: boolean;
+};
+
+export type GithubIssueDetail = GithubIssueSummary & { readonly body: string; readonly author: string | null; readonly comments: number };
+
 const issueList = z.array(
   z.object({ html_url: z.string(), body: z.string().nullish(), pull_request: z.unknown().optional() }),
 );
@@ -22,6 +33,34 @@ const errorBody = z.object({
   message: z.string().optional(),
   errors: z.array(z.object({ code: z.string().optional(), message: z.string().optional() })).optional(),
 });
+
+const labelNames = z.array(z.union([z.string(), z.object({ name: z.string() })])).optional();
+const issueSummary = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  html_url: z.string(),
+  labels: labelNames,
+  pull_request: z.unknown().optional(),
+});
+const searchResult = z.object({ items: z.array(issueSummary) });
+const issueDetail = issueSummary.extend({
+  body: z.string().nullish(),
+  user: z.object({ login: z.string() }).nullish(),
+  comments: z.number().optional(),
+});
+
+const toSummary = (i: z.infer<typeof issueSummary>): GithubIssueSummary => ({
+  number: i.number,
+  title: i.title,
+  state: i.state,
+  url: i.html_url,
+  labels: (i.labels ?? []).map((l) => (typeof l === "string" ? l : l.name)),
+  isPullRequest: i.pull_request !== undefined,
+});
+
+// The model writes the query, and a repo: qualifier in it would search outside the configured repository.
+const SCOPE_QUALIFIER = /\b(?:repo|org|user|owner|enterprise):\S*/gi;
 
 const repoInfo = z.object({ default_branch: z.string() });
 
@@ -68,7 +107,7 @@ export function createGithubClient(config: GithubClientConfig) {
     const detail = parsed.success
       ? [parsed.data.message, ...(parsed.data.errors ?? []).map((e) => e.message)].filter(Boolean).join("; ")
       : "";
-    const safe = redactText(detail.split(config.token).join("[redacted]")).slice(0, 300);
+    const safe = redactUntrusted(detail.split(config.token).join("[redacted]")).slice(0, 300);
     return new GithubApiError(
       `GitHub API ${method} ${path.split("?")[0]} failed with status ${res.status}${safe ? `: ${safe}` : ""}`,
       res.status,
@@ -113,6 +152,24 @@ export function createGithubClient(config: GithubClientConfig) {
       const res = await request("POST", path, issue);
       if (!res.ok) throw await fail("POST", path, res);
       return createdIssue.parse(await res.json());
+    },
+
+    async searchIssues(query: string, limit: number): Promise<GithubIssueSummary[]> {
+      const terms = query.replace(SCOPE_QUALIFIER, " ").replace(/\s+/g, " ").trim();
+      const q = `${terms} repo:${owner}/${name} is:issue`;
+      const path = `/search/issues?q=${encodeURIComponent(q)}&per_page=${limit}`;
+      const res = await request("GET", path);
+      if (!res.ok) throw await fail("GET", path, res);
+      return searchResult.parse(await res.json()).items.map(toSummary);
+    },
+
+    async getIssue(number: number): Promise<GithubIssueDetail | null> {
+      const path = `${repoPath}/issues/${number}`;
+      const res = await request("GET", path);
+      if (res.status === 404) return null;
+      if (!res.ok) throw await fail("GET", path, res);
+      const issue = issueDetail.parse(await res.json());
+      return { ...toSummary(issue), body: issue.body ?? "", author: issue.user?.login ?? null, comments: issue.comments ?? 0 };
     },
 
     async defaultBranch(): Promise<string> {

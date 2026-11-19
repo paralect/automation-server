@@ -57,6 +57,19 @@ describe("resolution order", () => {
     expect(cfg.posthog.values.host).toBe("https://us.posthog.com");
   });
 
+  test("slack is configured by the alert webhook or by the bot credentials, and reports the nearest gap", () => {
+    expect(resolveConfig(fresh(), {}).slack.configured).toBe(false);
+    expect(resolveConfig(fresh(), {}).slack.missing).toEqual(["webhookUrl"]);
+    expect(resolveConfig(fresh(), { SLACK_ALERTS_WEBHOOK_URL: "https://hooks.slack.com/services/T/B/x" }).slack.configured).toBe(true);
+    const partial = resolveConfig(fresh(), { SLACK_BOT_TOKEN: "xoxb-1" }).slack;
+    expect(partial.configured).toBe(false);
+    expect(partial.missing).toEqual(["signingSecret"]);
+    const bot = resolveConfig(fresh(), { SLACK_BOT_TOKEN: "xoxb-1", SLACK_SIGNING_SECRET: "s" }).slack;
+    expect(bot.configured).toBe(true);
+    expect(bot.values.botEnabled).toBe(false);
+    expect(bot.values.allowedUsers).toBeUndefined();
+  });
+
   test("a db secret makes an integration configured", () => {
     const store = fresh();
     store.apply({ set: [{ key: "sentry.clientSecret", json: '"abc"', secret: true }] });
@@ -106,6 +119,11 @@ describe("planUpdate", () => {
       { key: "slack.webhookUrl", json: '"https://hooks.slack.com/services/T/B/x"', secret: true },
     ]);
     expect(planUpdate("slack", { values: { webhookUrl: "" } }).set).toEqual([]);
+  });
+
+  test("the Slack API base URL must be https", () => {
+    expect(() => planUpdate("slack", { values: { apiBaseUrl: "http://slack.example/api" } })).toThrow("must start with https://");
+    expect(planUpdate("slack", { values: { apiBaseUrl: "https://proxy.example/api" } }).set).toEqual([{ key: "slack.apiBaseUrl", json: '"https://proxy.example/api"', secret: false }]);
   });
 
   test("stores secrets only for non-empty strings", () => {

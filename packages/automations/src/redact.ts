@@ -1,12 +1,13 @@
 const REDACTED = "[redacted]";
 
-const SENSITIVE_KEY = "[\\w-]*(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|session)[\\w-]*";
+const SENSITIVE_KEY = "(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|session)[\\w-]*";
 
 const HEADER_LINE = /^([ \t]*)(authorization|proxy-authorization|cookie|set-cookie)[ \t]*:.*$/gim;
 const JWT = /\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]*/g;
 const BEARER = /\bBearer[ \t]+[^\s"']+/gi;
+// The match starts at the keyword, not at the start of the key: the key is kept as written, so a leading prefix or quote stays outside the match and the output is the same, but the scan no longer backtracks over the whole word at every start.
 const KEY_VALUE = new RegExp(
-  `(["']?${SENSITIVE_KEY}["']?[ \\t]*[:=][ \\t]*)(\\[redacted\\]|"[^"\\n]*"|'[^'\\n]*'|[^\\s,&;"'}\\]]+)`,
+  `(${SENSITIVE_KEY}["']?[ \\t]*[:=][ \\t]*)(\\[redacted\\]|"[^"\\n]*"|'[^'\\n]*'|[^\\s,&;"'}\\]]+)`,
   "gi",
 );
 const URL_QUERY = /(https?:\/\/[^\s?#"'<>]+)\?[^\s"'<>]*/g;
@@ -72,6 +73,20 @@ export function redactText(s: string): string {
     .replace(IPV6, (m) => (/[0-9a-f]/i.test(m) ? "[ip]" : m))
     .replace(LONG_TOKEN, (m) => (looksLikeSecret(m) ? REDACTED : m));
 }
+
+export const MAX_REDACT_INPUT = 4000;
+
+const MIN_DETECTABLE_RUN = 32;
+
+// redactText is quadratic on long runs of word characters, so untrusted text is cut first. A short token fragment left at the cut would be too short for any pattern, so the cut drops it. A longer run is still seen by the long-token rule.
+export function clipForRedaction(s: string, max = MAX_REDACT_INPUT): string {
+  if (s.length <= max) return s;
+  let end = max;
+  while (end > 0 && max - end < MIN_DETECTABLE_RUN && /[\w+=./-]/.test(s[end - 1] as string)) end--;
+  return max - end < MIN_DETECTABLE_RUN ? s.slice(0, end) : s.slice(0, max);
+}
+
+export const redactUntrusted = (s: string, max = MAX_REDACT_INPUT): string => redactText(clipForRedaction(s, max));
 
 export function singleLine(s: string): string {
   return s.replace(/\s+/g, " ").trim();

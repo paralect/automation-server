@@ -7,6 +7,7 @@ import {
   createLogger,
   createScheduler,
   createSqliteActivityStore,
+  createSqlitePendingActionStore,
   createSqliteStore,
 } from "@automation-server/core";
 import {
@@ -33,6 +34,7 @@ const config = buildConfig(ENV);
 
 const store = createSqliteStore({ path: config.databasePath });
 const activity = createSqliteActivityStore({ path: config.databasePath, legacyProject: DEFAULT_PROJECT_ID });
+const pending = createSqlitePendingActionStore({ path: config.databasePath });
 const settings = createSqliteSettingsStore({ path: config.databasePath, encryptionKey: config.encryptionKey });
 const startedAt = new Date().toISOString();
 
@@ -52,6 +54,11 @@ const pruneOld = () => {
   } catch (err) {
     log.error("activity prune failed", { error: errorMessage(err) });
   }
+  try {
+    pending.prune(new Date(Date.now() - config.retentionDays * DAY_MS).toISOString());
+  } catch (err) {
+    log.error("pending action prune failed", { error: errorMessage(err) });
+  }
 };
 pruneOld();
 const pruneTimer = setInterval(pruneOld, HOUR_MS);
@@ -64,7 +71,7 @@ const runtime = createRuntime({
   modules: INTEGRATION_MODULES,
   projects: () => settings.projects().map((p) => p.id),
   resolve,
-  deps: { log },
+  deps: { log, pending },
   health: createHealthSink({ store: healthStore, notify: notifyHealth }),
 });
 
@@ -150,6 +157,7 @@ async function shutdown(signal: string) {
     await Promise.all([dispatcher.drain(10_000), scheduler.drain(10_000)]);
     store.close();
     healthStore.close();
+    pending.close();
     settings.close();
     log.info("shutdown complete");
     activity.close();

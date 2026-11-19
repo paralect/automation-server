@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { redactText, redactUrl, stripQuery } from "../src/redact";
+import { clipForRedaction, redactText, redactUntrusted, redactUrl, stripQuery } from "../src/redact";
 
 describe("redactText", () => {
   const cases: [string, string, string][] = [
@@ -78,5 +78,28 @@ describe("url helpers", () => {
   });
   test("redactUrl", () => {
     expect(redactUrl("https://a.com/u/jane@x.com?token=1")).toBe("https://a.com/u/[email]");
+  });
+});
+
+describe("untrusted input", () => {
+  test("short text is redacted exactly like redactText", () => {
+    const text = "mail ada@example.com token=abc123secret";
+    expect(redactUntrusted(text)).toBe(redactText(text));
+    expect(clipForRedaction(text)).toBe(text);
+  });
+
+  test("long text is cut at the cap and a trailing partial token is dropped", () => {
+    const clipped = clipForRedaction(`${"hello ".repeat(663)}${"x".repeat(1)}ghp_partialtokenthatwas`, 4000);
+    expect(clipped.length).toBeLessThanOrEqual(4000);
+    expect(clipped).not.toContain("ghp_");
+    expect(clipForRedaction("a".repeat(200_000))).toHaveLength(4000);
+  });
+
+  test("hostile long inputs finish quickly", () => {
+    for (const text of ["a".repeat(200_000), "token".repeat(40_000), `${"a".repeat(100_000)}@${"b".repeat(100_000)}`, "a=".repeat(100_000)]) {
+      const started = performance.now();
+      redactUntrusted(text);
+      expect(performance.now() - started).toBeLessThan(200);
+    }
   });
 });

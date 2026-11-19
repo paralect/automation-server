@@ -1,5 +1,5 @@
 import { errorMessage } from "@automation-server/api/errors";
-import { postToSlack, redactText, singleLine, truncate } from "@automation-server/automations";
+import { escapeSlackText, postToSlack, redactText, singleLine, truncate } from "@automation-server/automations";
 import type { ActivityStore, Logger, RunRecord } from "@automation-server/core";
 import { DEFAULT_PROJECT_ID, INTEGRATIONS, type HealthStore, type IntegrationId, type ResolvedConfig, type StoredHealth } from "@automation-server/settings";
 
@@ -37,8 +37,6 @@ export function healthAlerts(previous: StoredHealth | undefined, current: Stored
 const MAX_ERROR_CHARS = 300;
 const MAX_TRACKED_STREAKS = 1000;
 
-const slackEscape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
 export function createAlertNotifier({ resolve, activity, log, fetch, adminUrl, health }: AlertNotifierDeps) {
   // Two failures finishing together both read the same streak count, so the key is held in flight while the post runs. It becomes alerted only after the post succeeded, so a failed post can be retried. A success clears both.
   const alerted = new Set<string>();
@@ -47,9 +45,9 @@ export function createAlertNotifier({ resolve, activity, log, fetch, adminUrl, h
   const message = (run: RunRecord, project: string, streak: number, channelLabel: string | undefined) => {
     const error = truncate(singleLine(redactText(run.error ?? "unknown error")), MAX_ERROR_CHARS);
     const lines = [
-      `:rotating_light: *${slackEscape(run.automation)}* has failed ${streak} times in a row${channelLabel ? ` (${slackEscape(channelLabel)})` : ""}`,
-      `Project: \`${slackEscape(project)}\``,
-      `Latest error: ${slackEscape(error)}`,
+      `:rotating_light: *${escapeSlackText(run.automation)}* has failed ${streak} times in a row${channelLabel ? ` (${escapeSlackText(channelLabel)})` : ""}`,
+      `Project: \`${escapeSlackText(project)}\``,
+      `Latest error: ${escapeSlackText(error)}`,
     ];
     if (adminUrl) lines.push(`Run: ${adminUrl}/runs/${encodeURIComponent(run.id)}`);
     return lines.join("\n");
@@ -57,14 +55,14 @@ export function createAlertNotifier({ resolve, activity, log, fetch, adminUrl, h
 
   const healthMessage = (project: string, integration: IntegrationId, current: StoredHealth, kinds: readonly HealthAlertKind[], now: Date, channelLabel: string | undefined) => {
     const title = INTEGRATIONS[integration].title;
-    const label = channelLabel ? ` (${slackEscape(channelLabel)})` : "";
+    const label = channelLabel ? ` (${escapeSlackText(channelLabel)})` : "";
     const headline = kinds.includes("failing")
-      ? `:warning: *${slackEscape(title)}* connection is failing${label}`
+      ? `:warning: *${escapeSlackText(title)}* connection is failing${label}`
       : kinds.includes("expired")
-        ? `:warning: *${slackEscape(title)}* token has expired${label}`
-        : `:hourglass_flowing_sand: *${slackEscape(title)}* token expires soon${label}`;
-    const lines = [headline, `Project: \`${slackEscape(project)}\``];
-    if (!current.ok) lines.push(`Check result: ${slackEscape(truncate(singleLine(redactText(current.message)), MAX_ERROR_CHARS))}`);
+        ? `:warning: *${escapeSlackText(title)}* token has expired${label}`
+        : `:hourglass_flowing_sand: *${escapeSlackText(title)}* token expires soon${label}`;
+    const lines = [headline, `Project: \`${escapeSlackText(project)}\``];
+    if (!current.ok) lines.push(`Check result: ${escapeSlackText(truncate(singleLine(redactText(current.message)), MAX_ERROR_CHARS))}`);
     if (current.expiresAt) {
       const days = Math.ceil((Date.parse(current.expiresAt) - now.getTime()) / DAY_MS);
       lines.push(days > 0 ? `Expires: ${current.expiresAt.slice(0, 10)} (in ${days} day${days === 1 ? "" : "s"})` : `Expired: ${current.expiresAt.slice(0, 10)}`);
@@ -76,10 +74,11 @@ export function createAlertNotifier({ resolve, activity, log, fetch, adminUrl, h
   const notifyHealth = async (project: string, integration: IntegrationId, previous: StoredHealth | undefined, current: StoredHealth, now: Date): Promise<void> => {
     try {
       const { slack } = resolve(project);
-      if (!slack.configured || !slack.values.alertOnTokenHealth) return;
+      const { webhookUrl } = slack.values;
+      if (!webhookUrl || !slack.values.alertOnTokenHealth) return;
       const kinds = healthAlerts(previous, current, now);
       if (kinds.length === 0) return;
-      await postToSlack(slack.values.webhookUrl, healthMessage(project, integration, current, kinds, now, slack.values.channelLabel), { fetch });
+      await postToSlack(webhookUrl, healthMessage(project, integration, current, kinds, now, slack.values.channelLabel), { fetch });
       if (current.expiresAt && (kinds.includes("expiring") || kinds.includes("expired"))) {
         health?.markExpiryAlerted(project, integration, kinds.includes("expired") ? `${current.expiresAt}${EXPIRED_SUFFIX}` : current.expiresAt);
       }
@@ -101,12 +100,13 @@ export function createAlertNotifier({ resolve, activity, log, fetch, adminUrl, h
     try {
       const { slack } = resolve(project);
       if (!slack.configured) return;
-      const { failureThreshold, channelLabel } = slack.values;
+      const { webhookUrl, failureThreshold, channelLabel } = slack.values;
+      if (!webhookUrl) return;
       const streak = activity.consecutiveFailures(run.project ?? undefined, run.automation, failureThreshold);
       if (streak !== failureThreshold || alerted.has(streakKey) || posting.has(streakKey)) return;
       posting.add(streakKey);
       try {
-        await postToSlack(slack.values.webhookUrl, message(run, project, streak, channelLabel), { fetch });
+        await postToSlack(webhookUrl, message(run, project, streak, channelLabel), { fetch });
         // A success that finished during the post already cleared the streak, so the alert must not be remembered.
         if (posting.has(streakKey)) {
           if (alerted.size >= MAX_TRACKED_STREAKS) alerted.delete(alerted.values().next().value as string);
