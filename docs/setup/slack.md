@@ -2,7 +2,7 @@
 
 This guide connects a Slack channel to the admin so the server tells you when an automation keeps failing. For how the alert rule works and what the message contains, read [docs/integrations/slack.md](../integrations/slack.md).
 
-Slack sends nothing to this server. The server posts to an incoming webhook, so there is no webhook URL to paste into Slack. Everything is entered on the admin Integrations page, in the **Slack alerts** card. You can also set the webhook URL with the environment variable `SLACK_ALERTS_WEBHOOK_URL`.
+The alerts need nothing from Slack to reach this server: the server posts to an incoming webhook, so there is no URL to paste into Slack. The [Slack bot](slack-bot.md) is different. Slack sends its events to this server, so the bot needs a public URL, and its settings live in the same card but are independent of the webhook. Everything is entered on the admin Integrations page, in the **Slack** card. You can also set the webhook URL with the environment variable `SLACK_ALERTS_WEBHOOK_URL`.
 
 Before you start, make sure the server has `SETTINGS_ENCRYPTION_KEY` set. The admin refuses to save the webhook URL without it.
 
@@ -22,12 +22,12 @@ Treat the URL as a secret. Anyone who has it can post to the channel. Alerts quo
 
 ## 2. Fill in the admin
 
-1. Open the admin and go to **Integrations**. Find the **Slack alerts** card.
+1. Open the admin and go to **Integrations**. Find the **Slack** card.
 2. Fill in the fields.
 
 | Field | Value |
 | --- | --- |
-| Incoming webhook URL | The `https://hooks.slack.com/services/...` URL from step 1. It must start with `https://`. |
+| Alerts incoming webhook URL | The `https://hooks.slack.com/services/...` URL from step 1. It must start with `https://`. |
 | Failure threshold | How many failures in a row trigger an alert. Default `3`, from 1 to 50. |
 | Alert on token health | On by default. Alerts when a connected token stops working or is about to expire. Turn it off to keep only failure alerts. |
 | Channel label | Optional. Shown in the alert text, for example `#alerts`. |

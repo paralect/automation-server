@@ -1,6 +1,6 @@
-# Slack alerts
+# Slack
 
-Posts to a Slack channel when an automation fails several times in a row.
+One integration for Slack. It posts failure alerts and token-health alerts to a channel through an incoming webhook, and runs the Slack bot that answers when a member tags it.
 
 - Settings spec: `slack` in `packages/settings/src/spec.ts`.
 - Server module: `apps/server/src/integrations/slack`, which only provides the connection test.
@@ -11,12 +11,32 @@ Posts to a Slack channel when an automation fails several times in a row.
 
 | Field | Env | Default | Meaning |
 | --- | --- | --- | --- |
-| `webhookUrl` | `SLACK_ALERTS_WEBHOOK_URL` | | Required. Incoming webhook of the alerts channel. Must start with `https://`. Stored encrypted. |
+| `webhookUrl` | `SLACK_ALERTS_WEBHOOK_URL` | | Optional. Incoming webhook of the alerts channel. Must start with `https://`. Stored encrypted. Without it no alert is sent. |
 | `failureThreshold` | | `3` | Failures in a row that trigger an alert. 1 to 50. |
 | `alertOnTokenHealth` | | `true` | Also alert when a connected token stops working or is about to expire. See [Token health](#token-health). |
 | `channelLabel` | | | Optional text shown in the alert, for example `#alerts`. |
+| `botToken` | `SLACK_BOT_TOKEN` | | Bot User OAuth Token (`xoxb-`). Stored encrypted. |
+| `signingSecret` | `SLACK_SIGNING_SECRET` | | Signing Secret of the Slack app. Stored encrypted. |
+| `botEnabled` | | `false` | Switches the bot and its webhook route on. |
+| `allowedUsers` | | empty | Member IDs allowed to use the bot. Empty means nobody. |
+| `botName` | | | Optional name shown as `@name approve` in the approval message. |
+| `apiBaseUrl` | | `https://slack.com/api` | Slack Web API host. Must start with `https://`. Change only for a proxy or a test double. |
+
+The integration counts as configured with the alert webhook, or with `botToken` and `signingSecret`. It declares this with `requiredOneOf` in the spec.
 
 The server variable `ADMIN_PUBLIC_URL` is optional. When it is set, the alert links to `<ADMIN_PUBLIC_URL>/runs/<run id>`.
+
+## Slack bot
+
+The bot is the `slack-bot` automation over the `slack` source. See [docs/setup/slack-bot.md](../setup/slack-bot.md) for the Slack app.
+
+- Source: `packages/sources/src/slack`. `POST /webhooks/:project/slack` verifies the Slack v0 signature (`HMAC-SHA256` of `v0:<timestamp>:<raw body>`, compared in constant time, timestamp within 5 minutes). `url_verification` is answered through the optional `Source.respond` hook before anything is parsed. Only `app_mention` becomes an event, and events with `bot_id`, a `bot_message` subtype or the bot's own user ID are ignored.
+- Event: `{source: "slack", kind: "app_mention", externalId: <event_id>, payload: {team, channel, user, text, ts, threadTs}}`. The leading `<@BOT>` is stripped from `text`. Using `event_id` as the claim key makes Slack's retries `duplicate` runs.
+- Client: `packages/automations/src/slackBot/client.ts`, `auth.test` and `chat.postMessage` with injectable `fetch`, a 10 second timeout and the token scrubbed from every error.
+- Limits: `packages/automations/src/slackBot/limiter.ts`, in memory per server process. Allowed members get 6 requests a minute each (a token bucket per project and member), one slow-down reply per member per minute and silence after that. A member outside `allowedUsers` gets the denial at most once per 10 minutes and silence otherwise. At most 4 runs are in flight per project, extra mentions get one `I am busy` reply per member per minute. Maps are bounded and old entries are evicted. A dry run spends no quota.
+- Automation: `packages/automations/src/slackBot/automation.ts`. A user outside `allowedUsers` gets the denial reply (see Limits) and nothing else runs. A listed user gets `Got it: <text>` in the thread (`threadTs ?? ts`), escaped so it cannot ping. In a dry run it logs `dry-run: would reply`, reports the reply on the run and posts nothing.
+- Connection test: `auth.test` when `botToken` is set (bot name and workspace, never the token), and the webhook test message when `webhookUrl` is set. The daily token-health check still skips Slack, because the webhook test posts a message.
+- Stored events keep the message text. They are redacted by key name only.
 
 ## The rule
 
