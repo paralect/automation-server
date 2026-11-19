@@ -14,16 +14,21 @@ const NOW = new Date("2026-11-17T06:00:00Z");
 
 const log: Logger = { info() {}, warn() {}, error() {} };
 
-type World = { githubStatus: number; githubExpiry: string | undefined };
+type World = { githubStatus: number; githubExpiry: string | undefined; slackAuth: "ok" | "invalid_auth" };
 
 const setup = ({ env = {}, adminUrl }: { env?: Record<string, string>; adminUrl?: string } = {}) => {
-  const world: World = { githubStatus: 200, githubExpiry: undefined };
+  const world: World = { githubStatus: 200, githubExpiry: undefined, slackAuth: "ok" };
+  const slackApi: string[] = [];
   const posted: { url: string; text: string }[] = [];
   const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.hostname === "hooks.slack.com") {
       posted.push({ url: url.href, text: (JSON.parse(String(init?.body)) as { text: string }).text });
       return new Response("ok");
+    }
+    if (url.hostname === "slack.com") {
+      slackApi.push(url.pathname);
+      return Response.json(world.slackAuth === "ok" ? { ok: true, user: "bot", user_id: "UBOT", team: "Acme", team_id: "T1" } : { ok: false, error: "invalid_auth" });
     }
     if (world.githubStatus !== 200) return new Response("{}", { status: world.githubStatus });
     return url.pathname === "/user"
@@ -44,7 +49,7 @@ const setup = ({ env = {}, adminUrl }: { env?: Record<string, string>; adminUrl?
   });
   const job = runtime.project("default").jobs.find((j) => j.name === TOKEN_HEALTH_JOB) as Job;
   const runJob = (now: Date) => job.run({ log, key: job.due(now) ?? "", now });
-  return { world, posted, runtime, healthStore, activity, job, runJob, settings };
+  return { world, posted, slackApi, runtime, healthStore, activity, job, runJob, settings };
 };
 
 const expiryIn = (days: number, from = NOW) => new Date(from.getTime() + days * DAY).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
@@ -58,13 +63,46 @@ describe("token-health job", () => {
     expect(job.due(new Date("2026-11-18T06:00:00Z"))).toBe("2026-11-18");
   });
 
-  test("the runtime registers it per project and tests only configured integrations whose test has no side effects", async () => {
+  test("the runtime registers it per project and tests only configured integrations whose scheduled check applies", async () => {
     const { runJob, healthStore, runtime, posted } = setup();
     expect(runtime.project("default").jobs.map((j) => j.name)).toContain(TOKEN_HEALTH_JOB);
     await runJob(NOW);
     expect(posted).toEqual([]);
     expect(Object.keys(healthStore.get("default")).sort()).toEqual(["github"]);
     expect(healthStore.get("default").github).toMatchObject({ ok: true, checkedAt: NOW.toISOString() });
+  });
+
+  test("a project with a bot token gets auth.test in the daily run, and the webhook test message is never posted", async () => {
+    const { runJob, healthStore, posted, slackApi } = setup({ env: { SLACK_BOT_TOKEN: "xoxb-1-2-AbCdEfGhIjKlMnOpQrStUv", SLACK_SIGNING_SECRET: "s" } });
+    await runJob(NOW);
+    expect(slackApi).toEqual(["/api/auth.test"]);
+    expect(posted).toEqual([]);
+    expect(Object.keys(healthStore.get("default")).sort()).toEqual(["github", "slack"]);
+    expect(healthStore.get("default").slack).toMatchObject({ ok: true });
+  });
+
+  test("a bot-only project with no alert webhook is checked too, and a rejected bot token is recorded", async () => {
+    const t = setup({ env: { SLACK_ALERTS_WEBHOOK_URL: "", SLACK_BOT_TOKEN: "xoxb-1-2-AbCdEfGhIjKlMnOpQrStUv", SLACK_SIGNING_SECRET: "s" } });
+    t.world.slackAuth = "invalid_auth";
+    await t.runJob(NOW);
+    expect(t.healthStore.get("default").slack).toMatchObject({ ok: false });
+    expect(t.posted).toEqual([]);
+  });
+
+  test("a rejected bot token alerts through the alert webhook without posting the test message", async () => {
+    const t = setup({ env: { SLACK_BOT_TOKEN: "xoxb-1-2-AbCdEfGhIjKlMnOpQrStUv", SLACK_SIGNING_SECRET: "s" } });
+    t.world.slackAuth = "invalid_auth";
+    await t.runJob(NOW);
+    expect(t.posted).toHaveLength(1);
+    expect(t.posted[0]!.text).toContain("Slack");
+    expect(t.posted[0]!.text).not.toContain("Automation server alerts are connected");
+  });
+
+  test("a webhook-only Slack stays out of the daily run", async () => {
+    const { runJob, healthStore, slackApi } = setup();
+    await runJob(NOW);
+    expect(slackApi).toEqual([]);
+    expect(healthStore.get("default").slack).toBeUndefined();
   });
 
   test("a run through the scheduler is recorded like any other job", async () => {

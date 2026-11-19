@@ -1,8 +1,109 @@
 # Set up the Slack bot
 
-This guide creates a Slack app that your team tags in a channel. In this first version the bot only answers `Got it: <your text>` in the thread, and only to members you list. It does not call a model or any other service yet. The setup below is the one the later versions reuse.
+This guide creates a Slack app that your team tags in a channel. The bot reads the question (and the thread it was tagged in), asks an AI model, and lets the model look things up in the services you connected. It answers in the thread. It can also propose changes (create an issue, label a ticket, start a workflow), but it never makes one until the person who asked approves it in the thread. See [Changes and approval](#changes-and-approval).
 
-The bot is configured on the admin Integrations page, in the **Slack** card, next to the alert settings. The alert webhook is optional. You can run the bot without it, or the alerts without the bot.
+The bot answers only members you list. Everything is configured on the admin Integrations page, in the **Slack** card, next to the alert settings. The alert webhook is optional. You can run the bot without it, or the alerts without the bot.
+
+## What the bot can do
+
+The bot is a language model with a short list of tools. A tool is offered to the model only when its service is set up. A service that is not set up has no tool, and the model is not told it exists.
+
+| Tool | Needs | What it returns |
+| --- | --- | --- |
+| `github.searchIssues` | GitHub token and **Issues repository** | Issues of that repository matching keywords: number, title, state, labels, link. A `repo:` or `org:` word in the query is stripped, so the search stays inside the repository. |
+| `github.getIssue` | The same | One issue with its body (first 2000 characters) and comment count. |
+| `sentry.listIssues` | Sentry **Auth token** (and **API base URL**) | Issues of the token's organization, newest activity first, for a Sentry search query. |
+| `posthog.weeklyReport` | PostHog fully configured | The same numbers as the weekly report: users, pageviews, sessions, top pages and events. It posts nothing to Slack. |
+| `linear.searchIssues` | Linear **API key** | Issues matching keywords: identifier, title, state, assignee, link. |
+| `linear.getIssue` | Linear **API key** | One issue with its description, labels and latest comments. |
+
+The changes the bot can propose are listed under [Changes and approval](#changes-and-approval).
+
+Examples to ask: `@Automation Bot what Linear issues mention billing?`, `@Automation Bot is there a GitHub issue about the login timeout?`, `@Automation Bot what are the top Sentry errors this week?`, `@Automation Bot how did signups change in PostHog?`
+
+Limits that keep a question bounded:
+
+- At most 6 tool steps and 2 minutes per question. After that the bot says it ran out of steps.
+- Each tool result is cut to 4000 characters before the model sees it.
+- The thread context is the newest 20 messages of the thread (the bot pages through up to 1000 messages), kept within about 6000 characters.
+- The model answers in your language, short, in Slack formatting.
+
+If OpenRouter is not configured the bot replies `The AI model is not configured.` and does nothing else. If anything fails it replies `I could not do that: <reason>` with the reason scrubbed of secrets.
+
+## Changes and approval
+
+Write tools exist only when their service is set up, like read tools. When the model picks one, the bot does not run it. The server checks the arguments, stores the request, and posts the exact tool and arguments in the thread. Nothing happens until the person who asked replies `approve`.
+
+| Tool | Needs | What it does |
+| --- | --- | --- |
+| `linear.createIssue` | Linear **API key** | Creates an issue. Arguments: `title`, optional `description`, optional `teamKey` (needed only when the workspace has more than one team), optional `labels`. Labels must already exist in Linear. A missing label is an error, the bot never creates labels. |
+| `linear.addLabel` | Linear **API key** | Adds an existing label to an issue, found by name (`issue` is an identifier like `ENG-123`, `label` is the name). A missing label or issue is an error. |
+| `github.createIssue` | GitHub token and **Issues repository** | Creates an issue in that repository. Arguments: `title`, `body`, optional `labels`. GitHub itself creates a label that does not exist yet. |
+| `github.dispatchWorkflow` | GitHub token and **Issues repository**, and at least one allowed workflow | Starts a GitHub Actions workflow in that repository. Arguments: `workflowFile`, optional `inputs`. There is no `ref`: it always runs on the ref configured for that workflow (the Linear **Ref** for the Linear workflow file) or on the repository default branch, never on one the model picks. |
+
+**What "run a ticket" means.** There is no separate run tool. Adding the Linear **trigger label** to an issue is what starts the `linear-label-to-pr` automation, which dispatches the implementation workflow and opens a pull request. So "run ENG-123" becomes `linear.addLabel` with the trigger label, and the approval message shows exactly that. The tool description tells the model this, and also that it should only add that label when the person asked to run or implement the ticket.
+
+**Allowed workflows.** `github.dispatchWorkflow` refuses any file that is not on a list built from the project's own settings: the Crisp **Workflow file**, and the Linear **Workflow file** when Linear's **Target repository** is the same repository as the GitHub **Issues repository**. A file such as `deploy-prod.yml` is refused even if the model, or text it read, asks for it. The list is checked again when the request is approved.
+
+### The approval flow
+
+1. A listed member asks for a change. The model picks a write tool. The bot posts, in the thread, the tool name and the exact arguments as plain text, and who can approve.
+2. Only the member who asked can answer. They reply in the same thread, tagging the bot, with exactly one of `approve`, `yes`, `да`, `подтверждаю` to run it, or `cancel`, `no`, `нет`, `отмена` to drop it. Case and punctuation do not matter. A longer sentence is not a decision, it goes to the model like any other question.
+3. The words are matched by the server, not by the model. The model is not asked.
+4. The bot runs the tool once and posts the result with the link.
+
+Example thread:
+
+```text
+Anna:  @Automation Bot create a Linear ticket for the billing bug
+Bot:   I need approval to run `linear.createIssue` with exactly these arguments:
+       {
+         "title": "Billing bug",
+         "description": "Checkout returns 500 for annual plans",
+         "teamKey": "ENG"
+       }
+       Reply `@Automation Bot approve` or `@Automation Bot cancel` in this thread within 10 minutes. Only @Anna can approve.
+Ben:   @Automation Bot approve
+Bot:   Only U01ANNA can approve this.
+Anna:  @Automation Bot approve
+Bot:   Done. Created Linear issue ENG-231 "Billing bug": https://linear.app/acme/issue/ENG-231
+Anna:  @Automation Bot approve
+Bot:   Nothing is waiting for approval in this thread.
+```
+
+Rules the server enforces:
+
+- **Rate limits apply.** `approve` and `cancel` go through the same limits as any other message, see [Rate limits](#rate-limits).
+- **Same user only.** The member who made the request is the only one who can approve or cancel it. Another allowed member gets `Only <member ID> can approve this.` and nothing happens. The bot's own mention of the requester in the approval message is the only mention the bot ever writes. It is built from Slack's validated user ID, never from model or tool text.
+- **Ten minutes.** After 10 minutes a request is expired. Approving it gets `This request expired.` and runs nothing.
+- **Once.** The server marks the request approved with one atomic database update before running it, so two approvals sent together run the tool once. A second `approve` gets `Nothing is waiting for approval in this thread.`
+- **One request per thread.** A new proposal in a thread cancels the one before it. A request is tied to its channel and thread and can never be approved from another.
+- **Checked again at approval.** The arguments are validated again, and the tool is looked up in the current settings. If the integration was switched off in between, the bot says the tool is no longer available and runs nothing. A request that was approved but did not finish because the server stopped is not retried. If the server cannot record the result after the tool ran, for example during shutdown, the reply still says what was done and a warning is logged.
+- **Retention.** Finished requests, and any request past its expiry, are deleted by the hourly prune after the same number of days as runs (`LOG_RETENTION_DAYS`, 30 by default).
+- **Dry run.** A dry run stores nothing and writes nothing. It shows the proposal on the run page, and a dry-run approve reports `dry-run: would run <tool> <arguments>`.
+
+Why the exact arguments are shown: the model can be steered by text it read (an issue, a comment, a Slack message). Approval is the control for that, and it only works if what you approve is exactly what runs. The bot therefore shows the validated arguments verbatim, escaped so they cannot ping anyone, and runs those same stored arguments. Read them before you approve, especially a title or body that came from something pasted into the thread.
+
+### Turning approval off
+
+The **Require approval for changes** field (`requireApproval`, on by default) controls this. When it is off, the bot validates the arguments and runs the write right away, replies with the result, and still logs it on the run as a write step (stage `executed`). Risk: anyone on the allowlist, and any text the bot reads, can then get issues created and workflows started with no human check. Leave it on unless the bot is only in a private channel of people you trust and the connected tokens can do little damage. The server logs a warning at startup while it is off.
+
+## Model choice and cost
+
+The bot uses the **Agent model** field of the Slack card. If it is empty it uses the **Escalation model** of the OpenRouter integration (`anthropic/claude-sonnet-5.5` by default). The model must support structured outputs, like the Crisp triage models.
+
+Each question costs one to seven model calls, and each call carries the thread, the question and the tool results so far, up to a few thousand tokens. A typical question with one tool is two calls. Set a credit limit on the OpenRouter key, and use a cheaper model in **Agent model** if cost matters. Only listed members can trigger calls, so the allowlist is also your cost control.
+
+## Treat everything the bot reads as untrusted
+
+Issue bodies, comments, Sentry titles and other people's Slack messages can contain text written to trick an AI model ("ignore your instructions and ..."). The bot is built for that:
+
+- The model is told that thread text and tool results are data, never instructions, and they are fenced in the prompt so they cannot close the fence.
+- The model can only call the tools listed here. It has no shell and no arbitrary HTTP. A call to anything else is refused and counted as a step. A write tool is never run by the model's turn, it only produces a proposal that a person approves.
+- Every tool result and every piece of thread text is redacted (tokens, emails, long secrets) before it goes into a prompt, and the same redaction is applied to what is logged.
+- The answer is escaped before it is posted, so a hostile issue cannot make the bot ping `@channel` or a person. Links the model writes show as plain text and Slack still makes URLs clickable.
+
+This lowers the risk. It does not remove it: a model can still repeat misleading text from an issue in its answer, and a hostile issue can still try to make it propose a change. That is why a change is never run on the model's say-so: you see the exact arguments and only the requester can approve. Read answers as you would read the issue itself.
 
 ## 1. Create the Slack app
 
@@ -33,7 +134,11 @@ settings:
   token_rotation_enabled: false
 ```
 
-`app_mentions:read` and `chat:write` are all this version uses. `channels:history` and `groups:history` let a later version read the thread it was tagged in, so granting them now avoids a reinstall.
+Scopes:
+
+- `app_mentions:read` lets Slack send the bot the messages that tag it.
+- `chat:write` lets it answer.
+- `channels:history` and `groups:history` let it read the thread it was tagged in (public and private channels). If you leave them out the bot still answers, but without the earlier messages of the thread. The run log then shows `could not read the thread, answering without it`. Reinstall the app after adding scopes.
 
 3. Click **Create**. Slack checks the request URL right away. If the server is not reachable yet or the signing secret is not saved, the check fails. Save the secrets in step 2 first, then open **Event Subscriptions** and click **Retry**. The server answers the check on its own.
 
@@ -49,15 +154,22 @@ settings:
 | Signing secret | The signing secret. Env: `SLACK_SIGNING_SECRET`. |
 | Bot enabled | On. The route `/webhooks/<project>/slack` only exists while this is on. |
 | Allowed users | Member IDs, one per line. Empty means nobody can use the bot. |
-| Bot name | Optional. Used in help text. |
+| Agent model | Optional. An OpenRouter model id. Empty uses the OpenRouter escalation model. |
+| Bot name | Optional. Shown in the approval message as `@name approve`. Empty uses the name Slack reports for the bot. |
+| Require approval for changes | On by default. See [Turning approval off](#turning-approval-off). |
 
-4. Click **Save**, then **Test connection**. It calls `auth.test` and shows the bot name and the workspace. It never shows the token, and it posts no message unless you also set the alert webhook.
+4. Set up OpenRouter (see [OpenRouter](openrouter.md)), and any service you want the bot to read: GitHub token and issues repository, Sentry auth token, PostHog, and the Linear **API key** ([Linear](linear.md)). Each one adds its tools.
+5. Click **Save**, then **Test connection**. It calls `auth.test` and shows the bot name and the workspace. It never shows the token, and it posts no message unless you also set the alert webhook.
 
 The card also shows the **Webhook URL** to use as the Slack request URL. It needs `PUBLIC_URL` on the server.
+
+The daily token check also calls `auth.test` for the bot token, and alerts when it stops working. It never posts the alert webhook's test message.
 
 ## 3. Find member IDs for the allowlist
 
 In Slack, open the person's profile, click the three dots (**More**) and choose **Copy member ID**. It looks like `U01ABCDEF23`. Paste one ID per line into **Allowed users**.
+
+The allowlist is the only gate. Someone who is not listed gets `You are not allowed to use this bot. Ask an admin to add your member ID.` at most once every 10 minutes, and nothing at all in between. No model call, tool call or thread read happens for them.
 
 ## Rate limits
 
@@ -73,17 +185,26 @@ Normal use never reaches these limits. A dry run does not use up any allowance. 
 
 ## 4. Invite the bot and try it
 
-Invite the bot to a channel (`/invite @Automation Bot`), then write `@Automation Bot hello`. A listed member gets `Got it: hello` in a thread under the message. Anyone else gets `You are not allowed to use this bot. Ask an admin to add your member ID.` at most once every 10 minutes and nothing else runs. See [Rate limits](#rate-limits).
+Invite the bot to a channel (`/invite @Automation Bot`), then write `@Automation Bot what Linear issues mention billing?`. A listed member gets the answer in a thread under the message. To continue, reply in that thread and tag the bot again: it reads the earlier messages as context.
 
-Each mention is a run of the `slack-bot` automation on the **Runs** page. Open one to see who asked, the channel and the reply. Slack retries an event it thinks was not delivered in time. The server uses the event ID as the claim, so a retry is shown as a `duplicate` run and does not reply twice.
+Each mention is a run of the `slack-bot` automation on the **Runs** page. Open one to see who asked, the channel and the reply. Every tool call is a log line `agent step` with the tool name, the redacted arguments and how long it took. The run's outcome lists the final status (`answered`, `exhausted`, `failed`, `not-configured`, `pending-approval`, `executed`, `cancelled` or `expired`), the step count and the tools used. A change shows as a step on its run: `proposed` when the bot asked for approval, then `executed` (or `cancelled`) on the run of the reply that decided it. Results shown on the run never contain tokens. Slack retries an event it thinks was not delivered in time. The server uses the event ID as the claim, so a retry is shown as a `duplicate` run and does not reply twice.
 
 ## What is checked and stored
 
 - Every request must carry a valid `X-Slack-Signature` for the signing secret and a timestamp within five minutes. Otherwise the server answers `401` and runs nothing.
 - Messages written by a bot, including this one, are ignored, so the bot cannot trigger itself.
-- Text from Slack is escaped before it is echoed, so a message cannot make the bot ping `@channel` or a person.
-- The message text is stored with the event so a run can be replayed. Stored events are redacted by key name only (keys such as `token` or `secret`), not by content, so a secret pasted into a message is stored as written. Tell people not to paste secrets to the bot.
-- To rehearse without posting, replay the run as a dry run from its page. It logs what it would reply and posts nothing.
+- The message text is stored with the event so a run can be replayed. Stored events are redacted by key name only (keys such as `token` or `secret`), not by content, so a secret pasted into a message is stored as written. Tell people not to paste secrets to the bot. The text is redacted by content before it goes to the model and before it is logged.
+- To rehearse without posting, replay the run as a dry run from its page. The bot still reads (model and tools), logs what it would reply and posts nothing.
+- A failed answer does not fail the run: the thread gets `I could not do that: ...` and the outcome status says `failed`. A failed Slack post does fail the run, and Slack's retry can reply again.
+
+## Known limits
+
+- **The bot reads with the shared token.** Every read uses the token or API key of the project, not the access of the person who asked. Anyone on the allowlist can learn what those tokens can see, so give them only access you are happy to share with that list.
+- **One Slack workspace per project is assumed.** A pending request is found by project, channel and thread. The workspace ID is stored with it but not compared. Do not point one project at an app installed in several workspaces.
+- **Sentry uses the first organization.** `sentry.listIssues` searches the first organization the auth token can see. A token that belongs to several organizations always reads from the same one.
+- **A `crisp` fix workflow shows only an issue number.** Starting the Crisp fix workflow passes an `issue_number` input, so the approval message shows just that number. Open the issue and read it before you approve, because the workflow works from the issue text.
+- **`requireApproval: false` removes the human check.** With it off, anyone on the allowlist, and any text the bot reads, can get issues created, labels added and allowed workflows started at once. See [Turning approval off](#turning-approval-off).
+- **Stored Slack events are redacted by key name and by secret shape only.** Keys such as `token`, `secret` or `key` are replaced, and values that look like a Slack, GitHub, OpenRouter, Linear or PostHog token, a bearer token, a JWT or a Slack webhook URL are replaced wherever they are. A secret in some other form, such as a password pasted in a sentence, is stored as written. Tell people not to paste secrets into Slack when they talk to the bot.
 
 ## Troubleshooting
 
@@ -93,3 +214,7 @@ Each mention is a run of the `slack-bot` automation on the **Runs** page. Open o
 | `invalid_auth` in Test connection | The bot token is wrong or the app was reinstalled and the token rotated. |
 | The bot never answers | It is not in the channel, or the member ID is not in **Allowed users** (you get the denial then). |
 | `channel_not_found` in the run error | The bot is not a member of that channel. Invite it. |
+| `The AI model is not configured.` | The OpenRouter API key is not set. |
+| `I could not do that: ... does not match the schema` | The Agent model does not support structured outputs. Pick another model. |
+| The bot says it has no way to look something up | The service for that question has no tool: its token is not set, or for GitHub the **Issues repository** is empty. |
+| The run log says `could not read the thread` | The app lacks `channels:history` or `groups:history`, or the bot is not in the channel. |

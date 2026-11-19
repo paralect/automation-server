@@ -1,8 +1,9 @@
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, withDryRun, type Event, type Logger } from "@automation-server/core";
+import { slackBotOutcomeSchema } from "@automation-server/sources/slack/outcome";
 import { describe, expect, test } from "bun:test";
 
-import { createSlackBot, DENIED_REPLY, escapeSlackText } from "../src/slackBot/automation";
-import type { PostMessage, SlackBotClient } from "../src/slackBot/client";
+import { createSlackBot, DENIED_REPLY, type SlackBotHandler } from "../src/slackBot/automation";
+import { escapeSlackText, type PostMessage, type SlackBotClient } from "../src/slackBot/client";
 import { BUSY_REPLY, createSlackBotLimiter, RATE_LIMITED_REPLY, type SlackBotLimiter } from "../src/slackBot/limiter";
 
 const mentionEvent = (user: string, patch: Record<string, unknown> = {}, externalId = "Ev1"): Event => ({
@@ -14,7 +15,7 @@ const mentionEvent = (user: string, patch: Record<string, unknown> = {}, externa
   payload: { team: "T1", channel: "C1", user, text: "create a ticket", ts: "100.1", threadTs: null, ...patch },
 });
 
-const setup = ({ allowedUsers = ["UOK"], dry = false, handler, limiter }: { allowedUsers?: string[]; dry?: boolean; handler?: (m: unknown) => Promise<string>; limiter?: SlackBotLimiter } = {}) => {
+const setup = ({ allowedUsers = ["UOK"], dry = false, handler, limiter }: { allowedUsers?: string[]; dry?: boolean; handler?: SlackBotHandler; limiter?: SlackBotLimiter } = {}) => {
   const posted: PostMessage[] = [];
   const logs: string[] = [];
   const log: Logger = {
@@ -24,6 +25,7 @@ const setup = ({ allowedUsers = ["UOK"], dry = false, handler, limiter }: { allo
   };
   const client: SlackBotClient = {
     authTest: async () => ({ botName: "b", botUserId: "UBOT", team: "t", teamId: "T1" }),
+    replies: async () => [],
     postMessage: async (message) => {
       posted.push(message);
       return { ts: "200.1" };
@@ -62,7 +64,7 @@ describe("slack-bot automation", () => {
     const t = setup({
       handler: async () => {
         ran += 1;
-        return "secret work";
+        return { reply: "secret work" };
       },
     });
     await t.send(mentionEvent("UNOPE"));
@@ -130,7 +132,7 @@ describe("slack-bot automation", () => {
 
     test("the seventh quick request gets one slow-down notice and later ones get nothing", async () => {
       let ran = 0;
-      const t = setup({ limiter: limiter(), handler: async () => (ran++, "ok") });
+      const t = setup({ limiter: limiter(), handler: async () => (ran++, { reply: "ok" }) });
       for (let i = 0; i < 9; i++) await t.send(mentionEvent("UOK", {}, `Ev${i}`));
       expect(ran).toBe(6);
       expect(t.posted.map((p) => p.text)).toEqual([...Array(6).fill("ok"), RATE_LIMITED_REPLY]);
@@ -147,7 +149,7 @@ describe("slack-bot automation", () => {
     test("a fifth concurrent mention gets the busy reply and the slots free up afterwards", async () => {
       let release!: () => void;
       const gate = new Promise<void>((r) => (release = r));
-      const t = setup({ allowedUsers: ["U1", "U2", "U3", "U4", "U5"], limiter: limiter(), handler: async () => (await gate, "ok") });
+      const t = setup({ allowedUsers: ["U1", "U2", "U3", "U4", "U5"], limiter: limiter(), handler: async () => (await gate, { reply: "ok" }) });
       const sends = ["U1", "U2", "U3", "U4", "U5"].map((u, i) => t.send(mentionEvent(u, {}, `Ev${i}`)));
       await Bun.sleep(20);
       expect(t.posted.map((p) => p.text)).toEqual([BUSY_REPLY]);
@@ -160,10 +162,9 @@ describe("slack-bot automation", () => {
     test("a handler that throws frees its slot", async () => {
       const t = setup({ limiter: limiter(), handler: async () => Promise.reject(new Error("boom")) });
       for (let i = 0; i < 5; i++) await t.send(mentionEvent("UOK", {}, `Ev${i}`));
-      const run = t.activity.queryRuns({ limit: 1 }).items[0]!;
-      expect(run.status).toBe("failed");
       await t.send(mentionEvent("UOK", {}, "Ev9"));
-      expect(t.posted).toEqual([]);
+      expect(t.posted.every((p) => p.text.startsWith("I could not do that: "))).toBe(true);
+      expect(t.posted).toHaveLength(6);
     });
 
     test("a dry run spends no quota", async () => {
@@ -176,11 +177,71 @@ describe("slack-bot automation", () => {
     });
   });
 
+  test("the handler gets the event, the run context, the client and the settings", async () => {
+    let seen: Parameters<SlackBotHandler>[0] | undefined;
+    const t = setup({
+      handler: async (input) => {
+        seen = input;
+        return { reply: "ok" };
+      },
+    });
+    await t.send(mentionEvent("UOK"));
+    expect(seen!.event.payload.text).toBe("create a ticket");
+    expect(seen!.config.allowedUsers).toEqual(["UOK"]);
+    expect(typeof seen!.client.postMessage).toBe("function");
+    expect(typeof seen!.ctx.log.info).toBe("function");
+  });
+
+  test("steps from the handler are logged one by one and summarised in a compact outcome", async () => {
+    const t = setup({
+      handler: async () => ({
+        reply: "done",
+        status: "answered",
+        steps: [
+          { index: 1, tool: "linear.searchIssues", args: '{"query":"billing"}', ok: true, durationMs: 12 },
+          { index: 2, tool: "linear.getIssue", args: '{"identifier":"ENG-1"}', ok: false, durationMs: 3, error: "not found" },
+        ],
+      }),
+    });
+    await t.send(mentionEvent("UOK"));
+    const stepLogs = t.logs.filter((l) => l.includes("agent step"));
+    expect(stepLogs).toHaveLength(2);
+    expect(stepLogs[0]).toContain("linear.searchIssues");
+    const run = t.activity.queryRuns({ limit: 1 }).items[0]!;
+    const outcome = slackBotOutcomeSchema.parse(t.activity.getRun(run.id)?.run.outcome);
+    expect(outcome.agent).toEqual({
+      status: "answered",
+      stepCount: 2,
+      toolsUsed: ["linear.searchIssues", "linear.getIssue"],
+      steps: [
+        { tool: "linear.searchIssues", ok: true, durationMs: 12 },
+        { tool: "linear.getIssue", ok: false, durationMs: 3 },
+      ],
+    });
+  });
+
+  test("a handler that throws still answers in the thread and the run succeeds, with the reason scrubbed", async () => {
+    const t = setup({
+      handler: async () => {
+        throw new Error("model down, token=hunter2hunter2 <!channel>");
+      },
+    });
+    await t.send(mentionEvent("UOK"));
+    expect(t.posted).toHaveLength(1);
+    const text = t.posted[0]!.text;
+    expect(text.startsWith("I could not do that: ")).toBe(true);
+    expect(text).not.toContain("hunter2");
+    expect(text).not.toContain("<!channel>");
+    const run = t.activity.queryRuns({ limit: 1 }).items[0]!;
+    expect(run.status).toBe("succeeded");
+  });
+
   test("a failed post fails the run and releases the claim so Slack's retry can reply", async () => {
     let fail = true;
     const posted: string[] = [];
     const client: SlackBotClient = {
       authTest: async () => ({ botName: "b", botUserId: "u", team: "t", teamId: "T" }),
+      replies: async () => [],
       postMessage: async ({ text }) => {
         if (fail) throw new Error("ratelimited");
         posted.push(text);

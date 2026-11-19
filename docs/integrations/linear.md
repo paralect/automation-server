@@ -50,7 +50,7 @@ The integration uses the token from the GitHub integration. Give it Actions: Rea
 
 ## Configuration
 
-All values are saved from the admin Integrations page (or `settings.update`) and take effect without a restart. There are no environment variables for Linear. The source registers once the webhook secret, trigger label and target repository are set. The automation registers once the GitHub token is set too.
+All values are saved from the admin Integrations page (or `settings.update`) and take effect without a restart. The source registers once the webhook secret, trigger label and target repository are set. The automation registers once the GitHub token is set too.
 
 | Setting | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -58,5 +58,6 @@ All values are saved from the admin Integrations page (or `settings.update`) and
 | `linear.triggerLabel` | yes | | Label name that starts an implementation. Case-insensitive. |
 | `linear.targetRepo` | yes | | `owner/name` of the repository with the workflow installed. |
 | `linear.workflowFile` | no | `linear-implement.yml` | Workflow file name in `.github/workflows/`. |
+| `linear.apiKey` | no | | Personal API key (`LINEAR_API_KEY` also works). Stored encrypted. Not needed for the label trigger. It lets the Slack bot search and read issues, and create issues and add labels once its changes are approved. Test connection checks it with a `viewer` query. |
 | `linear.ref` | no | empty | Branch to run the workflow on and open the PR against. Empty means the default branch. |
 | `github.token` | yes | | From the GitHub integration (`GITHUB_TOKEN` also works). |

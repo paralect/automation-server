@@ -66,7 +66,7 @@ Every run and log line is recorded and shown in the admin, see [docs/observabili
 | Crisp | source + action | Verifies Crisp Web Hooks (`POST /webhooks/crisp`) and, when the trigger segment is added, classifies the conversation with an LLM through OpenRouter. Posts a private note, and by mode opens a GitHub issue or dispatches the Codex fix workflow (`crisp-triage`) | [docs/integrations/crisp.md](docs/integrations/crisp.md) |
 | PostHog | scheduled job | Sends a weekly week-over-week PostHog report to Slack (`posthog-weekly-report`) | [docs/integrations/posthog.md](docs/integrations/posthog.md) |
 | Slack | notifier and webhook | Posts to a Slack incoming webhook when an automation fails N times in a row | [docs/integrations/slack.md](docs/integrations/slack.md) |
-| Slack bot | webhook `/webhooks/:project/slack` | Replies in a thread when an allowed member tags the bot (`slack-bot`) | [docs/integrations/slack.md](docs/integrations/slack.md#slack-bot) |
+| Slack bot | webhook `/webhooks/:project/slack` | An allowed member tags the bot. An LLM through OpenRouter answers in the thread, using read tools for GitHub issues, Sentry, PostHog and Linear. It can propose creating Linear or GitHub issues, labelling a ticket and starting an allowed workflow, and runs one only after the requester replies `approve` (`slack-bot`) | [docs/integrations/slack.md](docs/integrations/slack.md#slack-bot) |
 
 New here? Start with the [step-by-step setup guides](docs/setup/README.md) (GitHub, OpenRouter, Sentry, Linear, Crisp, PostHog, Slack alerts, Slack bot), which have annotated screenshots.
 
