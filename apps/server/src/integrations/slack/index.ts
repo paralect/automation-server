@@ -1,19 +1,53 @@
-import { createSlackBot, createSlackBotClient, postToSlack } from "@automation-server/automations";
+import {
+  buildReadTools,
+  createAgent,
+  createAgentHandler,
+  createOpenRouterClient,
+  createSlackBot,
+  createSlackBotClient,
+  postToSlack,
+} from "@automation-server/automations";
 import { createSlackSource } from "@automation-server/sources";
+import { parseRepo, type ResolvedConfig } from "@automation-server/settings";
 
 import { defineModule } from "../module";
 
+type Deps = { fetch?: typeof fetch };
+
+// The read tools need only the token of each service, not its webhook settings, so a team can give the bot Linear or Sentry access without wiring their webhooks.
+function readTools({ github, sentry, posthog, linear }: ResolvedConfig, { fetch }: Deps) {
+  const { authToken, apiBaseUrl } = sentry.values;
+  const { apiKey } = linear.values;
+  return buildReadTools({
+    github: github.configured && github.values.repo ? { token: github.values.token, repo: parseRepo(github.values.repo) } : undefined,
+    sentry: authToken ? { authToken, apiBaseUrl: apiBaseUrl ?? "https://sentry.io" } : undefined,
+    posthog: posthog.configured ? posthog.values : undefined,
+    linear: apiKey ? { apiKey } : undefined,
+    fetch,
+  });
+}
+
 export const slack = defineModule({
   id: "slack",
-  build({ slack }, { log, fetch }) {
+  build(config, { log, fetch }) {
+    const { slack, openrouter } = config;
     if (!slack.configured) return {};
-    const { botEnabled, botToken, signingSecret, allowedUsers = [], apiBaseUrl } = slack.values;
+    const { botEnabled, botToken, signingSecret, allowedUsers = [], apiBaseUrl, agentModel } = slack.values;
     if (!botEnabled || !botToken || !signingSecret) return {};
     if (allowedUsers.length === 0) log.warn("slack bot is on but no member IDs are allowed, so it will only answer with a denial");
+
+    const tools = readTools(config, { fetch });
+    const agent = createAgent({
+      model: openrouter.configured ? createOpenRouterClient({ apiKey: openrouter.values.apiKey, fetch }) : null,
+      modelName: agentModel || openrouter.values.escalationModel || "anthropic/claude-sonnet-5.5",
+      tools,
+    });
+    log.info("slack bot ready", { tools: tools.map((t) => t.name), model: openrouter.configured ? "configured" : "missing" });
+
     const client = createSlackBotClient({ token: botToken, apiBaseUrl, fetch });
     return {
       sources: [createSlackSource({ signingSecret })],
-      automations: [createSlackBot({ client, allowedUsers })],
+      automations: [createSlackBot({ client, allowedUsers, handler: createAgentHandler(agent) })],
     };
   },
   testHasSideEffects: true,

@@ -3,6 +3,8 @@ import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-se
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 
+import { NOT_CONFIGURED_REPLY } from "@automation-server/automations";
+
 import { createRuntime } from "../src/runtime";
 import { slack } from "../src/integrations/slack";
 import { createWebhookRoutes } from "../src/webhooks";
@@ -14,8 +16,17 @@ const BASE_ENV = { SLACK_BOT_TOKEN: TOKEN, SLACK_SIGNING_SECRET: SIGNING };
 
 type SlackCall = { method: string; auth: string | null; body: Record<string, unknown> };
 
-const setup = ({ botEnabled = true, allowed = ["UOK"], env = BASE_ENV }: { botEnabled?: boolean; allowed?: string[]; env?: Record<string, string> } = {}) => {
+type Step = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null };
+
+const setup = ({
+  botEnabled = true,
+  allowed = ["UOK"],
+  env = BASE_ENV,
+  model = [],
+}: { botEnabled?: boolean; allowed?: string[]; env?: Record<string, string>; model?: Step[] } = {}) => {
   const calls: SlackCall[] = [];
+  const modelRequests: { system: string; user: string }[] = [];
+  const withModel = model.length > 0;
   const hookCalls: string[] = [];
   const logs: string[] = [];
   const log: Logger = {
@@ -29,6 +40,17 @@ const setup = ({ botEnabled = true, allowed = ["UOK"], env = BASE_ENV }: { botEn
       hookCalls.push(target);
       return new Response("ok");
     }
+    if (target === "https://openrouter.ai/api/v1/chat/completions") {
+      const request = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] };
+      modelRequests.push({ system: request.messages[0]!.content, user: request.messages[1]!.content });
+      const step = model.shift();
+      return step ? Response.json({ choices: [{ message: { content: JSON.stringify(step) } }] }) : new Response("{}", { status: 500 });
+    }
+    if (target === "https://api.linear.app/graphql") {
+      return Response.json({
+        data: { searchIssues: { nodes: [{ identifier: "ENG-1", title: "Billing <!channel> fails", url: "https://linear.app/x/ENG-1", state: { name: "Todo" }, assignee: null }] } },
+      });
+    }
     const method = target.replace("https://slack.com/api/", "");
     const headers = init?.headers as Record<string, string>;
     calls.push({ method, auth: headers.authorization ?? null, body: JSON.parse(String(init?.body)) });
@@ -41,6 +63,7 @@ const setup = ({ botEnabled = true, allowed = ["UOK"], env = BASE_ENV }: { botEn
     set: [
       { key: "slack.botEnabled", json: JSON.stringify(botEnabled), secret: false },
       { key: "slack.allowedUsers", json: JSON.stringify(allowed), secret: false },
+      ...(withModel ? [{ key: "openrouter.apiKey", json: JSON.stringify("sk-or-test-key-0123456789"), secret: true }] : []),
     ],
   });
   const runtime = createRuntime({
@@ -73,18 +96,47 @@ const setup = ({ botEnabled = true, allowed = ["UOK"], env = BASE_ENV }: { botEn
   };
   const unsigned = (payload: unknown) => app.request("/webhooks/slack", { method: "POST", body: JSON.stringify(payload) });
   const replies = () => calls.filter((c) => c.method === "chat.postMessage").map((c) => c.body);
-  return { deliver, unsigned, mention, replies, calls, hookCalls, logs, dispatcher, runtime, activity };
+  return { deliver, unsigned, mention, replies, calls, hookCalls, logs, dispatcher, runtime, activity, modelRequests };
 };
 
 describe("slack bot over the webhook route", () => {
-  test("a listed user's signed mention gets a threaded reply", async () => {
+  test("a listed user's signed mention gets a threaded reply, and without OpenRouter the bot says so", async () => {
     const t = setup();
     const res = await t.deliver(t.mention());
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     await t.dispatcher.drain(1000);
-    expect(t.replies()).toEqual([{ channel: "C1", thread_ts: "100.1", text: "Got it: hello team" }]);
+    expect(t.replies()).toEqual([{ channel: "C1", thread_ts: "100.1", text: NOT_CONFIGURED_REPLY }]);
     expect(t.calls[0]!.auth).toBe(`Bearer ${TOKEN}`);
+    expect(t.activity.queryRuns({ limit: 1 }).items[0]!.status).toBe("succeeded");
+  });
+
+  test("with OpenRouter and a Linear key the model sees only the Linear tools, calls one, and the reply is escaped", async () => {
+    const t = setup({
+      env: { ...BASE_ENV, LINEAR_API_KEY: "lin_api_secretsecretsecret" },
+      model: [
+        { type: "tool", tool: "linear.searchIssues", argsJson: '{"query":"billing"}', text: null },
+        { type: "final", tool: null, argsJson: null, text: "ENG-1 <!channel> is about billing" },
+      ],
+    });
+    await t.deliver(t.mention({ text: "<@UBOT> what Linear issues mention billing?" }));
+    await t.dispatcher.drain(1000);
+    expect(t.replies()).toEqual([{ channel: "C1", thread_ts: "100.1", text: "ENG-1 &lt;!channel&gt; is about billing" }]);
+    const system = t.modelRequests[0]!.system;
+    expect(system).toContain("linear.searchIssues");
+    for (const absent of ["github.", "sentry.", "posthog."]) expect(system).not.toContain(absent);
+    expect(t.modelRequests[1]!.user).toContain("Billing ‹!channel› fails");
+    const everything = JSON.stringify([t.logs, t.replies(), t.activity.queryLogs({ limit: 50 }).items]);
+    expect(everything).not.toContain("lin_api_secretsecretsecret");
+    expect(everything).not.toContain("sk-or-test-key");
+  });
+
+  test("an unlisted user never reaches the model", async () => {
+    const t = setup({ model: [{ type: "final", tool: null, argsJson: null, text: "should not run" }] });
+    await t.deliver(t.mention({ user: "UNOPE" }));
+    await t.dispatcher.drain(1000);
+    expect(t.modelRequests).toEqual([]);
+    expect(t.replies()).toHaveLength(1);
   });
 
   test("Slack's retry of the same event_id runs once through the real claim", async () => {

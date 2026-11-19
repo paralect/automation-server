@@ -10,6 +10,7 @@ export * from "./redact";
 export * from "./slackBot/agent";
 export * from "./slackBot/automation";
 export * from "./slackBot/client";
+export * from "./slackBot/handler";
 export * from "./slackBot/thread";
 export * from "./slackBot/tools";
 export * from "./sentryToGithubIssue/automation";
