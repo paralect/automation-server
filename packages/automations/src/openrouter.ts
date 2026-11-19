@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { redactText } from "./redact";
+import { redactUntrusted } from "./redact";
 
 const API = "https://openrouter.ai/api/v1";
 const TIMEOUT_MS = 90_000;
@@ -64,7 +64,7 @@ export function createOpenRouterClient(config: OpenRouterConfig) {
     if (!res.ok) {
       const parsed = errorBody.safeParse(json);
       const detail = parsed.success ? (parsed.data.error?.message ?? "") : "";
-      const safe = redactText(detail.split(config.apiKey).join("[redacted]")).slice(0, 300);
+      const safe = redactUntrusted(detail.split(config.apiKey).join("[redacted]")).slice(0, 300);
       throw new OpenRouterError(`OpenRouter ${method} ${path} failed with status ${res.status}${safe ? `: ${safe}` : ""}`, res.status);
     }
     return json;

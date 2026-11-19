@@ -5,6 +5,9 @@ import { scrub } from "../posthogWeeklyReport/scrub";
 export const SLACK_API = "https://slack.com/api";
 const TIMEOUT_MS = 10_000;
 
+// Slack treats <!channel> and <@U123> as live markup, so text that came from a person or a tool must never reach it unescaped.
+export const escapeSlackText = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 export type SlackBotClientConfig = {
   token: string;
   apiBaseUrl?: string;

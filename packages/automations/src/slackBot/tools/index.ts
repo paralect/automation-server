@@ -8,7 +8,7 @@ import { sentryTools } from "./sentry";
 import type { AnyTool } from "./types";
 
 export * from "./registry";
-export * from "./types";
+export { defineTool, type AnyTool, type Tool, type ToolContext, type ToolKind, type ToolResult } from "./types";
 
 // An integration that is left out has no tools, so the model is never told it exists.
 export type ReadToolsConfig = {
