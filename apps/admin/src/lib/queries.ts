@@ -53,6 +53,7 @@ export const runsQuery = (project: string, filters: RunsSearch) =>
   })
 
 const CRISP_POLL_MS = 10_000
+const RUN_POLL_MS = 2000
 
 export const crispQuery = (project: string, filters: CrispSearch) =>
   infiniteQueryOptions({
@@ -74,6 +75,7 @@ export const runQuery = (project: string, id: string) =>
   queryOptions({
     queryKey: [project, "run", id],
     queryFn: () => getRun({ data: { project, id } }),
+    refetchInterval: (query) => (query.state.data?.run.status === "running" ? RUN_POLL_MS : false),
   })
 
 export const systemQuery = (project: string) =>

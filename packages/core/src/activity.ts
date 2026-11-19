@@ -1,3 +1,5 @@
+import type { StoredEvent } from "./redact";
+import type { Event } from "./event";
 import type { LogFields } from "./logger";
 
 export type LogLevel = "info" | "warn" | "error";
@@ -35,6 +37,9 @@ export type RunRecord = {
   readonly error: string | null;
   readonly outcome?: RunOutcome | null;
   readonly readAt?: string | null;
+  readonly replayOf?: string;
+  readonly hasEvent: boolean;
+  readonly dryRun: boolean;
 };
 
 export type Page<T> = { readonly items: T[]; readonly nextCursor: number | null };
@@ -50,6 +55,8 @@ export type LogQuery = {
   limit: number;
 };
 
+export type DryRunFilter = "include" | "exclude" | "only";
+
 export type RunQuery = {
   project?: string;
   decision?: string;
@@ -58,6 +65,7 @@ export type RunQuery = {
   automation?: string;
   source?: string;
   search?: string;
+  dryRun?: DryRunFilter;
   before?: number;
   limit: number;
 };
@@ -78,7 +86,13 @@ export type ActivityStats = {
   readonly recentFailures: RunRecord[];
 };
 
-export type RunStart = Pick<RunRecord, "automation" | "source" | "kind" | "externalId"> & { startedAt: string; project?: string };
+export type RunStart = Pick<RunRecord, "automation" | "source" | "kind" | "externalId"> & {
+  startedAt: string;
+  project?: string;
+  event?: Event;
+  replayOf?: string;
+  dryRun?: boolean;
+};
 
 export interface ActivityStore {
   recordLog(entry: LogEntry): void;
@@ -91,8 +105,11 @@ export interface ActivityStore {
   setRunRead(id: string, readAt: string | null): boolean;
   markRunsRead(query: { project?: string; automation: string; readAt: string }): number;
   unreadCount(query: { project?: string; automation: string }): number;
-  getRun(id: string): { run: RunRecord; logs: StoredLog[] } | null;
+  getRun(id: string): { run: RunRecord; logs: StoredLog[]; event?: StoredEvent } | null;
   stats(sinceIso: string, bucketMs: number, project?: string): ActivityStats;
+  // Failed runs in a row, newest first, ending at the first success or at `cap`. `running`, `duplicate`, dry runs and runs killed by a restart are skipped, not counted and not streak breakers.
+  // An undefined project means no project filter, as in queryRuns.
+  consecutiveFailures(project: string | undefined, automation: string, cap: number): number;
   failInterruptedRuns(finishedAt: string): number;
   prune(beforeIso: string): number;
   close(): void;

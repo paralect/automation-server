@@ -17,8 +17,12 @@ export const logsSearch = z.object({
 })
 export type LogsSearch = z.infer<typeof logsSearch>
 
+export const DRY_RUN_FILTERS = ["include", "exclude", "only"] as const
+export type DryRunFilter = (typeof DRY_RUN_FILTERS)[number]
+
 export const runsSearch = z.object({
   status: z.enum(RUN_STATUSES).optional().catch(undefined),
+  dryRun: z.enum(DRY_RUN_FILTERS).optional().catch(undefined),
   source: text,
   automation: text,
   q: text,

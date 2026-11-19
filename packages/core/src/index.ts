@@ -1,5 +1,6 @@
 export * from "./automation";
 export * from "./event";
+export * from "./redact";
 export * from "./logger";
 export * from "./source";
 export * from "./store";
@@ -7,5 +8,7 @@ export * from "./dispatcher";
 export * from "./sqliteStore";
 export * from "./activity";
 export * from "./sqliteActivityStore";
+export * from "./pendingActions";
+export * from "./sqlitePendingActionStore";
 export * from "./job";
 export * from "./scheduler";

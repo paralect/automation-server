@@ -68,6 +68,7 @@ export const MODE_COPY = {
   shadow: "Shadow: decisions are only recorded, nothing is written to GitHub.",
   issue: "Issue: creates GitHub issues, never starts a fix.",
   fix: "Fix: creates GitHub issues and starts the Codex fix for eligible bugs.",
+  "dry-run": "Dry run: triages every conversation like fix mode would, but writes nothing to Crisp or GitHub. Each run on the Runs page shows what it would have done.",
 } as const
 
 export const isCrispMode = (mode: string): mode is keyof typeof MODE_COPY => Object.hasOwn(MODE_COPY, mode)

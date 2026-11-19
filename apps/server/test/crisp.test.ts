@@ -49,6 +49,7 @@ function setup(values: { openrouter?: boolean; mode?: string; github?: boolean }
       if (url.pathname.endsWith("/key")) return Response.json({ data: { label: "prod", limit: null, usage: 0 } });
       return Response.json({ choices: [{ message: { content: JSON.stringify(verdict) } }] });
     }
+    if (url.host === "api.github.com" && method === "GET") return Response.json([]);
     return new Response("unexpected", { status: 500 });
   }) as typeof fetch;
   const record = (m: string, f?: Record<string, unknown>) => logs.push(JSON.stringify({ m, f }));
@@ -144,6 +145,22 @@ describe("crisp integration", () => {
     expect(logged).not.toContain("c@example.com");
     expect(logged).not.toContain(PLUGIN_KEY);
     expect(logged).not.toContain(OR_KEY);
+  });
+
+  test("dry-run mode marks live runs as dry, reads, and writes nothing to Crisp or GitHub", async () => {
+    const t = setup({ mode: "dry-run", github: true });
+    expect((await t.deliver()).status).toBe(200);
+    await t.dispatcher.drain(2000);
+    const writes = t.calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.url.host}`);
+    expect(new Set(writes)).toEqual(new Set(["POST openrouter.ai"]));
+    const run = t.activity.queryRuns({ limit: 10 }).items[0];
+    expect(run).toMatchObject({ automation: "crisp-triage", status: "succeeded", dryRun: true });
+    expect(run?.outcome).toMatchObject({ dryRun: true, decision: "issue", wouldDo: { issue: { labels: expect.arrayContaining(["crisp", "bug"]) } } });
+    expect(t.activity.stats("2000-01-01T00:00:00.000Z", 3_600_000).runs.succeeded).toBe(0);
+  });
+
+  test("dry-run mode without a GitHub repository registers no automation", () => {
+    expect(setup({ mode: "dry-run" }).runtime.automations()).toHaveLength(0);
   });
 
   test("the connection tests reach Crisp and OpenRouter", async () => {

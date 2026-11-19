@@ -45,7 +45,17 @@ describe("openrouter client", () => {
 
   test("key() reads the key's label and usage", async () => {
     const { fn, calls } = mockFetch(() => json(200, { data: { label: "prod", limit: null, usage: 1.5 } }));
-    expect(await createOpenRouterClient({ apiKey: KEY, fetch: fn }).key()).toEqual({ label: "prod", limit: null, usage: 1.5 });
+    expect(await createOpenRouterClient({ apiKey: KEY, fetch: fn }).key()).toEqual({ label: "prod", limit: null, usage: 1.5, expiresAt: null });
     expect(calls[0]?.url).toBe("https://openrouter.ai/api/v1/key");
+  });
+
+  test("requests never follow a redirect, so the bearer key cannot be forwarded", async () => {
+    const seen: RequestInit["redirect"][] = [];
+    const fn = (async (_input: string | URL | Request, init?: RequestInit) => {
+      seen.push(init?.redirect);
+      return json(200, { data: { label: "prod", limit: null, usage: 1.5 } });
+    }) as unknown as typeof fetch;
+    await createOpenRouterClient({ apiKey: KEY, fetch: fn }).key();
+    expect(seen).toEqual(["error"]);
   });
 });

@@ -5,6 +5,7 @@ export type ServerConfig = {
   retentionDays: number;
   encryptionKey?: string;
   publicUrl?: string;
+  adminPublicUrl?: string;
 };
 
 export type RawEnv = {
@@ -14,6 +15,7 @@ export type RawEnv = {
   LOG_RETENTION_DAYS: number;
   SETTINGS_ENCRYPTION_KEY?: string;
   PUBLIC_URL?: string;
+  ADMIN_PUBLIC_URL?: string;
 };
 
 export function buildConfig(env: RawEnv): ServerConfig {
@@ -24,6 +26,7 @@ export function buildConfig(env: RawEnv): ServerConfig {
     retentionDays: env.LOG_RETENTION_DAYS,
     encryptionKey: env.SETTINGS_ENCRYPTION_KEY || undefined,
     publicUrl: env.PUBLIC_URL ? env.PUBLIC_URL.replace(/\/+$/, "") : undefined,
+    adminPublicUrl: env.ADMIN_PUBLIC_URL ? env.ADMIN_PUBLIC_URL.replace(/\/+$/, "") : undefined,
   };
 }
 

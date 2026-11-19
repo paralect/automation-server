@@ -15,7 +15,7 @@ export function createSentryToGithubIssue(config: SentryToGithubIssueConfig): Au
   return defineAutomation({
     name: SENTRY_TO_GITHUB_ISSUE,
     matches: isSentryIssueAlert,
-    async run(event, { log }) {
+    async run(event, { log, dryRun }) {
       const alert = event.payload;
       const decision = shouldHandle(alert, config);
       if (!decision.handle) {
@@ -30,6 +30,10 @@ export function createSentryToGithubIssue(config: SentryToGithubIssueConfig): Au
       }
 
       const issue = formatIssue(alert);
+      if (dryRun) {
+        log.info("dry-run: would create github issue", { issueId: alert.issueId, title: issue.title, labels: issue.labels });
+        return;
+      }
       await github.ensureLabels(issue.labels);
       const created = await github.createIssue(issue);
       log.info("created github issue", { issueId: alert.issueId, number: created.number, url: created.html_url });

@@ -1,9 +1,11 @@
-import type {
-  ActivityStats,
-  Page,
-  RunRecord,
-  StoredLog,
-  StoredRun,
+import {
+  ClaimStoreError,
+  type ActivityStats,
+  type Page,
+  type RunRecord,
+  type StoredEvent,
+  type StoredLog,
+  type StoredRun,
 } from "@automation-server/core";
 import {
   describeSettings,
@@ -26,6 +28,7 @@ import { z } from "zod";
 
 import { adminProcedure, o } from "../index";
 import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../context";
+import { canReplay, SCHEDULE_SOURCE } from "../replay";
 import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
 import { DAY_MS, HOUR_MS } from "../time";
 import { WorkflowInstallError, type InstallResult, type WorkflowCheck, type WorkflowStatus } from "../workflowInstaller";
@@ -85,6 +88,30 @@ function runInProject(context: Context, project: string, id: string) {
   const found = context.activity.getRun(id);
   if (!found || found.run.project !== inProject(context, project)) throw new ORPCError("NOT_FOUND");
   return found;
+}
+
+const precondition = (message: string) => new ORPCError("PRECONDITION_FAILED", { message });
+
+async function replayEvent(context: Context, project: string, run: RunRecord, event: StoredEvent | undefined, dryRun: boolean) {
+  if (!event) throw precondition("This run has no stored event");
+  let result;
+  try {
+    result = await context.replay.event({ project, automation: run.automation, event, replayOf: run.id, dryRun });
+  } catch (err) {
+    if (err instanceof ClaimStoreError) throw new ORPCError("BAD_GATEWAY", { message: "The claim store is unavailable, so the replay was not started. Try again in a moment." });
+    throw err;
+  }
+  if (result.outcome === "unknown-automation") throw precondition(`${run.automation} is no longer configured for this project`);
+  if (result.outcome === "duplicate") throw precondition("This event already ran successfully");
+  return result.runId;
+}
+
+async function replayJob(context: Context, project: string, run: RunRecord) {
+  const result = await context.replay.job(project, run.automation, `replay:${new Date().toISOString()}`, run.id);
+  if (result.status === "started") return result.runId;
+  throw precondition(
+    result.status === "busy" ? `${run.automation} is already running` : `${run.automation} is no longer configured for this project`,
+  );
 }
 
 function projectCall<T>(run: () => T): T {
@@ -168,14 +195,24 @@ export const appRouter = {
 
   runs: {
     list: adminProcedure
-      .input(z.object({ project, status: status.optional(), automation: text, source: text, search: text, ...page }))
+      .input(z.object({ project, status: status.optional(), automation: text, source: text, search: text, dryRun: z.enum(["include", "exclude", "only"]).optional(), ...page }))
       .output(type<Page<StoredRun>>())
       .handler(({ input, context }) => context.activity.queryRuns({ ...input, project: inProject(context, input.project) })),
     get: adminProcedure
       .input(z.object({ project, id: z.string().min(1) }))
-      .output(type<{ run: RunRecord; logs: StoredLog[] }>())
-      .handler(({ input, context }) => {
-        return runInProject(context, input.project, input.id);
+      .output(type<{ run: RunRecord; logs: StoredLog[]; event?: StoredEvent }>())
+      .handler(({ input, context }) => runInProject(context, input.project, input.id)),
+    replay: adminProcedure
+      .input(z.object({ project, id: z.string().min(1), dryRun: z.boolean().optional() }))
+      .output(type<{ runId: string; status: "started" }>())
+      .handler(async ({ input, context }) => {
+        const { run, event } = runInProject(context, input.project, input.id);
+        const dryRun = input.dryRun === true;
+        const check = canReplay(run, { dryRun });
+        if (!check.ok) throw new ORPCError("PRECONDITION_FAILED", { message: check.reason });
+        const started = run.source === SCHEDULE_SOURCE ? await replayJob(context, input.project, run) : await replayEvent(context, input.project, run, event, dryRun);
+        if (!started) throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "The replay started but its run could not be recorded" });
+        return { runId: started, status: "started" as const };
       }),
   },
 
@@ -187,6 +224,7 @@ export const appRouter = {
         const found = context.activity.queryRuns({
           project: inProject(context, input.project),
           automation: CRISP_TRIAGE,
+          dryRun: "exclude",
           decision: input.decision,
           unread: input.unread,
           search: input.search,
@@ -343,10 +381,10 @@ export const appRouter = {
   },
 };
 
-const currentView = ({ db, env }: Context["settings"], project: string): SettingsView => {
+const currentView = ({ db, env, health }: Context["settings"], project: string): SettingsView => {
   const store = db.project(project);
   const scopedEnv = envFor(project, env);
-  return describeSettings(store, scopedEnv, resolveConfig(store, scopedEnv));
+  return describeSettings(store, scopedEnv, resolveConfig(store, scopedEnv), health(project));
 };
 
 export type AppRouter = typeof appRouter;

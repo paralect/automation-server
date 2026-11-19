@@ -310,6 +310,121 @@ describe("run outcomes", () => {
   });
 });
 
+describe("stored event", () => {
+  const event = { project: "acme", source: "sentry", kind: "alert", externalId: "e1", receivedAt: "2026-01-01T00:00:00.000Z", payload: { title: "boom", token: "t" } };
+
+  test("startRun stores the redacted event, getRun returns it and queryRuns does not", () => {
+    const s = make();
+    const id = s.startRun(runStart({ event }));
+    expect(s.getRun(id)?.event).toEqual({ ...event, payload: { title: "boom", token: "[redacted]" } });
+    expect(s.getRun(id)?.run.hasEvent).toBe(true);
+    const [listed] = s.queryRuns({ limit: 10 }).items;
+    expect(listed).toMatchObject({ id, hasEvent: true });
+    expect(listed).not.toHaveProperty("event");
+    expect(JSON.stringify(s.stats("2025-01-01T00:00:00.000Z", 3_600_000).recentFailures)).not.toContain("boom");
+  });
+
+  test("a run without an event has hasEvent false and no event", () => {
+    const s = make();
+    const id = s.startRun(runStart());
+    expect(s.getRun(id)).not.toHaveProperty("event");
+    expect(s.getRun(id)?.run.hasEvent).toBe(false);
+  });
+
+  test("replayOf is stored and returned", () => {
+    const s = make();
+    const first = s.startRun(runStart({ event }));
+    const again = s.startRun(runStart({ event, replayOf: first }));
+    expect(s.getRun(again)?.run.replayOf).toBe(first);
+    expect(s.getRun(first)?.run).not.toHaveProperty("replayOf");
+  });
+
+  test("prune removes the event with its run", () => {
+    const s = make();
+    const id = s.startRun(runStart({ event, startedAt: "2025-12-01T00:00:00.000Z" }));
+    s.finishRun(id, { status: "failed", error: "x", finishedAt: "2025-12-01T00:00:01.000Z" });
+    s.prune("2026-01-01T00:00:00.000Z");
+    expect(s.getRun(id)).toBeNull();
+  });
+
+  test("a database from before stored events is upgraded and old runs report no event", () => {
+    const dir = mkdtempSync(join(tmpdir(), "event-"));
+    try {
+      const path = join(dir, "a.db");
+      const first = createSqliteActivityStore({ path });
+      const old = first.startRun(runStart());
+      first.close();
+      const raw = new Database(path);
+      raw.run("ALTER TABLE runs DROP COLUMN event");
+      raw.run("ALTER TABLE runs DROP COLUMN replay_of");
+      raw.run("UPDATE schema_versions SET version = 2 WHERE component = 'activity'");
+      raw.close();
+      const s = createSqliteActivityStore({ path });
+      open.push(s);
+      expect(s.getRun(old)?.run).toMatchObject({ id: old, hasEvent: false });
+      const id = s.startRun(runStart({ event }));
+      expect(s.getRun(id)?.event?.externalId).toBe("e1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("dry runs", () => {
+  const finished = (s: ActivityStore, over: Partial<RunStart>, status: "succeeded" | "failed" = "succeeded") => {
+    const id = s.startRun(runStart(over));
+    s.finishRun(id, { status, error: status === "failed" ? "x" : undefined, finishedAt: "2026-01-01T00:00:01.000Z", outcome: { decision: "issue" } });
+    return id;
+  };
+
+  test("are marked, listed by queryRuns, and filterable", () => {
+    const s = make();
+    const real = finished(s, { externalId: "real" });
+    const dry = finished(s, { externalId: "dry", dryRun: true });
+    expect(s.getRun(dry)?.run.dryRun).toBe(true);
+    expect(s.getRun(real)?.run.dryRun).toBe(false);
+    const ids = (dryRun?: "include" | "exclude" | "only") => s.queryRuns({ limit: 10, dryRun }).items.map((r) => r.id);
+    expect(ids().sort()).toEqual([dry, real].sort());
+    expect(ids("include").sort()).toEqual([dry, real].sort());
+    expect(ids("exclude")).toEqual([real]);
+    expect(ids("only")).toEqual([dry]);
+  });
+
+  test("never count toward stats, decisionCounts, unreadCount or markRunsRead", () => {
+    const s = make();
+    finished(s, { externalId: "real" });
+    finished(s, { externalId: "dry-ok", dryRun: true });
+    finished(s, { externalId: "dry-bad", dryRun: true }, "failed");
+    const stats = s.stats("2025-01-01T00:00:00.000Z", 3_600_000 * 24 * 365);
+    expect(stats.runs).toEqual({ running: 0, succeeded: 1, failed: 0, duplicate: 0 });
+    expect(stats.buckets.reduce((n, b) => n + b.succeeded + b.failed, 0)).toBe(1);
+    expect(stats.recentFailures).toEqual([]);
+    expect(s.decisionCounts({ automation: "a", sinceIso: "2025-01-01T00:00:00.000Z" })).toEqual({ issue: 1 });
+    expect(s.unreadCount({ automation: "a" })).toBe(1);
+    expect(s.markRunsRead({ automation: "a", readAt: "2026-01-02T00:00:00.000Z" })).toBe(1);
+  });
+
+  test("a database from before dry runs is upgraded and old runs are not dry", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dry-"));
+    try {
+      const path = join(dir, "a.db");
+      const first = createSqliteActivityStore({ path });
+      const old = first.startRun(runStart());
+      first.close();
+      const raw = new Database(path);
+      raw.run("ALTER TABLE runs DROP COLUMN dry_run");
+      raw.run("UPDATE schema_versions SET version = 3 WHERE component = 'activity'");
+      raw.close();
+      const s = createSqliteActivityStore({ path });
+      open.push(s);
+      expect(s.getRun(old)?.run.dryRun).toBe(false);
+      expect(s.getRun(s.startRun(runStart({ dryRun: true })))?.run.dryRun).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("read state", () => {
   test("runs start unread and can be marked read, unread again, filtered and counted", () => {
     const s = make();
@@ -393,5 +508,82 @@ describe("upgrades and damaged rows", () => {
       ]);
       expect(s.queryLogs({ runId: "r1", limit: 10 }).items).toHaveLength(4);
     });
+  });
+});
+
+describe("consecutiveFailures", () => {
+  const record = (s: ActivityStore, status: "succeeded" | "failed", over: Partial<RunStart> = {}, error?: string) => {
+    const id = s.startRun(runStart(over));
+    s.finishRun(id, { status, error, finishedAt: "2026-01-01T00:00:01.000Z" });
+    return id;
+  };
+  const fail = (s: ActivityStore, over: Partial<RunStart> = {}) => record(s, "failed", over, "boom");
+
+  test("counts failures newest first until the first success", () => {
+    const s = make();
+    fail(s);
+    fail(s);
+    record(s, "succeeded");
+    fail(s);
+    fail(s);
+    fail(s);
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(0);
+    expect(s.consecutiveFailures(undefined, "a", 10)).toBe(3);
+  });
+
+  test("is capped", () => {
+    const s = make();
+    for (let i = 0; i < 6; i++) fail(s, { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 3)).toBe(3);
+  });
+
+  test("a success newer than the failures resets the streak to zero", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    fail(s, { project: "acme" });
+    record(s, "succeeded", { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(0);
+  });
+
+  test("skips running, duplicate and dry runs without breaking the streak", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    s.recordDuplicate(runStart({ project: "acme" }));
+    record(s, "succeeded", { project: "acme", dryRun: true });
+    s.startRun(runStart({ project: "acme" }));
+    fail(s, { project: "acme", dryRun: true });
+    fail(s, { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(2);
+  });
+
+  test("a restart-interrupted run is skipped, not counted and not a streak breaker", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    s.startRun(runStart({ project: "acme" }));
+    s.failInterruptedRuns("2026-01-01T00:00:02.000Z");
+    fail(s, { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(2);
+  });
+
+  test("finds the success past many skipped rows", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    record(s, "succeeded", { project: "acme" });
+    for (let i = 0; i < 80; i++) s.recordDuplicate(runStart({ project: "acme" }));
+    for (let i = 0; i < 80; i++) record(s, "succeeded", { project: "acme", dryRun: true });
+    fail(s, { project: "acme" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(1);
+  });
+
+  test("is isolated by project and automation", () => {
+    const s = make();
+    fail(s, { project: "acme" });
+    fail(s, { project: "acme" });
+    fail(s, { project: "other" });
+    fail(s, { project: "acme", automation: "b" });
+    expect(s.consecutiveFailures("acme", "a", 10)).toBe(2);
+    expect(s.consecutiveFailures("other", "a", 10)).toBe(1);
+    expect(s.consecutiveFailures("acme", "b", 10)).toBe(1);
+    expect(s.consecutiveFailures("nobody", "a", 10)).toBe(0);
   });
 });

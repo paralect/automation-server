@@ -304,6 +304,64 @@ describe("crisp-triage", () => {
     expect(issue).not.toContain("7946");
   });
 
+  describe("dry run", () => {
+    const dry = async (over: Partial<CrispTriageConfig> = {}, replies = [triage(), triage()]) => {
+      const { fn, calls } = services(replies.map((r) => JSON.stringify(r)));
+      let reported: unknown;
+      const logged: string[] = [];
+      const recording: Logger = { info: (m) => void logged.push(m), warn: () => undefined, error: () => undefined };
+      await make(fn, over).run(event(), { log: recording, dryRun: true, report: (o) => void (reported = o) });
+      return { calls, logged, outcome: crispOutcomeSchema.parse(reported) as CrispOutcome };
+    };
+
+    test("reads the model and GitHub but makes no write call to GitHub or Crisp", async () => {
+      const { calls } = await dry();
+      expect(writes(calls)).toEqual(["POST openrouter.ai/api/v1/chat/completions", "POST openrouter.ai/api/v1/chat/completions"]);
+      expect(calls.some((c) => c.method === "GET" && new URL(c.url).pathname === "/repos/o/r/issues")).toBe(true);
+      expect(calls.some((c) => c.url.includes("api.crisp.chat"))).toBe(false);
+    });
+
+    test("reports the would-be issue, dispatch and note, never sets the triage segment", async () => {
+      const { outcome, logged } = await dry();
+      expect(outcome).toMatchObject({
+        dryRun: true,
+        decision: "fix",
+        wouldDo: {
+          issue: { title: "[Crisp] CSV export button does nothing on the reports page.", labels: ["crisp", "area:export", "severity:major", "bug", "autofix"] },
+          dispatch: true,
+        },
+        github: { written: true, issue: null, dispatched: false },
+        crisp: { notePosted: false, segmentSet: false },
+      });
+      expect(outcome.note).toContain("Decision: fix.");
+      expect(outcome.note).toContain("The Codex fix workflow would be queued.");
+      expect(logged).toEqual(expect.arrayContaining(["dry-run: would create github issue", "dry-run: would dispatch workflow", "dry-run: would post note", "dry-run: would set segment"]));
+    });
+
+    test("a decision with no GitHub write has no would-be issue", async () => {
+      const spam = triage({ category: "spam" });
+      const { outcome, calls } = await dry({}, [spam, spam]);
+      expect(outcome).toMatchObject({ dryRun: true, decision: "drop", wouldDo: { issue: null, dispatch: false } });
+      expect(writes(calls).every((w) => w.includes("openrouter"))).toBe(true);
+    });
+
+    test("a duplicate is still found by reading GitHub", async () => {
+      const { fn, calls } = services([], [{ html_url: ISSUE_URL, number: 3, body: `Crisp Session: ${SESSION}` }]);
+      let reported: unknown;
+      await make(fn).run(event(), { log, dryRun: true, report: (o) => void (reported = o) });
+      expect(writes(calls)).toEqual([]);
+      expect(crispOutcomeSchema.parse(reported)).toMatchObject({ dryRun: true, decision: "drop", duplicateOf: ISSUE_URL });
+    });
+
+    test("a live outcome carries no dry-run fields", async () => {
+      const { fn } = services([JSON.stringify(triage()), JSON.stringify(triage())]);
+      let reported: unknown;
+      await make(fn).run(event(), { log, report: (o) => void (reported = o) });
+      expect(reported).not.toHaveProperty("dryRun");
+      expect(reported).not.toHaveProperty("wouldDo");
+    });
+  });
+
   test("issue and fix modes need GitHub", () => {
     expect(() => make(none, { mode: "issue", github: null })).toThrow("needs the GitHub token");
     expect(() => make(none, { mode: "shadow", github: null })).not.toThrow();

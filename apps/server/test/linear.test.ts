@@ -59,12 +59,13 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
       activity,
       actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
       adminToken: undefined,
-      settings: { db: settings, env: {}, reload: runtime.rebuild, test: runtime.test },
+      settings: { db: settings, env: {}, reload: runtime.rebuild, test: runtime.test, health: () => ({}) },
       workflows: () => createWorkflowInstaller({ token: undefined }),
       posthog: {
         preview: async () => ({ ok: false as const, message: "unused" }),
         runNow: async () => ({ status: "busy" as const, message: "unused" }),
       },
+      replay: { event: async () => ({ outcome: "unknown-automation" as const }), job: async () => ({ status: "unknown-job" as const }) },
       system: () => ({ startedAt: "", sources: [], automations: [], jobs: [], retentionDays: 30, webhookUrls: {} }),
     },
   });

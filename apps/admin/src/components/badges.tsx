@@ -9,3 +9,9 @@ export const StatusBadge = ({ status }: { status: RunStatus }) => (
 export const LevelBadge = ({ level }: { level: LogLevel }) => (
   <Badge {...LEVEL_BADGE[level]}>{level}</Badge>
 )
+
+export const DryRunBadge = () => (
+  <Badge variant="outline" className="border-dashed text-violet-700 dark:text-violet-400">
+    Dry run
+  </Badge>
+)

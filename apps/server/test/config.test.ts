@@ -24,6 +24,11 @@ describe("buildConfig", () => {
     expect(buildConfig({ ...base, ADMIN_API_TOKEN: "x".repeat(32) }).adminToken).toBe("x".repeat(32));
   });
 
+  test("admin public url loses its trailing slash and empty counts as absent", () => {
+    expect(buildConfig({ ...base, ADMIN_PUBLIC_URL: "https://admin.example.com/" }).adminPublicUrl).toBe("https://admin.example.com");
+    expect(buildConfig({ ...base, ADMIN_PUBLIC_URL: "" }).adminPublicUrl).toBeUndefined();
+  });
+
   test("public url loses its trailing slash", () => {
     expect(buildConfig({ ...base, PUBLIC_URL: "https://hooks.example.com/" }).publicUrl).toBe("https://hooks.example.com");
   });

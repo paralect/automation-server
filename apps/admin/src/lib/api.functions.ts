@@ -74,6 +74,10 @@ export const getRun = authed
     callAutomation((api) => api.runs.get(data), { notFoundIsExpected: true })
   )
 
+export const replayRun = authedPost
+  .validator(inProject.extend({ id: entityId, dryRun: z.boolean().optional() }))
+  .handler(({ data }) => callAutomation((api) => api.runs.replay(data), { showMessages: true }))
+
 export const listCrisp = authed.validator(inProject.extend(crispInput.shape)).handler(({ data: { q, ...rest } }) =>
   callAutomation((api) => api.crisp.list({ ...rest, search: q }))
 )
@@ -97,7 +101,7 @@ export const getActionRun = authed.validator(inProject.extend(actionRunInput.sha
 )
 
 type IntegrationId = IntegrationView["id"]
-const INTEGRATION_IDS = ["github", "sentry", "linear", "posthog", "openrouter", "crisp"] as const satisfies readonly IntegrationId[]
+const INTEGRATION_IDS = ["github", "sentry", "linear", "posthog", "openrouter", "crisp", "slack"] as const satisfies readonly IntegrationId[]
 const allIntegrationIds: [Exclude<IntegrationId, (typeof INTEGRATION_IDS)[number]>] extends [never] ? true : never = true
 void allIntegrationIds
 const integrationInput = inProject.extend({ integrationId: z.enum(INTEGRATION_IDS) })

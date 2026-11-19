@@ -1,5 +1,5 @@
-import type { ActivityStore } from "@automation-server/core";
-import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsDb } from "@automation-server/settings";
+import type { ActivityStore, ReplayRequest, ReplayResult } from "@automation-server/core";
+import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsDb, StoredHealth } from "@automation-server/settings";
 
 import type { ActionsReader } from "./githubActions";
 import type { WorkflowInstaller } from "./workflowInstaller";
@@ -18,6 +18,7 @@ export type SettingsAdmin = {
   env: EnvSource;
   reload(): void;
   test(project: string, id: IntegrationId): Promise<ConnectionTestResult>;
+  health(project: string): Readonly<Record<string, StoredHealth>>;
 };
 
 export type PosthogPreview =
@@ -33,6 +34,15 @@ export type PosthogAdmin = {
   runNow(project: string): Promise<PosthogRunResult>;
 };
 
+export type ReplayJobResult =
+  | { readonly status: "started"; readonly runId: string | null }
+  | { readonly status: "busy" | "duplicate" | "unknown-job" };
+
+export type ReplayAdmin = {
+  event(request: ReplayRequest): Promise<ReplayResult>;
+  job(project: string, automation: string, key: string, replayOf: string): Promise<ReplayJobResult>;
+};
+
 export type Context = {
   activity: ActivityStore;
   actions: (project: string) => ActionsReader;
@@ -40,6 +50,7 @@ export type Context = {
   system: (project: string) => SystemInfo;
   settings: SettingsAdmin;
   posthog: PosthogAdmin;
+  replay: ReplayAdmin;
   adminToken: string | undefined;
   bearer: string | undefined;
 };
