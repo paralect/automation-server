@@ -27,6 +27,9 @@ export async function executeTool(tool: AnyTool, rawArgs: unknown, ctx: ToolCont
     const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ");
     return { ok: false, error: safeError(`Invalid arguments for ${tool.name}: ${issues}`) };
   }
+  if (tool.kind === "write" && ctx.dryRun) {
+    return { ok: true, text: `dry-run: would run ${tool.name} ${truncate(singleLine(redactText(JSON.stringify(parsed.data) ?? "")), MAX_ERROR_CHARS)}` };
+  }
   try {
     const result = await tool.run(parsed.data, ctx);
     if (!result.ok) return { ok: false, error: safeError(result.error) };

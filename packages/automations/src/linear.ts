@@ -31,6 +31,15 @@ export type LinearClient = {
   viewer(): Promise<{ readonly name: string; readonly organization: string | null }>;
   searchIssues(term: string, limit: number): Promise<readonly LinearIssueSummary[]>;
   getIssue(identifier: string): Promise<LinearIssue | null>;
+  createIssue(input: NewLinearIssue): Promise<LinearIssueSummary>;
+  addLabel(identifier: string, label: string): Promise<LinearIssueSummary>;
+};
+
+export type NewLinearIssue = {
+  readonly title: string;
+  readonly description?: string;
+  readonly teamKey?: string;
+  readonly labels?: readonly string[];
 };
 
 export class LinearApiError extends Error {
@@ -60,6 +69,14 @@ const issueData = z.object({
     })
     .nullable(),
 });
+
+const teamsData = z.object({ teams: z.object({ nodes: z.array(z.object({ id: z.string(), key: z.string() })) }) });
+const labelsData = z.object({
+  issueLabels: z.object({ nodes: z.array(z.object({ id: z.string(), name: z.string(), team: z.object({ key: z.string() }).nullish() })) }),
+});
+const issueRefData = z.object({ issue: z.object({ id: z.string(), team: z.object({ key: z.string() }).nullish() }).nullable() });
+const createData = z.object({ issueCreate: z.object({ success: z.boolean(), issue: summary.nullable() }) });
+const addLabelData = z.object({ issueAddLabel: z.object({ success: z.boolean(), issue: summary.nullable() }) });
 
 const toSummary = (issue: z.infer<typeof summary>): LinearIssueSummary => ({
   identifier: issue.identifier,
@@ -99,6 +116,28 @@ export function createLinearClient({ apiKey, apiUrl = LINEAR_API, fetch: doFetch
     return parsed.success ? parsed.data : fail("unexpected response");
   };
 
+  const sameKey = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+  // A label is never created here: a name that does not exist is an error, so a typo cannot add a label to the workspace.
+  const findLabel = async (name: string, teamKey: string | null): Promise<{ id: string; name: string }> => {
+    const { issueLabels } = await query(
+      "query($name: String!) { issueLabels(first: 25, filter: { name: { eqIgnoreCase: $name } }) { nodes { id name team { key } } } }",
+      { name },
+      labelsData,
+    );
+    const usable = issueLabels.nodes.filter((l) => !l.team || teamKey === null || sameKey(l.team.key, teamKey));
+    const label = usable.find((l) => l.team) ?? usable[0];
+    return label ?? fail(`label "${name}" does not exist${teamKey ? ` for team ${teamKey}` : ""}, and labels are never created automatically`);
+  };
+
+  const resolveTeam = async (teamKey: string | undefined): Promise<{ id: string; key: string }> => {
+    const { teams } = await query("query { teams(first: 50) { nodes { id key } } }", {}, teamsData);
+    if (teamKey) return teams.nodes.find((t) => sameKey(t.key, teamKey)) ?? fail(`team ${teamKey} does not exist. Teams: ${teams.nodes.map((t) => t.key).join(", ") || "none"}`);
+    const [only, ...rest] = teams.nodes;
+    if (only && rest.length === 0) return only;
+    return fail(`teamKey is required. Teams: ${teams.nodes.map((t) => t.key).join(", ") || "none"}`);
+  };
+
   return {
     async viewer() {
       const { viewer, organization } = await query("query { viewer { name } organization { name } }", {}, viewerData);
@@ -125,6 +164,30 @@ export function createLinearClient({ apiKey, apiUrl = LINEAR_API, fetch: doFetch
         labels: (issue.labels?.nodes ?? []).map((l) => l.name),
         comments: (issue.comments?.nodes ?? []).map((c) => ({ author: c.user?.name ?? null, body: c.body })),
       };
+    },
+    async createIssue({ title, description, teamKey, labels = [] }) {
+      const team = await resolveTeam(teamKey);
+      const labelIds: string[] = [];
+      for (const name of labels) labelIds.push((await findLabel(name, team.key)).id);
+      const { issueCreate } = await query(
+        `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { ${SUMMARY_FIELDS} } } }`,
+        { input: { teamId: team.id, title, ...(description ? { description } : {}), ...(labelIds.length > 0 ? { labelIds } : {}) } },
+        createData,
+      );
+      if (!issueCreate.success || !issueCreate.issue) return fail("Linear did not create the issue");
+      return toSummary(issueCreate.issue);
+    },
+    async addLabel(identifier, labelName) {
+      const { issue } = await query("query($id: String!) { issue(id: $id) { id team { key } } }", { id: identifier }, issueRefData);
+      if (!issue) return fail(`issue ${identifier} was not found`);
+      const label = await findLabel(labelName, issue.team?.key ?? null);
+      const { issueAddLabel } = await query(
+        `mutation($id: String!, $labelId: String!) { issueAddLabel(id: $id, labelId: $labelId) { success issue { ${SUMMARY_FIELDS} } } }`,
+        { id: issue.id, labelId: label.id },
+        addLabelData,
+      );
+      if (!issueAddLabel.success || !issueAddLabel.issue) return fail("Linear did not add the label");
+      return toSummary(issueAddLabel.issue);
     },
   };
 }
