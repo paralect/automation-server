@@ -24,6 +24,7 @@ const setup = ({ allowedUsers = ["UOK"], dry = false, handler, limiter }: { allo
   };
   const client: SlackBotClient = {
     authTest: async () => ({ botName: "b", botUserId: "UBOT", team: "t", teamId: "T1" }),
+    replies: async () => [],
     postMessage: async (message) => {
       posted.push(message);
       return { ts: "200.1" };
@@ -181,6 +182,7 @@ describe("slack-bot automation", () => {
     const posted: string[] = [];
     const client: SlackBotClient = {
       authTest: async () => ({ botName: "b", botUserId: "u", team: "t", teamId: "T" }),
+      replies: async () => [],
       postMessage: async ({ text }) => {
         if (fail) throw new Error("ratelimited");
         posted.push(text);
