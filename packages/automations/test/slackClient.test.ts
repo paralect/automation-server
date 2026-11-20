@@ -42,6 +42,16 @@ describe("slack bot client", () => {
     expect(calls[0]!.body).toEqual({ channel: "C1", thread_ts: "1700.1", text: "hi" });
   });
 
+  test("chat.postMessage sends blocks next to the text, and leaves out an empty list", async () => {
+    const { fn, calls } = stub(() => json({ ok: true, ts: "1.2" }));
+    const client = createSlackBotClient({ token: TOKEN, fetch: fn });
+    const blocks = [{ type: "divider" }];
+    await client.postMessage({ channel: "C1", threadTs: "1", text: "hi", blocks });
+    await client.postMessage({ channel: "C1", threadTs: "1", text: "hi", blocks: [] });
+    expect(calls[0]!.body).toEqual({ channel: "C1", thread_ts: "1", text: "hi", blocks });
+    expect(calls[1]!.body).toEqual({ channel: "C1", thread_ts: "1", text: "hi" });
+  });
+
   test("apiBaseUrl overrides the host and tolerates a trailing slash", async () => {
     const { fn, calls } = stub(() => json({ ok: true, ts: "1.2" }));
     await createSlackBotClient({ token: TOKEN, fetch: fn, apiBaseUrl: "http://127.0.0.1:3199/api/" }).postMessage({ channel: "C", threadTs: "1", text: "x" });

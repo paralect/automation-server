@@ -1,3 +1,4 @@
+import type { SlackBlock } from "@chat-adapter/slack/blocks";
 import { createDispatcher, createSqliteActivityStore, createSqlitePendingActionStore, createSqliteStore, type Event, type Logger } from "@automation-server/core";
 import { slackBotOutcomeSchema } from "@automation-server/sources/slack/outcome";
 import { describe, expect, test } from "bun:test";
@@ -13,7 +14,7 @@ import { buildReadTools, buildWriteTools, createToolRegistry, defineTool, type A
 const BOT_TOKEN = "xoxb-1234567890-ABCDEFGHIJ-secretsecret";
 const LINEAR_KEY = "lin_api_secretsecretsecret";
 
-type Wire = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null };
+type Wire = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null; specJson?: string | null };
 const createIssue = (args: Record<string, unknown> = { title: "Billing bug", description: "Checkout 500s" }): Wire => ({ type: "tool", tool: "linear.createIssue", argsJson: JSON.stringify(args), text: null });
 const call = (tool: string, args: Record<string, unknown>): Wire => ({ type: "tool", tool, argsJson: JSON.stringify(args), text: null });
 
@@ -27,6 +28,7 @@ const setup = ({
   finalTransitionThrows = false,
 }: { finalTransitionThrows?: boolean; script?: Wire[]; requireApproval?: boolean; dry?: boolean; linearFails?: boolean; writeTools?: boolean; issueBody?: string } = {}) => {
   const posted: PostMessage[] = [];
+  const cards: (readonly SlackBlock[])[] = [];
   const logs: string[] = [];
   const prompts: string[] = [];
   const mutations: { query: string; variables: Record<string, any> }[] = [];
@@ -39,8 +41,9 @@ const setup = ({
   const client: SlackBotClient = {
     authTest: async () => ({ botName: "paralect-bot", botUserId: "UBOT", team: "t", teamId: "T1" }),
     replies: async () => [],
-    postMessage: async (message) => {
+    postMessage: async ({ blocks, ...message }) => {
       posted.push(message);
+      cards.push(blocks ?? []);
       return { ts: "200.1" };
     },
   };
@@ -49,7 +52,7 @@ const setup = ({
       prompts.push(req.user);
       const next = script.shift();
       if (!next) throw new Error("script ran out");
-      return req.schema.parse(next);
+      return req.schema.parse({ specJson: null, ...next });
     }) as AgentModel["structured"],
   };
   const linearFetch = (async (_url: string, init: RequestInit) => {
@@ -116,7 +119,7 @@ const setup = ({
     await dispatcher.drain(2000);
   };
   const outcomes = () => activity.queryRuns({ limit: 20 }).items.map((i) => activity.getRun(i.id)?.run.outcome);
-  return { posted, logs, prompts, mutations, pending, send, sendMany, outcomes, advance: (ms: number) => void (t += ms), rebuildWith: (available: AnyTool[]) => void (bot = build(available)), script, clock: () => t };
+  return { posted, cards, logs, prompts, mutations, pending, send, sendMany, outcomes, advance: (ms: number) => void (t += ms), rebuildWith: (available: AnyTool[]) => void (bot = build(available)), script, clock: () => t };
 };
 
 const lastReply = (posted: PostMessage[]) => posted[posted.length - 1]!.text;
@@ -134,7 +137,7 @@ describe("the agent loop never runs a write", () => {
         return { ok: true, text: "done" };
       },
     });
-    const model: AgentModel = { structured: (async (req: { schema: z.ZodType }) => req.schema.parse(call("x.write", { title: "t" }))) as AgentModel["structured"] };
+    const model: AgentModel = { structured: (async (req: { schema: z.ZodType }) => req.schema.parse({ specJson: null, ...call("x.write", { title: "t" }) })) as AgentModel["structured"] };
     const agent = createAgent({ model, modelName: "m/x", tools: [write] });
     const result = await agent.run({ question: "q", user: "U1", thread: [] }, { requestedBy: "U1", channel: "C1", threadTs: "1.1", dryRun: false });
     expect(result).toMatchObject({ status: "pending-approval", proposal: { tool: "x.write", args: { title: "t" } }, steps: [{ tool: "x.write", stage: "proposed" }] });
@@ -144,7 +147,7 @@ describe("the agent loop never runs a write", () => {
   test("a write call with invalid arguments is an error for the model to fix, not a proposal", async () => {
     const write = defineTool({ name: "x.write", description: "w", kind: "write", argsSchema: z.object({ title: z.string() }), run: async () => ({ ok: true, text: "done" }) });
     const script = [call("x.write", { title: 5 }), { type: "final", tool: null, argsJson: null, text: "sorry" } as Wire];
-    const model: AgentModel = { structured: (async (req: { schema: z.ZodType }) => req.schema.parse(script.shift())) as AgentModel["structured"] };
+    const model: AgentModel = { structured: (async (req: { schema: z.ZodType }) => req.schema.parse({ specJson: null, ...script.shift() })) as AgentModel["structured"] };
     const agent = createAgent({ model, modelName: "m/x", tools: [write] });
     const result = await agent.run({ question: "q", user: "U1", thread: [] }, { requestedBy: "U1", channel: "C1", threadTs: "1.1", dryRun: false });
     expect(result.status).toBe("answered");

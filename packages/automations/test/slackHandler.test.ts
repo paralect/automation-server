@@ -1,3 +1,4 @@
+import type { SlackBlock } from "@chat-adapter/slack/blocks";
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Event, type Logger } from "@automation-server/core";
 import { slackBotOutcomeSchema } from "@automation-server/sources/slack/outcome";
 import { describe, expect, test } from "bun:test";
@@ -20,10 +21,11 @@ const mention = (user: string, patch: Record<string, unknown> = {}, id = "Ev1"):
   payload: { team: "T1", channel: "C1", user, text: "what Linear issues mention billing?", ts: "100.1", threadTs: null, ...patch },
 });
 
-type Wire = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null };
+type Wire = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null; specJson?: string | null };
 
 const setup = ({ script, replies = [], repliesFail = false, dry = false }: { script: Wire[]; replies?: SlackThreadMessage[]; repliesFail?: boolean; dry?: boolean }) => {
   const posted: PostMessage[] = [];
+  const cards: (readonly SlackBlock[])[] = [];
   const logs: string[] = [];
   const prompts: string[] = [];
   const fetched: string[] = [];
@@ -39,8 +41,9 @@ const setup = ({ script, replies = [], repliesFail = false, dry = false }: { scr
       if (repliesFail) throw new Error(`missing_scope for ${SECRET_TOKEN}`);
       return replies;
     },
-    postMessage: async (message) => {
+    postMessage: async ({ blocks, ...message }) => {
       posted.push(message);
+      cards.push(blocks ?? []);
       return { ts: "200.1" };
     },
   };
@@ -49,7 +52,7 @@ const setup = ({ script, replies = [], repliesFail = false, dry = false }: { scr
       prompts.push(req.user);
       const next = script.shift();
       if (!next) throw new Error("script ran out");
-      return req.schema.parse(next);
+      return req.schema.parse({ specJson: null, ...next });
     }) as AgentModel["structured"],
   };
   const linearFetch = (async () =>
@@ -68,7 +71,7 @@ const setup = ({ script, replies = [], repliesFail = false, dry = false }: { scr
     const item = activity.queryRuns({ limit: 1 }).items[0]!;
     return { item, outcome: activity.getRun(item.id)?.run.outcome };
   };
-  return { posted, logs, prompts, fetched, send, run, script };
+  return { posted, cards, logs, prompts, fetched, send, run, script };
 };
 
 describe("slack agent end to end through the dispatcher", () => {

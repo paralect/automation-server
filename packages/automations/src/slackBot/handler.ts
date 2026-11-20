@@ -3,7 +3,7 @@ import type { PendingAction, PendingActionStore } from "@automation-server/core/
 import { redactUntrusted, singleLine, truncate } from "../redact";
 import type { Agent, Proposal, StepLog } from "./agent";
 import {
-  approvalMessage,
+  approvalCard,
   APPROVAL_TTL_MS,
   CANCELLED_REPLY,
   EXPIRED_REPLY,
@@ -157,7 +157,8 @@ export function createAgentHandler(agent: Agent, approvals?: ApprovalConfig): Sl
       config.pending.create({ project: config.project, team, channel, threadTs: threadTs ?? ts, requestedBy: user, tool: proposal.tool, args: proposal.args, expiresAt: at + (config.ttlMs ?? APPROVAL_TTL_MS) });
     }
     const botName = await botNameFor(client);
-    return { reply: approvalMessage({ tool: proposal.tool, args: proposal.args, botName, requestedBy: user }), status: "pending-approval", steps };
+    const card = approvalCard({ tool: proposal.tool, args: proposal.args, botName, requestedBy: user });
+    return { reply: card.text, ...(card.blocks.length ? { blocks: card.blocks } : {}), status: "pending-approval", steps };
   }
 
   return async (input): Promise<SlackBotHandlerResult> => {
