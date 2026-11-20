@@ -1,39 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import type { FieldView } from "@automation-server/api/routers/index"
 
-import { groupFields, idsOf, isMissingScope, mergeSelection, parseManualId, pickersEnabled, removeId, resolveChips, textOf, toggleId } from "./slack-picker"
+import { idsOf, isMissingScope, mergeSelection, parseManualId, pickersEnabled, removeId, resolveChips, textOf, toggleId } from "./slack-picker"
 
 const field = (over: Partial<FieldView> & Pick<FieldView, "key" | "kind">): FieldView => ({
   label: over.key,
   required: false,
+  advanced: false,
   source: "default",
   set: false,
   ...over,
-})
-
-describe("groupFields", () => {
-  test("keeps spec order, with each group where its first field is", () => {
-    const groups = groupFields([
-      field({ key: "token", kind: "secret", group: "Connection", groupHelp: "Save first." }),
-      field({ key: "on", kind: "boolean", group: "Access" }),
-      field({ key: "secret", kind: "secret", group: "Connection" }),
-      field({ key: "model", kind: "text", group: "Advanced" }),
-      field({ key: "users", kind: "slackUsers", group: "Access" }),
-    ])
-    expect(groups.map((g) => [g.name, g.fields.map((f) => f.key)])).toEqual([
-      ["Connection", ["token", "secret"]],
-      ["Access", ["on", "users"]],
-      ["Advanced", ["model"]],
-    ])
-    expect(groups[0]!.help).toBe("Save first.")
-  })
-
-  test("an integration without groups is one section with no heading", () => {
-    const groups = groupFields([field({ key: "a", kind: "text" }), field({ key: "b", kind: "text" })])
-    expect(groups).toHaveLength(1)
-    expect(groups[0]!.name).toBeUndefined()
-    expect(groups[0]!.fields.map((f) => f.key)).toEqual(["a", "b"])
-  })
 })
 
 describe("pickersEnabled", () => {

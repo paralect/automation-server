@@ -194,15 +194,18 @@ describe("slack list fields", () => {
 });
 
 describe("describeSettings", () => {
-  test("exposes groups in spec order, and integrations without groups stay flat", () => {
+  test("exposes groups in spec order, and advanced fields without a group", () => {
     const view = describeSettings(fresh(), {}, resolveConfig(fresh(), {}));
     const slack = view.integrations.find((i) => i.id === "slack")!;
-    const groups = [...new Set(slack.fields.map((f) => f.group))];
-    expect(groups).toEqual(["Connection", "Access", "Alerts", "Advanced"]);
+    const groups = [...new Set(slack.fields.filter((f) => !f.advanced).map((f) => f.group))];
+    expect(groups).toEqual(["Connection", "Access", "Alerts"]);
+    expect(slack.fields.filter((f) => f.advanced).map((f) => [f.key, f.group])).toEqual([["agentModel", undefined], ["botName", undefined], ["apiBaseUrl", undefined]]);
     expect(slack.fields.slice(0, 2).map((f) => f.key)).toEqual(["botToken", "signingSecret"]);
     expect(slack.fields.find((f) => f.key === "allowedChannels")).toMatchObject({ kind: "slackChannels", group: "Access" });
     expect(slack.fields.find((f) => f.key === "allowedUsers")).toMatchObject({ kind: "slackUsers", group: "Access" });
-    expect(view.integrations.find((i) => i.id === "github")!.fields.every((f) => f.group === undefined)).toBe(true);
+    for (const integration of view.integrations) {
+      expect(integration.fields.filter((f) => !f.advanced && f.group === undefined).map((f) => `${integration.id}.${f.key}`)).toEqual([]);
+    }
   });
 
 

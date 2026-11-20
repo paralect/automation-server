@@ -70,7 +70,7 @@ Never paste these values into a chat, an issue or a commit. If one leaks, click 
 ## 4. Add the web hook
 
 1. Open the **Settings** tab and scroll to **Events**, **Web Hooks**.
-2. In **Production Web Hook**, enter `https://<host>/webhooks/<project>/crisp`. The admin shows the exact URL on the Crisp integration card, with a copy button.
+2. In **Production Web Hook**, enter `https://<host>/webhooks/<project>/crisp`. The admin shows the exact URL on the Crisp integration page, with a copy button.
 3. Click **Create Web Hook**.
 4. In the dialog that lists events, turn on exactly these two and leave the rest off.
 
@@ -112,22 +112,23 @@ The server ignores deliveries for any other website.
 ## 7. Save the settings in the admin
 
 1. In the admin, open **Integrations** and click **Add integration**. Pick **Crisp**.
-2. Fill the four required fields from steps 3 and 6. Leave the rest at their defaults for now.
+2. Fill the four required fields from steps 3 and 6, all in **Connection**. Leave the rest at their defaults for now.
 3. Click **Save**, then **Test connection**. A working setup answers that the plugin token can read your website. Write access for notes and segments is only exercised by the first triage.
 
 The webhook is served once the four required fields are set. The triage runs once OpenRouter is configured too.
 
-![The Crisp form in the admin: 1 webhook URL, 2 Website ID, 3 token identifier, 4 token key, 5 signing secret, 6 trigger segment, 7 mode](img/admin-09-crisp-form.png)
+![The Crisp form before its first save: 1 webhook URL, 2 Website ID, 3 token identifier, 4 token key, 5 signing secret, 6 mode, 7 trigger segment, 8 Save](img/admin-09-crisp-form.png)
 
 1. **Webhook URL.** Paste it into Crisp, step 5.
 2. **Website ID.** From step 6.
 3. **Plugin token identifier.** From the production token in step 3.
-4. **Plugin token key.** Click **Replace** and paste the token key.
-5. **Web Hooks signing secret.** Click **Replace** and paste the secret from step 5.
-6. **Trigger segment.** The tag that starts a triage. Default `triage`.
-7. **Mode.** `shadow`, `issue`, `fix` or `dry-run`. Start with `shadow`.
+4. **Plugin token key.** Paste the token key.
+5. **Web Hooks signing secret.** Paste the secret from step 5.
+6. **Mode.** `shadow`, `issue`, `fix` or `dry-run`. Start with `shadow`.
+7. **Trigger segment.** The tag that starts a triage. Default `triage`.
+8. **Save.**
 
-The fields below Mode (minimum confidence, product areas, autofix areas, workflow file) are optional and explained in [the integration page](../integrations/crisp.md#configuration).
+The other fields (triage resolved conversations, product areas, autofix areas, and minimum confidence and workflow file under **Advanced**) are optional and explained in [the integration page](../integrations/crisp.md#configuration).
 
 ## 8. Create the trigger segment
 

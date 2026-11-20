@@ -6,6 +6,7 @@ import { buildPayload, initialState, isDirty, missingText } from "./settings-for
 const field = (over: Partial<FieldView> & Pick<FieldView, "key" | "kind">): FieldView => ({
   label: over.key,
   required: false,
+  advanced: false,
   source: "default",
   set: false,
   ...over,

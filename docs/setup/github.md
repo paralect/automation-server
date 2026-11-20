@@ -44,7 +44,7 @@ If you only need Sentry, Issues write is enough. A missing permission shows up a
 
 ## 2. Save the token and repository in the admin
 
-Open the admin, then Integrations, then the GitHub card.
+Open the admin, then Integrations, then GitHub. The token is in **Connection**, the repositories in **Repositories**.
 
 | Field in the admin | Environment variable | Value |
 | --- | --- | --- |
@@ -58,12 +58,13 @@ The Linear integration has its own target repository field, `linear.targetRepo`.
 
 Values saved in the admin win over environment variables and apply without a restart. The variable names are listed in [`apps/server/.env.example`](../../apps/server/.env.example).
 
-![The GitHub integration form: 1 Replace the token, 2 Issues repository, 3 Actions repositories, 4 Test connection](img/admin-05-github-form.png)
+![The GitHub form before its first save: 1 Token, 2 Issues repository, 3 Actions repositories, 4 Save, 5 Test connection](img/admin-05-github-form.png)
 
-1. **Token.** A saved secret shows **Set** and is never displayed again. Click **Replace**, paste the new token and save to change it. **Clear** removes it.
+1. **Token.** Paste the token. Once saved it shows **Set** and is never displayed again. To change it later, click **Edit** on **Connection**, then **Replace**.
 2. **Issues repository.** Where Sentry alerts and Crisp triage become issues.
 3. **Actions repositories.** One `owner/name` per line. The GitHub Actions page of the admin shows runs from these.
-4. **Test connection.** Run it after **Save**.
+4. **Save.** The page switches to a summary of the saved settings.
+5. **Test connection.** Run it after **Save**.
 
 ## 3. Allow Actions to create pull requests
 

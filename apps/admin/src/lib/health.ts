@@ -1,5 +1,7 @@
 import type { IntegrationView } from "@automation-server/api/routers/index"
 
+import { missingText } from "./settings-form"
+
 export const EXPIRY_WARNING_DAYS = 14
 
 const DAY_MS = 86_400_000
@@ -28,3 +30,14 @@ export function expiryLabel(state: ExpiryState): string | undefined {
 
 export const healthDot = (health: IntegrationView["health"]): HealthDot =>
   !health ? "unknown" : health.ok ? "ok" : "failed"
+
+export type IntegrationStatus = { kind: "attention"; reason: string } | { kind: "healthy" } | { kind: "unchecked" }
+
+export function integrationStatus(integration: IntegrationView, now: Date): IntegrationStatus {
+  if (!integration.configured) return { kind: "attention", reason: missingText(integration.missing, integration.fields) ?? "Needs setup." }
+  const { health } = integration
+  if (health && !health.ok) return { kind: "attention", reason: health.message }
+  const expiry = expiryState(health?.expiresAt, now)
+  if (expiry.kind === "expired" || (expiry.kind === "expiring" && expiry.warning)) return { kind: "attention", reason: `Token ${expiryLabel(expiry)!.toLowerCase()}.` }
+  return health ? { kind: "healthy" } : { kind: "unchecked" }
+}

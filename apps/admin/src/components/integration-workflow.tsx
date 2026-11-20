@@ -7,6 +7,7 @@ import {
   GitPullRequestIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
+import { cn } from "cn"
 
 import { ExternalLink } from "@/components/external-link"
 import { Badge } from "@/components/ui/badge"
@@ -53,11 +54,13 @@ export function IntegrationWorkflow({
   repo: typedRepo,
   repoLabel,
   githubReady,
+  className,
 }: {
   template: LinkedTemplate
   repo: string | undefined
   repoLabel: string
   githubReady: boolean
+  className?: string
 }) {
   const project = useProjectId()
   const queryClient = useQueryClient()
@@ -80,7 +83,7 @@ export function IntegrationWorkflow({
   const secrets = template.requiredSecrets.map((names) => names.join(" or "))
 
   return (
-    <section aria-label="GitHub workflow" className="flex flex-col gap-3 rounded-lg border p-3">
+    <section aria-label="GitHub workflow" className={cn("flex flex-col gap-3 rounded-lg border p-3", className)}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium">GitHub workflow</span>
         <Badge variant="outline" className="font-mono">

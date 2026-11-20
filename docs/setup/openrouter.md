@@ -120,9 +120,10 @@ These settings apply to the whole organization. A stricter rule for one key goes
 | Run fails with `429` | Rate limit of the model or provider. Retry later or choose another model. |
 | "returned no valid JSON" | The model ignores structured outputs. Choose another model. |
 
-![The OpenRouter form in the admin: 1 Replace the API key, 2 Triage model, 3 Escalation model, 4 Test connection](img/admin-08-openrouter-form.png)
+![The OpenRouter form before its first save: 1 API key, 2 Triage model, 3 Escalation model, 4 Save, 5 Test connection](img/admin-08-openrouter-form.png)
 
-1. **API key.** Click **Replace**, paste the `sk-or-...` key and save. It is stored encrypted and never shown again.
+1. **API key.** Paste the `sk-or-...` key. It is stored encrypted and never shown again. To change it later, click **Edit** on **Connection**, then **Replace**.
 2. **Triage model.** The fast first pass. Leave the default unless you have a reason.
 3. **Escalation model.** Asked again for bugs and low-confidence verdicts.
-4. **Test connection.** Sends a tiny request to check that the key works.
+4. **Save.**
+5. **Test connection.** Sends a tiny request to check that the key works.

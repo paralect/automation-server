@@ -2,7 +2,7 @@
 
 This guide connects PostHog to the admin so a weekly report posts to a Slack channel. For what the report contains, the schedule rules and the admin API, read [docs/integrations/posthog.md](../integrations/posthog.md).
 
-PostHog sends nothing to this server. The server calls PostHog on a schedule, so there is no webhook URL to paste into PostHog. There are no environment variables for this integration. Everything is entered on the admin Integrations page, in the PostHog card.
+PostHog sends nothing to this server. The server calls PostHog on a schedule, so there is no webhook URL to paste into PostHog. There are no environment variables for this integration. Everything is entered on the admin Integrations page, under PostHog.
 
 Before you start, make sure the server has `SETTINGS_ENCRYPTION_KEY` set. The admin refuses to save the two secrets below without it.
 
@@ -79,10 +79,10 @@ Treat the URL as a secret. Anyone who has it can post to the channel. The report
 
 ## 4. Fill in the admin
 
-1. Open the admin and go to **Integrations**. Find the **PostHog** card.
+1. Open the admin and go to **Integrations**. Open **PostHog**.
 2. Fill in the fields.
 
-![The PostHog form in the admin: 1 host, 2 project ID, 3 Replace the API key, 4 Enabled switch, 5 Replace the Slack webhook URL, 6 Preview report and Send now](img/admin-10-posthog-form.png)
+![The PostHog form before its first save: 1 Host, 2 Project ID, 3 Personal API key, 4 Slack webhook URL, 5 Save](img/admin-10-posthog-form.png)
 
 | Field | Value |
 | --- | --- |
@@ -90,13 +90,13 @@ Treat the URL as a secret. Anyone who has it can post to the channel. The report
 | Project ID | From step 1. |
 | Personal API key | The `phx_xxx` key from step 2. |
 | Slack webhook URL | The `https://hooks.slack.com/services/...` URL from step 3. |
-| Report title | Optional. First line of the report. Default `Weekly PostHog report`. |
+| Report title | Optional, under **Advanced**. First line of the report. Default `Weekly PostHog report`. |
 
-3. Click **Save**. The card shows **Configured** once the four required fields are set.
+3. Click **Save**. The page switches to a summary once the four required fields are set.
 
 ## 5. Choose the schedule
 
-Still in the PostHog card, set these fields and click **Save**.
+Click **Edit** on the **Weekly report** section, set these fields and click **Save**.
 
 | Field | Meaning | Default |
 | --- | --- | --- |
@@ -108,13 +108,13 @@ The default sends on Monday at 09:00 UTC. At most one report is sent per ISO wee
 
 ## 6. Test
 
-Run these in order in the PostHog card. None of them needs **Enabled** to be on.
+Run these in order on the PostHog page. None of them needs **Enabled** to be on.
 
 1. Click **Test connection**. It runs a small count query over the last day and shows the result. It tests the saved settings, so click **Save** first. A failure here means a wrong host, project ID or key scope.
-2. Click **Preview report**. The report text appears in the card. Nothing is sent to Slack.
+2. In **Try the report**, click **Preview report**. The report text appears below it. Nothing is sent to Slack.
 3. Click **Send now** and confirm the prompt. The report posts to the Slack channel. A manual send does not use up the weekly send, so the scheduled one still goes out.
 
-If a step fails, check the error text in the card. Errors never include the key or the webhook URL.
+If a step fails, check the error text on the page. Errors never include the key or the webhook URL.
 
 | Symptom | Likely cause |
 | --- | --- |

@@ -2,23 +2,6 @@ import type { DirectoryItem, FieldView } from "@automation-server/api/routers/in
 
 export type PickerKind = "users" | "channels"
 
-export type FieldGroup = { name: string | undefined; help: string | undefined; fields: FieldView[] }
-
-// Groups appear in the order their first field does, so the spec decides the page layout. Fields without a group share one heading-less section.
-export function groupFields(fields: readonly FieldView[]): FieldGroup[] {
-  const groups: FieldGroup[] = []
-  for (const field of fields) {
-    const found = groups.find((g) => g.name === field.group)
-    if (found) {
-      found.fields.push(field)
-      found.help ??= field.groupHelp
-    } else {
-      groups.push({ name: field.group, help: field.groupHelp, fields: [field] })
-    }
-  }
-  return groups
-}
-
 export const pickerKindOf = (kind: FieldView["kind"]): PickerKind | undefined =>
   kind === "slackUsers" ? "users" : kind === "slackChannels" ? "channels" : undefined
 
