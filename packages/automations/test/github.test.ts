@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import { createGithubClient } from "../src/github";
 
@@ -22,7 +23,7 @@ export function mockFetch(handler: (call: Call) => Response) {
 export const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 
 const TOKEN = "ghp_SUPERSECRETTOKEN";
-const make = (f: typeof fetch) => createGithubClient({ repo: { owner: "o", name: "r" }, token: TOKEN, fetch: f });
+const make = (f: typeof fetch) => createGithubClient({ repo: { owner: "o", name: "r" }, token: TOKEN, fetch: f, observe: UNOBSERVED });
 
 describe("github client", () => {
   test("sends required headers and posts labels", async () => {
@@ -117,7 +118,24 @@ describe("github client", () => {
 
   test("custom apiBaseUrl", async () => {
     const { fn, calls } = mockFetch(() => json(201, {}));
-    await createGithubClient({ repo: { owner: "o", name: "r" }, token: "t", fetch: fn, apiBaseUrl: "https://ghe.local/api/v3/" }).ensureLabels(["a"]);
+    await createGithubClient({ repo: { owner: "o", name: "r" }, token: "t", fetch: fn, apiBaseUrl: "https://ghe.local/api/v3/", observe: UNOBSERVED }).ensureLabels(["a"]);
     expect(calls[0]?.url).toBe("https://ghe.local/api/v3/repos/o/r/labels");
+  });
+
+  test("dispatch retries once without return_run_details after a 422", async () => {
+    const { fn, calls } = mockFetch((call) =>
+      (call.body as Record<string, unknown>).return_run_details ? json(422, { message: "Invalid request" }) : new Response(null, { status: 204 }),
+    );
+    await make(fn).dispatchWorkflow("codex-issue-fix.yml", "main", { issue_number: "12" });
+    expect(calls.map((c) => c.body)).toEqual([
+      { ref: "main", inputs: { issue_number: "12" }, return_run_details: true },
+      { ref: "main", inputs: { issue_number: "12" } },
+    ]);
+  });
+
+  test("dispatch still fails when the 422 repeats without the field", async () => {
+    const { fn, calls } = mockFetch(() => json(422, { message: "Workflow does not have 'workflow_dispatch' trigger" }));
+    await expect(make(fn).dispatchWorkflow("codex-issue-fix.yml", "main", {})).rejects.toThrow("status 422");
+    expect(calls).toHaveLength(2);
   });
 });

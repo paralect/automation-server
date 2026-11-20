@@ -2,7 +2,8 @@
   "name": "@automation-server/ledger",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",

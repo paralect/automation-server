@@ -1,6 +1,7 @@
 import { createScheduler, createSqliteActivityStore, createSqliteStore, type Job, type Logger } from "@automation-server/core";
 import { createSqliteHealthStore, createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import { createAlertNotifier } from "../src/alerts";
 import { createHealthSink, TOKEN_HEALTH_JOB } from "../src/health";
@@ -40,7 +41,7 @@ const setup = ({ env = {}, adminUrl }: { env?: Record<string, string>; adminUrl?
   const healthStore = createSqliteHealthStore({ path: ":memory:" });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const { notifyHealth } = createAlertNotifier({ resolve, activity, log, fetch, adminUrl, health: healthStore });
-  const runtime = createRuntime({
+  const runtime = createRuntime({ observerFor: () => UNOBSERVED,
     modules: INTEGRATION_MODULES,
     projects: () => ["default"],
     resolve,

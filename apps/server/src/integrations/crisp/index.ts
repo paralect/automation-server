@@ -10,7 +10,7 @@ const isMode = (value: string): value is Mode => MODE_SET.has(value);
 
 export const crisp = defineModule({
   id: "crisp",
-  build({ crisp, openrouter, github }, { log, fetch }) {
+  build({ crisp, openrouter, github }, { log, fetch, observe }) {
     if (!crisp.configured) return {};
     const v = crisp.values;
     const source = createCrispSource({
@@ -49,6 +49,7 @@ export const crisp = defineModule({
       autofixAreas: v.autofixAreas ?? [],
       workflowFile: v.workflowFile,
       fetch,
+      observe,
     });
     return { sources: [source], automations: [dryRun ? withDryRun(triage) : triage] };
   },

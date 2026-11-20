@@ -1,5 +1,7 @@
 import { GITHUB_API, githubHeaders } from "@automation-server/api/githubApi";
-import { parseExpiry } from "@automation-server/settings";
+import { parseRepoName } from "@automation-server/ledger";
+import { createOutcomeSyncJob } from "@automation-server/ledger/server";
+import { effectiveActionsRepos, parseExpiry } from "@automation-server/settings";
 import { z } from "zod";
 
 import { defineModule } from "../module";
@@ -11,7 +13,15 @@ const repoSchema = z.object({ private: z.boolean().optional(), permissions: z.ob
 
 export const github = defineModule({
   id: "github",
-  build: () => ({}),
+  // Tracks Codex PRs in the Actions repositories and the Linear target repository, so their outcomes need no extra setup.
+  build({ github, linear }, { ledger, project, fetch }) {
+    if (!github.configured || !ledger || !project) return {};
+    const repos = () => {
+      const names = [...effectiveActionsRepos(github), ...(linear.configured ? [linear.values.targetRepo] : [])];
+      return [...new Set(names.flatMap((name) => parseRepoName(name) ?? []))];
+    };
+    return { jobs: [createOutcomeSyncJob({ project, ledger, token: github.values.token, repos, fetch })] };
+  },
   async test({ github }, { fetch: doFetch = fetch }) {
     if (!github.configured) return { ok: false, available: true, message: "GitHub token is not set" };
     const call = (path: string) =>

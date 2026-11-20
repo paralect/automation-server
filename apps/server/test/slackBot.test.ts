@@ -1,6 +1,7 @@
 import { createDispatcher, createSqliteActivityStore, createSqlitePendingActionStore, createSqliteStore, type Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 import { createHmac } from "node:crypto";
 
 import { NOT_CONFIGURED_REPLY } from "@automation-server/automations";
@@ -76,7 +77,7 @@ const setup = ({
       ...extraSettings,
     ],
   });
-  const runtime = createRuntime({
+  const runtime = createRuntime({ observerFor: () => UNOBSERVED,
     modules: [slack],
     projects: () => ["default"],
     resolve: (p) => resolveConfig(settings.project(p), envFor(p, env)),
@@ -319,7 +320,7 @@ describe("slack connection test", () => {
 
   test("a rejected token comes back as not ok without the token", async () => {
     const t = setup({ env: BASE_ENV });
-    const failing = createRuntime({
+    const failing = createRuntime({ observerFor: () => UNOBSERVED,
       modules: [slack],
       projects: () => ["default"],
       resolve: () => resolveConfig({ all: () => ({}) }, BASE_ENV),

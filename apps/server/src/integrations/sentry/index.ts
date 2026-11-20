@@ -8,7 +8,7 @@ const SENTRY_REJECTED = new Set([401, 403]);
 
 export const sentry = defineModule({
   id: "sentry",
-  build({ sentry, github }, { log, fetch }) {
+  build({ sentry, github }, { log, fetch, observe }) {
     if (!sentry.configured) return {};
     const source = createSentrySource({
       clientSecret: sentry.values.clientSecret,
@@ -31,6 +31,7 @@ export const sentry = defineModule({
           environments: sentry.values.environments ?? [],
           minEventCount: sentry.values.minEventCount,
           fetch,
+          observe,
         }),
       ],
     };

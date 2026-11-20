@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import type { Event } from "@automation-server/core/event";
 
@@ -22,6 +23,7 @@ const setup = (handler: Parameters<typeof mockFetch>[0], over: Partial<SentryToG
     environments: [],
     minEventCount: 1,
     fetch: m.fn,
+    observe: UNOBSERVED,
     ...over,
   };
   const logs: { message: string; fields?: Record<string, unknown> }[] = [];

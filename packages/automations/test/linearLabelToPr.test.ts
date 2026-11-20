@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import type { Logger } from "@automation-server/core/logger";
 import type { LinearIssue, LinearIssueEvent } from "@automation-server/sources/linear/event";
@@ -44,6 +45,7 @@ const log: Logger = {
 const make = (f: typeof fetch, over: Partial<LinearLabelToPrConfig> = {}) =>
   createLinearLabelToPr({
     triggerLabel: "codex",
+    observe: UNOBSERVED,
     repo: { owner: "o", name: "r" },
     token: TOKEN,
     workflowFile: "linear-implement.yml",
@@ -78,6 +80,7 @@ describe("linear-label-to-pr", () => {
         issue_url: "https://linear.app/acme/issue/ENG-42/fix-login",
         issue_description: "Users land on a 404 after login.",
       },
+      return_run_details: true,
     });
   });
 

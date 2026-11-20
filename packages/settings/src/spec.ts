@@ -97,6 +97,7 @@ export const INTEGRATIONS = {
       { key: "apiKey", label: "API key", kind: "secret", group: "Connection", required: true, help: "An OpenRouter API key. Set a credit limit on it." },
       { key: "triageModel", label: "Triage model", kind: "text", group: "Models", default: "anthropic/claude-haiku-5.5", help: "Fast model for the first pass. Must support structured outputs." },
       { key: "escalationModel", label: "Escalation model", kind: "text", group: "Models", default: "anthropic/claude-sonnet-5.5", help: "Stronger model for bugs and unsure verdicts." },
+      { key: "monthlyBudgetUsd", label: "Monthly budget (USD)", kind: "number", group: "Budget", groupHelp: "Spend of the LLM calls this server makes, per calendar month (UTC).", default: 0, min: 0, help: "0 turns the budget off. When spend reaches 80% and 100% of it, the Slack alerts webhook gets one message for each, once a month. Nothing is blocked: the credit limit on the OpenRouter key is the hard cap." },
     ],
   },
   crisp: {

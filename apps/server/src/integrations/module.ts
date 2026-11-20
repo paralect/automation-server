@@ -1,4 +1,5 @@
 import type { Automation, Job, Logger, PendingActionStore, Source } from "@automation-server/core";
+import type { LedgerSyncPort, Observer } from "@automation-server/ledger";
 import type { ConnectionTestResult, IntegrationId, ResolvedConfig } from "@automation-server/settings";
 
 export type ModuleDeps = {
@@ -8,6 +9,10 @@ export type ModuleDeps = {
   readonly project?: string;
   // Where proposed writes wait for approval. Without it the Slack bot offers no write tools.
   readonly pending?: PendingActionStore;
+  // The project's observer. Every LLM and GitHub client a module builds reports through it.
+  readonly observe: Observer;
+  // Where the outcome sync writes Codex PRs and workflow runs. Without it the GitHub module builds no sync job.
+  readonly ledger?: LedgerSyncPort;
 };
 
 export type TestOptions = { readonly scheduled?: boolean };

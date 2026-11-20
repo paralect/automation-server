@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { buildConfig, webhookUrls, type RawEnv } from "../src/config";
 
-const base: RawEnv = { PORT: 3000, DATABASE_PATH: "./data/automation.db", LOG_RETENTION_DAYS: 30 };
+const base: RawEnv = { PORT: 3000, DATABASE_PATH: "./data/automation.db", LOG_RETENTION_DAYS: 30, LEDGER_RETENTION_DAYS: 400 };
 
 describe("buildConfig", () => {
   test("maps env to typed config", () => {
@@ -11,6 +11,7 @@ describe("buildConfig", () => {
       databasePath: "./data/automation.db",
       adminToken: undefined,
       retentionDays: 30,
+      ledgerRetentionDays: 400,
       encryptionKey: undefined,
       publicUrl: undefined,
     });

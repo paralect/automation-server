@@ -1,6 +1,7 @@
 import { defineAutomation, type Automation } from "@automation-server/core/automation";
 import type { Event } from "@automation-server/core/event";
 import { isLinearIssue, type LinearIssue, type LinearIssueEvent } from "@automation-server/sources/linear/event";
+import type { Observer } from "@automation-server/ledger";
 
 import { createGithubClient, GithubApiError } from "../github";
 
@@ -14,6 +15,7 @@ export type LinearLabelToPrConfig = {
   ref: string;
   apiBaseUrl?: string;
   fetch?: typeof fetch;
+  observe: Observer;
 };
 
 export type WorkflowInputs = {

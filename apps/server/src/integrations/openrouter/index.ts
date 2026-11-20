@@ -1,4 +1,5 @@
 import { createOpenRouterClient, OpenRouterError } from "@automation-server/automations";
+import { UNOBSERVED } from "@automation-server/ledger";
 import { parseExpiry } from "@automation-server/settings";
 
 import { defineModule } from "../module";
@@ -9,7 +10,7 @@ export const openrouter = defineModule({
   async test({ openrouter }, { fetch }) {
     if (!openrouter.configured) return { ok: false, available: true, message: "OpenRouter API key is not set" };
     try {
-      const key = await createOpenRouterClient({ apiKey: openrouter.values.apiKey, fetch }).key();
+      const key = await createOpenRouterClient({ apiKey: openrouter.values.apiKey, fetch, observe: UNOBSERVED }).key();
       const details: Record<string, string> = { triageModel: openrouter.values.triageModel, escalationModel: openrouter.values.escalationModel };
       if (key.label) details.label = key.label;
       if (key.usage !== null) details.usage = String(key.usage);

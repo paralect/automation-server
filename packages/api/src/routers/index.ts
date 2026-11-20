@@ -24,7 +24,9 @@ import {
 } from "@automation-server/settings";
 import { CRISP_DECISIONS, crispOutcomeSchema, type CrispDecision, type CrispOutcome } from "@automation-server/sources/crisp/outcome";
 import {
+  monthOf,
   OUTCOME_WINDOWS,
+  WORKFLOW_STATES,
   type CostMonth,
   type OutcomeSummary,
   type PullRequestRow,
@@ -35,11 +37,13 @@ import { ORPCError, type, type RouterClient } from "@orpc/server";
 import { z } from "zod";
 
 import { adminProcedure, o } from "../index";
+import { monthlyBudget } from "../budget";
 import type { Context, PosthogPreview, PosthogRunResult, SystemInfo } from "../context";
 import { canReplay, SCHEDULE_SOURCE } from "../replay";
-import { ACTION_STATES, type ActionsRunList, type WorkflowJob, type WorkflowRun } from "../githubActions";
+import type { ActionsRunList, WorkflowJob, WorkflowRun } from "../githubActions";
 import { DAY_MS, HOUR_MS } from "../time";
 import { SlackDirectoryError, type DirectoryFailure, type DirectoryResult } from "../slackDirectory";
+import { triggerUrl } from "../trigger";
 import { WorkflowInstallError, type InstallResult, type WorkflowCheck, type WorkflowStatus } from "../workflowInstaller";
 import { WORKFLOW_TEMPLATES, type IntegrationLink } from "../workflowTemplates";
 
@@ -99,9 +103,6 @@ function runInProject(context: Context, project: string, id: string) {
   return found;
 }
 
-const notImplemented = (): never => {
-  throw new ORPCError("NOT_IMPLEMENTED");
-};
 const precondition = (message: string) => new ORPCError("PRECONDITION_FAILED", { message });
 
 async function replayEvent(context: Context, project: string, run: RunRecord, event: StoredEvent | undefined, dryRun: boolean) {
@@ -245,7 +246,13 @@ export const appRouter = {
     trace: adminProcedure
       .input(z.object({ project, id: z.string().min(1) }))
       .output(type<RunTrace & { trigger: { source: string; externalId: string; url: string | null } }>())
-      .handler(() => notImplemented()),
+      .handler(({ input, context }) => {
+        const { run, event } = runInProject(context, input.project, input.id);
+        return {
+          ...context.ledger.trace(input.project, run.id, new Date()),
+          trigger: { source: run.source, externalId: run.externalId, url: triggerUrl(event) },
+        };
+      }),
   },
 
   crisp: {
@@ -306,22 +313,28 @@ export const appRouter = {
     summary: adminProcedure
       .input(z.object({ project, windowDays: z.union(OUTCOME_WINDOWS.map((d) => z.literal(d))).default(30) }))
       .output(type<OutcomeSummary>())
-      .handler(() => notImplemented()),
+      .handler(({ input, context }) => context.ledger.outcomes(inProject(context, input.project), input.windowDays, new Date())),
     pullRequests: adminProcedure
       .input(z.object({ project, state: z.enum(["open", "merged", "closed"]).optional(), origin: text, ...page }))
       .output(type<Page<PullRequestRow>>())
-      .handler(() => notImplemented()),
+      .handler(({ input, context }) => context.ledger.pullRequests({ ...input, project: inProject(context, input.project) })),
     syncNow: adminProcedure
       .input(z.object({ project }))
       .output(type<SyncNowResult>())
-      .handler(() => notImplemented()),
+      .handler(({ input, context }) => context.outcomes.syncNow(inProject(context, input.project))),
   },
 
   costs: {
     month: adminProcedure
       .input(z.object({ project, month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional() }))
       .output(type<CostMonth>())
-      .handler(() => notImplemented()),
+      .handler(({ input, context }) => {
+        const id = inProject(context, input.project);
+        const now = new Date();
+        const store = context.settings.db.project(id);
+        const budget = monthlyBudget(resolveConfig(store, envFor(id, context.settings.env)));
+        return context.ledger.costs(id, input.month ?? monthOf(now), budget, now);
+      }),
   },
 
   actions: {
@@ -331,7 +344,7 @@ export const appRouter = {
           project,
           repo: text,
           workflow: text,
-          state: z.enum(ACTION_STATES).optional(),
+          state: z.enum(WORKFLOW_STATES).optional(),
           page: z.number().int().min(1).max(50).default(1),
         }),
       )

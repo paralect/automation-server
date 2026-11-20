@@ -1,6 +1,7 @@
 import type { Automation, Job, Logger, Source } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import { defineModule, type IntegrationModule } from "../src/integrations/module";
 import { createRuntime } from "../src/runtime";
@@ -12,7 +13,7 @@ const job = (name: string): Job => ({ name, due: () => null, run: async () => {}
 
 const setup = (modules: IntegrationModule[], env: Record<string, string> = {}) => {
   const store = createSqliteSettingsStore({ path: ":memory:", encryptionKey: "k" });
-  const runtime = createRuntime({ modules, projects: () => store.projects().map((p) => p.id), resolve: (p) => resolveConfig(store.project(p), envFor(p, env)), deps: { log } });
+  const runtime = createRuntime({ observerFor: () => UNOBSERVED, modules, projects: () => store.projects().map((p) => p.id), resolve: (p) => resolveConfig(store.project(p), envFor(p, env)), deps: { log } });
   return { store, runtime };
 };
 

@@ -92,6 +92,7 @@
       "name": "@automation-server/automations",
       "dependencies": {
         "@automation-server/core": "workspace:*",
+        "@automation-server/ledger": "workspace:*",
         "@automation-server/sources": "workspace:*",
         "@chat-adapter/slack": "4.45.0",
         "@json-render/chat": "0.22.0",

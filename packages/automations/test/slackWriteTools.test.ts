@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 import { z } from "zod";
 
 import { buildReadTools, buildWriteTools, executeTool, type AnyTool, type ToolContext } from "../src/slackBot/tools";
@@ -35,14 +36,14 @@ describe("write tool registration", () => {
     expect(buildWriteTools({})).toEqual([]);
     const linear = buildWriteTools({ linear: { apiKey: LINEAR_KEY } });
     expect(linear.map((t) => t.name)).toEqual(["linear.createIssue", "linear.addLabel"]);
-    const github = buildWriteTools({ github: { token: GH_TOKEN, repo: { owner: "acme", name: "app" }, workflowFiles: ["linear-implement.yml"] } });
+    const github = buildWriteTools({ github: { token: GH_TOKEN, repo: { owner: "acme", name: "app" }, workflowFiles: ["linear-implement.yml"], observe: UNOBSERVED } });
     expect(github.map((t) => t.name)).toEqual(["github.createIssue", "github.dispatchWorkflow"]);
     for (const tool of [...linear, ...github]) expect(tool.kind).toBe("write");
     for (const tool of buildReadTools({ linear: { apiKey: LINEAR_KEY } })) expect(tool.kind).toBe("read");
   });
 
   test("without a configured workflow file there is no dispatch tool", () => {
-    const tools = buildWriteTools({ github: { token: GH_TOKEN, repo: { owner: "acme", name: "app" }, workflowFiles: [] } });
+    const tools = buildWriteTools({ github: { token: GH_TOKEN, repo: { owner: "acme", name: "app" }, workflowFiles: [], observe: UNOBSERVED } });
     expect(tools.map((t) => t.name)).toEqual(["github.createIssue"]);
   });
 
@@ -137,7 +138,7 @@ const githubFake = () => {
 };
 
 describe("github write tools", () => {
-  const config = (fn: typeof fetch) => buildWriteTools({ github: { token: GH_TOKEN, repo: { owner: "acme", name: "app" }, workflowFiles: ["linear-implement.yml", "codex-issue-fix.yml"] }, fetch: fn });
+  const config = (fn: typeof fetch) => buildWriteTools({ github: { token: GH_TOKEN, repo: { owner: "acme", name: "app" }, workflowFiles: ["linear-implement.yml", "codex-issue-fix.yml"], observe: UNOBSERVED }, fetch: fn });
 
   test("createIssue posts to the configured repository only and returns the link", async () => {
     const fake = githubFake();
@@ -150,7 +151,7 @@ describe("github write tools", () => {
     const fake = githubFake();
     const result = await executeTool(named(config(fake.fn), "github.dispatchWorkflow"), { workflowFile: "codex-issue-fix.yml", inputs: { issue: "12" } }, ctx);
     expect(result).toEqual({ ok: true, text: "Started workflow codex-issue-fix.yml in acme/app on main" });
-    expect(fake.writes()).toEqual([expect.objectContaining({ path: "/repos/acme/app/actions/workflows/codex-issue-fix.yml/dispatches", body: { ref: "main", inputs: { issue: "12" } } })]);
+    expect(fake.writes()).toEqual([expect.objectContaining({ path: "/repos/acme/app/actions/workflows/codex-issue-fix.yml/dispatches", body: { ref: "main", inputs: { issue: "12" }, return_run_details: true } })]);
   });
 
   test("dispatchWorkflow refuses a workflow that is not in the allowlist and sends nothing", async () => {
@@ -173,13 +174,13 @@ describe("github write tools", () => {
     expect(JSON.stringify(z.toJSONSchema(tool.argsSchema))).not.toContain('"ref"');
     const result = await executeTool(tool, { workflowFile: "codex-issue-fix.yml", ref: "evil-branch" }, ctx);
     expect(result).toEqual({ ok: true, text: "Started workflow codex-issue-fix.yml in acme/app on main" });
-    expect(fake.writes()).toEqual([expect.objectContaining({ body: { ref: "main", inputs: {} } })]);
+    expect(fake.writes()).toEqual([expect.objectContaining({ body: { ref: "main", inputs: {}, return_run_details: true } })]);
   });
 
   test("dispatchWorkflow uses the configured ref of that workflow file", async () => {
     const fake = githubFake();
     const tools = buildWriteTools({
-      github: { token: GH_TOKEN, repo: { owner: "acme", name: "app" }, workflowFiles: ["linear-implement.yml", "codex-issue-fix.yml"], workflowRefs: { "linear-implement.yml": "release" } },
+      github: { token: GH_TOKEN, repo: { owner: "acme", name: "app" }, workflowFiles: ["linear-implement.yml", "codex-issue-fix.yml"], observe: UNOBSERVED, workflowRefs: { "linear-implement.yml": "release" } },
       fetch: fake.fn,
     });
     const tool = named(tools, "github.dispatchWorkflow");

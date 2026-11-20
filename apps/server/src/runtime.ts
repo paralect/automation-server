@@ -1,5 +1,6 @@
 import { errorMessage } from "@automation-server/api/errors";
 import type { Automation, Job, Logger, Source } from "@automation-server/core";
+import type { Observer } from "@automation-server/ledger";
 import { INTEGRATIONS, type ConnectionTestResult, type IntegrationId, type ResolvedConfig } from "@automation-server/settings";
 
 import { createTokenHealthJob, type HealthSink } from "./health";
@@ -38,7 +39,9 @@ export type RuntimeDeps = {
   modules: readonly IntegrationModule[];
   projects: () => readonly string[];
   resolve: (project: string) => ResolvedConfig;
-  deps: ModuleDeps;
+  deps: Omit<ModuleDeps, "observe" | "project">;
+  // Required, so a caller decides per project: record through the ledger, or UNOBSERVED on purpose.
+  observerFor: (project: string) => Observer;
   testTimeoutMs?: number;
   health?: HealthSink;
 };
@@ -49,8 +52,8 @@ const withProject = (log: Logger, project: string): Logger => ({
   error: (m, f) => log.error(m, { project, ...f }),
 });
 
-export function createRuntime({ modules, projects, resolve, deps, testTimeoutMs = TEST_TIMEOUT_MS, health }: RuntimeDeps): Runtime {
-  const depsFor = (project: string): ModuleDeps => ({ ...deps, project, log: withProject(deps.log, project) });
+export function createRuntime({ modules, projects, resolve, deps, observerFor, testTimeoutMs = TEST_TIMEOUT_MS, health }: RuntimeDeps): Runtime {
+  const depsFor = (project: string): ModuleDeps => ({ ...deps, project, log: withProject(deps.log, project), observe: observerFor(project) });
 
   const probe = async (project: string, id: IntegrationId, options?: TestOptions): Promise<ConnectionTestResult> => {
     const title = INTEGRATIONS[id].title;

@@ -3,6 +3,7 @@ export type ServerConfig = {
   databasePath: string;
   adminToken?: string;
   retentionDays: number;
+  ledgerRetentionDays: number;
   encryptionKey?: string;
   publicUrl?: string;
   adminPublicUrl?: string;
@@ -13,6 +14,7 @@ export type RawEnv = {
   DATABASE_PATH: string;
   ADMIN_API_TOKEN?: string;
   LOG_RETENTION_DAYS: number;
+  LEDGER_RETENTION_DAYS: number;
   SETTINGS_ENCRYPTION_KEY?: string;
   PUBLIC_URL?: string;
   ADMIN_PUBLIC_URL?: string;
@@ -24,6 +26,7 @@ export function buildConfig(env: RawEnv): ServerConfig {
     databasePath: env.DATABASE_PATH,
     adminToken: env.ADMIN_API_TOKEN || undefined,
     retentionDays: env.LOG_RETENTION_DAYS,
+    ledgerRetentionDays: env.LEDGER_RETENTION_DAYS,
     encryptionKey: env.SETTINGS_ENCRYPTION_KEY || undefined,
     publicUrl: env.PUBLIC_URL ? env.PUBLIC_URL.replace(/\/+$/, "") : undefined,
     adminPublicUrl: env.ADMIN_PUBLIC_URL ? env.ADMIN_PUBLIC_URL.replace(/\/+$/, "") : undefined,
