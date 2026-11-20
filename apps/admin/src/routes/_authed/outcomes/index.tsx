@@ -165,8 +165,8 @@ function SummaryView({
       {errors.map(({ repo, error }) => (
         <Alert key={repo} role="alert">
           <WarningIcon />
-          <AlertTitle>Could not sync {repo}</AlertTitle>
-          <AlertDescription>{error}. Figures from the other repositories are still current.</AlertDescription>
+          <AlertTitle>Sync problem in {repo}</AlertTitle>
+          <AlertDescription>{error}. Everything else that synced is current.</AlertDescription>
         </Alert>
       ))}
 
