@@ -2,7 +2,7 @@
 
 This guide creates a Slack app that your team tags in a channel. The bot reads the question (and the thread it was tagged in), asks an AI model, and lets the model look things up in the services you connected. It answers in the thread. It can also propose changes (create an issue, label a ticket, start a workflow), but it never makes one until the person who asked approves it in the thread. See [Changes and approval](#changes-and-approval).
 
-The bot answers only the users you choose. Everything is configured on the admin Integrations page, in the **Slack** card. The setup order is: create the app, install it, paste the bot token and signing secret and save, then choose users and channels from your live Slack directory in the admin, then invite the bot and try it. The alert webhook is optional. You can run the bot without it, or the alerts without the bot.
+The bot answers only the users you choose. Everything is configured on the admin Integrations page, under **Slack**. The setup order is: create the app, install it, paste the bot token and signing secret and save, then choose users and channels from your live Slack directory in the admin, then invite the bot and try it. The alert webhook is optional. You can run the bot without it, or the alerts without the bot.
 
 ## What the bot can do
 
@@ -90,7 +90,7 @@ The **Require approval for changes** field (`requireApproval`, on by default) co
 
 ## Model choice and cost
 
-The bot uses the **Agent model** field of the Slack card. If it is empty it uses the **Escalation model** of the OpenRouter integration (`anthropic/claude-sonnet-5.5` by default). The model must support structured outputs, like the Crisp triage models.
+The bot uses the **Agent model** field, under **Advanced** on the Slack page. If it is empty it uses the **Escalation model** of the OpenRouter integration (`anthropic/claude-sonnet-5.5` by default). The model must support structured outputs, like the Crisp triage models.
 
 Each question costs one to seven model calls, and each call carries the thread, the question and the tool results so far, up to a few thousand tokens. A typical question with one tool is two calls. Set a credit limit on the OpenRouter key, and use a cheaper model in **Agent model** if cost matters. Only listed members can trigger calls, so the allowlist is also your cost control.
 
@@ -153,9 +153,9 @@ Reinstall the app after adding scopes. Slack keeps the old token's permissions u
 
 1. In the Slack app, open **Basic Information**, find **Signing Secret**, click **Show** and copy it.
 2. Open **Install App**, click **Install to Workspace** and allow it. Copy the **Bot User OAuth Token**, which starts with `xoxb-`.
-3. In the admin open **Integrations**, then the **Slack** card. The page has four sections: **Connection**, **Access**, **Alerts** and **Advanced**. Under **Connection** paste the bot token (env: `SLACK_BOT_TOKEN`) and the signing secret (env: `SLACK_SIGNING_SECRET`), and click **Save**. The pickers in **Access** stay disabled until the bot token is saved.
+3. In the admin open **Integrations**, then **Slack**. The page has four sections: **Connection**, **Access**, **Alerts** and **Advanced**. Under **Connection** (click **Edit** if Slack is already configured) paste the bot token (env: `SLACK_BOT_TOKEN`) and the signing secret (env: `SLACK_SIGNING_SECRET`), and click **Save**. The pickers in **Access** stay disabled until the bot token is saved.
 
-The card also shows the **Webhook URL** to use as the Slack request URL. It needs `PUBLIC_URL` on the server.
+**Connection** also shows the **Webhook URL** to use as the Slack request URL. It needs `PUBLIC_URL` on the server.
 
 4. Click **Test connection**. It calls `auth.test` and shows the bot name and the workspace. It never shows the token, and it posts no message unless you also set the alert webhook.
 
@@ -163,12 +163,12 @@ The daily token check also calls `auth.test` for the bot token, and alerts when 
 
 ## 3. Choose users and channels
 
-Once the bot token is saved, the **Access** section reads your live Slack directory. Nothing is typed by hand.
+Once the bot token is saved, the **Access** section reads your live Slack directory. Nothing is typed by hand. Click **Edit** on **Access** to change it.
 
 1. Click **Choose users**. A dialog lists the people of your workspace (no deactivated accounts, bots or Slackbot). Search by name or `@handle`, tick the people who may use the bot, click **Done**. They show as chips with their names. Remove one with its **x**.
 2. Optional: click **Choose channels** to limit where the bot answers. Public and private channels are listed, and a channel the bot has not been invited to is marked `bot not invited`. **Allowed channels** empty means the bot answers in any channel it has been invited to. With channels chosen, a mention anywhere else is ignored: no reply, no model call. It still shows as a run with the decision `channel-not-allowed`.
 3. Turn **Bot enabled** on. The route `/webhooks/<project>/slack` only exists while this is on.
-4. Click **Save**. Choosing in the dialog changes nothing until you save the page.
+4. Click **Save**. Choosing in the dialog changes nothing until you save the section.
 
 Until at least one user is chosen the page shows `Nobody can use the bot yet. Choose at least one user.` Someone who is not chosen gets `You are not allowed to use this bot. Ask an admin to add you to the allowed users.` at most once every 10 minutes, and nothing at all in between. No model call, tool call or thread read happens for them. The check runs on every mention, so approving and cancelling a change obey it too.
 

@@ -70,7 +70,7 @@ Never paste these values into a chat, an issue or a commit. If one leaks, click 
 ## 4. Add the web hook
 
 1. Open the **Settings** tab and scroll to **Events**, **Web Hooks**.
-2. In **Production Web Hook**, enter `https://<host>/webhooks/<project>/crisp`. The admin shows the exact URL on the Crisp integration card, with a copy button.
+2. In **Production Web Hook**, enter `https://<host>/webhooks/<project>/crisp`. The admin shows the exact URL on the Crisp integration page, with a copy button.
 3. Click **Create Web Hook**.
 4. In the dialog that lists events, turn on exactly these two and leave the rest off.
 
@@ -112,7 +112,7 @@ The server ignores deliveries for any other website.
 ## 7. Save the settings in the admin
 
 1. In the admin, open **Integrations** and click **Add integration**. Pick **Crisp**.
-2. Fill the four required fields from steps 3 and 6. Leave the rest at their defaults for now.
+2. Fill the four required fields from steps 3 and 6, all in **Connection**. Leave the rest at their defaults for now.
 3. Click **Save**, then **Test connection**. A working setup answers that the plugin token can read your website. Write access for notes and segments is only exercised by the first triage.
 
 The webhook is served once the four required fields are set. The triage runs once OpenRouter is configured too.

@@ -2,7 +2,7 @@
 
 This guide connects a Slack channel to the admin so the server tells you when an automation keeps failing. For how the alert rule works and what the message contains, read [docs/integrations/slack.md](../integrations/slack.md).
 
-The alerts need nothing from Slack to reach this server: the server posts to an incoming webhook, so there is no URL to paste into Slack. The [Slack bot](slack-bot.md) is different. Slack sends its events to this server, so the bot needs a public URL, and its settings live in the same card but are independent of the webhook. Everything is entered on the admin Integrations page, in the **Slack** card. You can also set the webhook URL with the environment variable `SLACK_ALERTS_WEBHOOK_URL`.
+The alerts need nothing from Slack to reach this server: the server posts to an incoming webhook, so there is no URL to paste into Slack. The [Slack bot](slack-bot.md) is different. Slack sends its events to this server, so the bot needs a public URL, and its settings live on the same page but are independent of the webhook. Everything is entered on the admin Integrations page, under **Slack**. You can also set the webhook URL with the environment variable `SLACK_ALERTS_WEBHOOK_URL`.
 
 Before you start, make sure the server has `SETTINGS_ENCRYPTION_KEY` set. The admin refuses to save the webhook URL without it.
 
@@ -22,8 +22,8 @@ Treat the URL as a secret. Anyone who has it can post to the channel. Alerts quo
 
 ## 2. Fill in the admin
 
-1. Open the admin and go to **Integrations**. Find the **Slack** card.
-2. Fill in the fields.
+1. Open the admin and go to **Integrations**. Open **Slack**.
+2. Fill in the fields of the **Alerts** section (click **Edit** on it if Slack is already configured).
 
 | Field | Value |
 | --- | --- |
@@ -32,7 +32,7 @@ Treat the URL as a secret. Anyone who has it can post to the channel. Alerts quo
 | Alert on token health | On by default. Alerts when a connected token stops working or is about to expire. Turn it off to keep only failure alerts. |
 | Channel label | Optional. Shown in the alert text, for example `#alerts`. |
 
-3. Click **Save**. The card shows **Configured** once the webhook URL is set.
+3. Click **Save**. The page shows the health check instead of **Needs setup** once the webhook URL is set.
 4. Click **Test connection**. The channel receives the message `Automation server alerts are connected`. If nothing arrives, the result says why. The webhook URL is never shown in it.
 
 ## What triggers an alert
@@ -46,7 +46,7 @@ The server alerts once when an automation's streak of failed runs reaches the th
 
 ## Token health alerts
 
-Once a day, from 06:00 UTC, the server tests every configured integration and records the result. The integration tiles show a green, red or grey dot, when the last check ran, and "Expires in N days" or "Expired" when the token has a known expiry. The **Test** button on a tile runs the same check at once and records it.
+Once a day, from 06:00 UTC, the server tests every configured integration and records the result. Each integration page shows a green, red or grey dot, when the last check ran, and "Expires in N days" or "Expired" when the token has a known expiry. A failed check or a token expiring soon moves the integration under **Needs attention** on the Integrations page. **Test connection** on the integration page runs the same check at once and records it.
 
 With **Alert on token health** on, the channel gets one message when:
 

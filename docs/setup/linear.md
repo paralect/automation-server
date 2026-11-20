@@ -41,7 +41,7 @@ https://<your-host>/webhooks/<project>/linear
 - `<your-host>` is the public host of automation-server.
 - `<project>` is the project path. The default project is `default`, so the URL is `https://<your-host>/webhooks/default/linear`. The default project also answers `https://<your-host>/webhooks/linear`.
 
-To copy the full URL, open the admin Integrations page and open the Linear card. The card shows the URL when `PUBLIC_URL` is set on the server. Without `PUBLIC_URL` it shows only the path, and you add the host yourself.
+To copy the full URL, open the admin Integrations page and open Linear. The **Connection** section shows the URL when `PUBLIC_URL` is set on the server. Without `PUBLIC_URL` it shows only the path, and you add the host yourself.
 
 The Linear form in the admin, with every field you will touch in the next steps.
 
@@ -69,7 +69,7 @@ The signing secret in the screenshot is blurred on purpose. Treat your own secre
 
 ## 4. Save the settings in the admin
 
-1. Open the admin Integrations page and open the Linear card.
+1. Open the admin Integrations page and open Linear. If it is already configured, click **Edit** on the section that holds a field.
 2. Paste the signing secret into **Webhook secret**.
 3. Enter the label name from step 1 into **Trigger label**.
 4. Enter `owner/name` of the repository that should receive the PR into **Target repository**.

@@ -32,7 +32,7 @@ The admin is the only screen you need. Sign in with the email and password from 
 | --- | --- |
 | **Overview** | Counters for the last day or week: runs that succeeded, failed or were duplicates, a chart over time and the latest failures. Open it first when something seems off. |
 | **Setup** | A checklist for a new project: GitHub token, repositories, services, workflows. |
-| **Integrations** | One card per service. This is where every token and setting from these guides goes. |
+| **Integrations** | One row per service, with its own page. This is where every token and setting from these guides goes. |
 | **Logs**, **Runs** | Everything the server did. A run is one automation reacting to one event. |
 | **GitHub Actions** | Live status of the Codex workflow runs in your repositories, with jobs and steps. |
 | **Workflows** | Installs the bundled GitHub Actions workflows into a repository. |
@@ -49,18 +49,20 @@ The **Setup** page walks through the order below inside the admin itself, and ti
 
 ### Where the values from these guides go
 
-Open **Integrations**. Each service you can use has a card. A card says **Configured** once its required fields are filled. Click **Configure** to open its form.
+Open **Integrations**. Each added service is a row. Rows that need attention (setup not finished, a failed check, a token that expired or expires within 14 days) are listed first and say why. Click a row to open its page. **Add integration** adds another service.
 
 ![The Integrations page with a card for each of GitHub, Sentry, Linear, PostHog, OpenRouter and Crisp](img/admin-02-integrations.png)
 
-All forms work the same way:
+An integration that is not set up yet opens as one form with a single **Save**. Once it is configured, its page is a summary of the saved settings in sections such as **Connection**. Click **Edit** on a section to change its fields, then **Save** or **Cancel**. Only that section is saved. Rarely changed fields sit in the last section, **Advanced**, which says **All defaults** or names the fields you changed.
+
+The fields work the same way everywhere:
 
 - **Webhook URL** (Sentry, Linear, Crisp). A read-only field with a copy button. You paste it into the other service. It needs `PUBLIC_URL` on the server to show the full address.
 - **Secret fields** (tokens, signing secrets). An empty one is an input box. Once saved it shows **Set** and the value is never displayed again. Click **Replace**, paste the new value, then **Save**. **Clear** removes it. Secrets are stored encrypted and need `SETTINGS_ENCRYPTION_KEY` on the server.
 - **Plain fields** (repository, label, model). Type the value and click **Save**. Saving applies at once, no restart.
-- **Test connection** (GitHub, Linear, PostHog, OpenRouter, Crisp, Slack). Checks the saved values against the real service. Run it after every save.
+- **Test connection** (GitHub, Linear, PostHog, OpenRouter, Crisp, Slack), next to the title. Checks the saved values against the real service. Run it after every save.
 
-Each guide below shows the exact form with the fields numbered in the order you fill them.
+Each guide below shows the form with the fields numbered in the order you fill them. The screenshots predate the section layout, so the fields may sit under an **Edit** button rather than in one long form.
 
 ## What each automation does
 
@@ -81,7 +83,7 @@ For the exact rules of each automation (filters, deduplication, retries, limits)
 ## Where to start
 
 1. Deploy the server and the admin first. See [docs/deployment.md](../deployment.md). Every webhook below needs a public HTTPS URL, so set `PUBLIC_URL`.
-2. Sign in to the admin. Each service has a card on the Integrations page. Values saved there take effect without a restart and secrets are stored encrypted (this needs `SETTINGS_ENCRYPTION_KEY`).
+2. Sign in to the admin. Each service has its own page under Integrations. Values saved there take effect without a restart and secrets are stored encrypted (this needs `SETTINGS_ENCRYPTION_KEY`).
 3. Connect services in this order, since later ones reuse earlier ones.
 
 | Order | Guide | You create | You paste into the admin |

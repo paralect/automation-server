@@ -44,7 +44,7 @@ If you only need Sentry, Issues write is enough. A missing permission shows up a
 
 ## 2. Save the token and repository in the admin
 
-Open the admin, then Integrations, then the GitHub card.
+Open the admin, then Integrations, then GitHub. The token is in **Connection**, the repositories in **Repositories**.
 
 | Field in the admin | Environment variable | Value |
 | --- | --- | --- |
