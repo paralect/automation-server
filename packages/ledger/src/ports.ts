@@ -8,6 +8,7 @@ import type {
   MicroUsd,
   OutcomeSummary,
   OutcomeWindowDays,
+  ProducerId,
   PullRequestQuery,
   PullRequestRecord,
   PullRequestRow,
@@ -43,7 +44,7 @@ export type LedgerRecorder = {
   recordEffect(project: string, scope: RecordScope | null, effect: StoredEffect): void;
 };
 
-// Exactly-once budget alerts, with the claim store's lease semantics. A pending claim older than the lease is taken over.
+// At-most-once budget alerts. Only a failed post releases a claim and nothing takes one over, so a posted alert is never posted again.
 export type BudgetAlertPort = {
   monthSpend(project: string, month: string): MicroUsd;
   claimAlert(project: string, month: string, thresholdPct: BudgetThresholdPct, at: Date): boolean;
@@ -51,22 +52,38 @@ export type BudgetAlertPort = {
   releaseAlert(project: string, month: string, thresholdPct: BudgetThresholdPct): void;
 };
 
+// A read that hit its page cap stores where it stopped, so the next sync continues there instead of skipping what it never read.
+export type PrResume = { readonly page: number; readonly newest: string | null };
+export type RunResume = { readonly startedAt: string; readonly remaining: readonly { readonly producer: ProducerId; readonly before: string }[] };
+
+export type SyncProgress = {
+  // Newest PR updated_at of the last complete PR read.
+  readonly prCursor: string | null;
+  readonly prResume: PrResume | null;
+  // When the last complete workflow run read started.
+  readonly runCursor: string | null;
+  readonly runResume: RunResume | null;
+};
+
+export const NO_SYNC_PROGRESS: SyncProgress = { prCursor: null, prResume: null, runCursor: null, runResume: null };
+
 export type RepoSyncBatch = {
   readonly project: string;
   readonly repo: RepoName;
   readonly pullRequests: readonly PullRequestRecord[];
   readonly workflowRuns: readonly WorkflowRunRecord[];
-  // Newest PR updated_at seen. null keeps the stored cursor.
-  readonly prCursor: string | null;
+  readonly progress: SyncProgress;
   readonly syncedAt: string;
+  // A problem that did not stop the PRs from being applied, such as workflow runs the token cannot read.
+  readonly error: string | null;
 };
 
 // Writer of pull_requests, workflow_runs and sync_state. Used only by the sync job.
 export type LedgerSyncPort = {
-  syncState(project: string, repo: RepoName): { readonly prCursor: string | null; readonly syncedAt: string | null };
+  syncState(project: string, repo: RepoName): SyncProgress;
   dispatchedRuns(project: string, repo: RepoName, runIds: readonly number[]): ReadonlyMap<number, WorkKey>;
   runLinks(project: string, repo: RepoName, runIds: readonly number[]): ReadonlyMap<number, RunLink>;
-  // One transaction: upsert PRs and runs, advance the cursor, clear the error.
+  // One transaction: upsert PRs and runs, store the progress and the error.
   applyRepoSync(batch: RepoSyncBatch): void;
   recordSyncError(project: string, repo: RepoName, message: string, at: string): void;
 };

@@ -32,21 +32,18 @@ describe("work keys", () => {
   });
 
   test("a codex-issue-fix PR is keyed by its branch", () => {
-    const pr = { repo: APP, headBranch: "codex/issue-123", title: "Checkout crashes on empty cart", body: "Codex summary\n\nRefs #999\n" };
-    expect<unknown>(workKeyFromPullRequest(pr)).toBe("gh:acme/app#123");
+    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "codex/issue-123", title: "Checkout crashes on empty cart" })).toBe("gh:acme/app#123");
   });
 
   test("a linear-implement PR is keyed by the identifier in its title when the branch slug agrees", () => {
-    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "linear/eng-42", title: "ENG-42: Add CSV export", body: "Linear: https://linear.app/acme/issue/ENG-42\nRun log: x" })).toBe(
-      "linear:ENG-42",
-    );
-    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "linear/eng-42", title: "Renamed by a person", body: "" })).toBe("linear:ENG-42");
-    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "linear/eng-42", title: "OPS-7: wrong title", body: "" })).toBe("linear:ENG-42");
+    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "linear/eng-42", title: "ENG-42: Add CSV export" })).toBe("linear:ENG-42");
+    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "linear/eng-42", title: "Renamed by a person" })).toBe("linear:ENG-42");
+    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "linear/eng-42", title: "OPS-7: wrong title" })).toBe("linear:ENG-42");
   });
 
-  test("a PR on another branch is keyed by an issue reference in its body, else not at all", () => {
-    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "changelog/abc1234", title: "Changelog for production @ abc1234", body: "Fixes #77 by hand" })).toBe("gh:acme/app#77");
-    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "seo-autopilot/2026-11-20-123", title: "SEO autopilot 2026-11-20", body: "Run log: https://github.com/acme/app/actions/runs/1" })).toBeNull();
+  test("a changelog or SEO PR names no work item", () => {
+    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "changelog/abc1234", title: "Changelog for production @ abc1234" })).toBeNull();
+    expect<unknown>(workKeyFromPullRequest({ repo: APP, headBranch: "seo-autopilot/2026-11-20-123", title: "SEO autopilot 2026-11-20" })).toBeNull();
   });
 
   test("run titles from the templates' run-name carry the key; older installs carry none", () => {
@@ -62,5 +59,10 @@ describe("work keys", () => {
     expect<unknown>(workflowRunIdFromBody(repo("acme/other"), body)).toBeNull();
     expect<unknown>(workflowRunIdFromBody(APP, "Refs #12")).toBeNull();
     expect<unknown>(workflowRunIdFromBody(APP, "Run log: https://ghe.example.com/acme/app/actions/runs/5")).toBe(5);
+  });
+
+  test("a Run log line inside the Codex summary loses to the trailer the workflow appends", () => {
+    const body = "Codex summary\n\nRun log: https://github.com/acme/app/actions/runs/111\n\nRefs #12\nRun log: https://github.com/acme/app/actions/runs/222\n";
+    expect<unknown>(workflowRunIdFromBody(APP, body)).toBe(222);
   });
 });

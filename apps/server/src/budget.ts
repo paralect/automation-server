@@ -18,7 +18,8 @@ export type BudgetAlerterDeps = {
 const dollars = (amount: MicroUsd) => `$${(amount / MICROS_PER_USD).toFixed(2)}`;
 
 // Level-triggered: every check sends each reached threshold that has no alert this month yet. The claim row makes that
-// exactly once across concurrent checks and restarts; a failed post releases it so the next LLM call retries.
+// at most once across concurrent checks and restarts; a failed post releases it so the next LLM call retries. A crash
+// between the claim and the post loses that alert rather than risk sending it twice.
 // Raising the budget mid-month does not re-arm a threshold already sent, because the row is keyed by month, not amount.
 export function createBudgetAlerter({ ledger, resolve, log, fetch, adminUrl }: BudgetAlerterDeps): BudgetAlerter {
   const message = (project: string, pct: BudgetThresholdPct, spent: MicroUsd, budget: MicroUsd, month: string) => {
@@ -45,8 +46,12 @@ export function createBudgetAlerter({ ledger, resolve, log, fetch, adminUrl }: B
             log.warn("budget alert failed", { project, month, thresholdPct: pct, error: errorMessage(err) });
             continue;
           }
-          ledger.markAlertSent(project, month, pct, now);
           log.info("budget alert sent", { project, month, thresholdPct: pct });
+          try {
+            ledger.markAlertSent(project, month, pct, now);
+          } catch (err) {
+            log.error("recording a sent budget alert failed", { project, month, thresholdPct: pct, error: errorMessage(err) });
+          }
         }
       } catch (err) {
         log.warn("budget check failed", { project, error: errorMessage(err) });

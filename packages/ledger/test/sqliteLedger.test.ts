@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { microUsd, toMicroUsd } from "../src/facts";
-import type { RecordScope, RepoSyncBatch, StoredEffect } from "../src/ports";
+import { NO_SYNC_PROGRESS, type RecordScope, type RepoSyncBatch, type StoredEffect } from "../src/ports";
 import { createSqliteLedger } from "../src/sqliteLedger";
 import type { WorkflowRunRecord } from "../src/types";
 import { workKey } from "../src/workKey";
@@ -49,8 +49,9 @@ const batch = (overrides: Partial<RepoSyncBatch>): RepoSyncBatch => ({
   repo: APP,
   pullRequests: [],
   workflowRuns: [],
-  prCursor: "2026-11-20T11:00:00.000Z",
+  progress: { ...NO_SYNC_PROGRESS, prCursor: "2026-11-20T11:00:00.000Z", runCursor: "2026-11-20T11:30:00.000Z" },
   syncedAt: "2026-11-20T11:30:00.000Z",
+  error: null,
   ...overrides,
 });
 
@@ -122,11 +123,11 @@ describe("sqlite ledger: budget alert claims", () => {
     expect(ledger.claimAlert(P, "2026-12", 80, NOW)).toBe(true);
   });
 
-  test("a pending claim left by a crash is taken over after the five-minute lease", () => {
+  test("a pending claim is never taken over, however old", () => {
     const ledger = createSqliteLedger({ path: ":memory:" });
     expect(ledger.claimAlert(P, "2026-11", 100, NOW)).toBe(true);
-    expect(ledger.claimAlert(P, "2026-11", 100, new Date(NOW.getTime() + 4 * 60_000))).toBe(false);
-    expect(ledger.claimAlert(P, "2026-11", 100, new Date(NOW.getTime() + 6 * 60_000))).toBe(true);
+    expect(ledger.claimAlert(P, "2026-11", 100, new Date(NOW.getTime() + 6 * 60_000))).toBe(false);
+    expect(ledger.claimAlert(P, "2026-11", 100, new Date(NOW.getTime() + 86_400_000))).toBe(false);
   });
 });
 
@@ -140,12 +141,13 @@ describe("sqlite ledger: sync and the run chain", () => {
     expect(first.items).toHaveLength(1);
     expect(first.items[0]?.lifecycle).toEqual({ state: "open", draft: true });
 
-    ledger.applyRepoSync(batch({ pullRequests: [pullRequest(12, { state: "merged", mergedAt: "2026-11-11T10:00:00.000Z" })], prCursor: null }));
+    const progress = { prCursor: "2026-11-20T11:00:00.000Z", prResume: { page: 10, newest: "2026-11-20T11:40:00Z" }, runCursor: null, runResume: { startedAt: "2026-11-20T11:30:00.000Z", remaining: [{ producer: "codex-issue-fix", before: "2026-11-01T00:00:00Z" }] } } as const;
+    ledger.applyRepoSync(batch({ pullRequests: [pullRequest(12, { state: "merged", mergedAt: "2026-11-11T10:00:00.000Z" })], progress }));
     const after = ledger.pullRequests({ project: P, limit: 10 }).items;
     expect(after).toHaveLength(1);
     expect(after[0]?.seq).toBe(first.items[0]?.seq ?? -1);
     expect(after[0]?.lifecycle).toEqual({ state: "merged", mergedAt: "2026-11-11T10:00:00.000Z" });
-    expect(ledger.syncState(P, APP)).toEqual({ prCursor: "2026-11-20T11:00:00.000Z", syncedAt: "2026-11-20T11:30:00.000Z" });
+    expect<unknown>(ledger.syncState(P, APP)).toEqual(progress);
     expect(ledger.runLinks(P, APP, [500, 501]).get(500)).toEqual({ workKey: issueKey(12), match: "titled" });
   });
 
@@ -250,11 +252,13 @@ describe("sqlite ledger: sync and the run chain", () => {
 });
 
 describe("sqlite ledger: retention and persistence", () => {
-  test("prune drops old facts and resolved PRs but keeps open ones", () => {
+  test("prune drops old facts and resolved PRs but keeps open ones with the effects that name their origin", () => {
     const ledger = createSqliteLedger({ path: ":memory:" });
     ledger.recordLlmCall(P, crispRun, llmCall({ at: "2025-01-01T00:00:00.000Z" }));
     ledger.recordLlmCall(P, crispRun, llmCall({ at: "2026-11-01T00:00:00.000Z" }));
     ledger.recordEffect(P, crispRun, issueCreated(1, "2025-01-01T00:00:00.000Z"));
+    ledger.recordEffect(P, crispRun, issueCreated(2, "2025-01-01T00:00:00.000Z"));
+    ledger.recordEffect(P, crispRun, issueCreated(3, "2025-01-01T00:00:00.000Z"));
     ledger.applyRepoSync(
       batch({
         pullRequests: [
@@ -265,10 +269,46 @@ describe("sqlite ledger: retention and persistence", () => {
       }),
     );
     expect(ledger.claimAlert(P, "2025-01", 80, NOW)).toBe(true);
-    expect(ledger.prune("2026-01-01T00:00:00.000Z")).toBe(5);
-    expect(ledger.pullRequests({ project: P, limit: 10 }).items.map((r) => r.number)).toEqual([1]);
+    expect(ledger.prune("2026-01-01T00:00:00.000Z")).toBe(6);
+    const kept = ledger.pullRequests({ project: P, limit: 10 }).items;
+    expect(kept.map((r) => [r.number, r.origin, r.originRunId])).toEqual([[1, { kind: "automation", name: "crisp-triage" }, "run-crisp"]]);
     expect(ledger.costs(P, "2026-11", null, NOW).totals.calls).toBe(1);
     expect(() => ledger.prune("not a date")).toThrow();
+  });
+
+  test("PR pages follow on from a cursor whose PR was pruned meanwhile", () => {
+    const ledger = createSqliteLedger({ path: ":memory:" });
+    ledger.applyRepoSync(
+      batch({
+        pullRequests: [
+          pullRequest(1, { state: "open", draft: false }, { createdAt: "2025-01-01T00:00:00.000Z" }),
+          pullRequest(2, { state: "merged", mergedAt: "2025-01-03T00:00:00.000Z" }, { createdAt: "2025-01-02T00:00:00.000Z" }),
+          pullRequest(3, { state: "open", draft: false }, { createdAt: "2025-01-03T00:00:00.000Z" }),
+        ],
+      }),
+    );
+    const first = ledger.pullRequests({ project: P, limit: 2 });
+    expect(first.items.map((r) => r.number)).toEqual([3, 2]);
+    ledger.prune("2026-01-01T00:00:00.000Z");
+    const second = ledger.pullRequests({ project: P, limit: 2, before: first.nextCursor ?? undefined });
+    expect(second.items.map((r) => r.number)).toEqual([1]);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  test("PRs opened in the same second are each listed once across pages", () => {
+    const ledger = createSqliteLedger({ path: ":memory:" });
+    const at = "2026-11-10T10:00:00.000Z";
+    ledger.applyRepoSync(batch({ pullRequests: [1, 2, 3, 4, 5].map((n) => pullRequest(n, { state: "open", draft: false }, { createdAt: n === 5 ? "2026-11-09T10:00:00.000Z" : at })) }));
+    const seen: number[] = [];
+    let before: number | undefined;
+    for (let pages = 0; pages < 10; pages++) {
+      const page = ledger.pullRequests({ project: P, limit: 2, before });
+      seen.push(...page.items.map((r) => r.number));
+      if (page.nextCursor === null) break;
+      before = page.nextCursor;
+    }
+    expect([...seen].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+    expect(seen.at(-1)).toBe(5);
   });
 
   test("data survives reopening the file, and migrating again is a no-op", () => {

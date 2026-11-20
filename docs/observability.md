@@ -43,7 +43,7 @@ Every link rests on evidence. A run with none stays unlinked, because a wrong li
 | `titled` | The run's name carries the work item: `Codex issue fix #123` or `Linear implement ENG-42`. The templates set this name; installs from before it need a reinstall. |
 | `linked` | The PR the run opened ends with `Run log: <run URL>`. |
 
-A PR is tied to its work item by its branch (`codex/issue-123`, `linear/eng-42`), then by the `ENG-42:` prefix of a Linear PR's title, then by `Refs #123` or `Fixes #123` in its description. That is why a fix started by hand for a Sentry issue still shows on the Sentry run.
+A PR is tied to its work item by its branch (`codex/issue-123`, `linear/eng-42`), then by the `ENG-42:` prefix of a Linear PR's title. That is why a fix started by hand for a Sentry issue still shows on the Sentry run. An issue reference in the description such as `Closes #42` ties nothing: a changelog or SEO PR that quotes one did not do that issue's work.
 
 ## Codex PR outcomes
 
@@ -111,7 +111,7 @@ Each automation's own messages (`created github issue`, `dispatched workflow`, `
 
 - Every line goes to **stdout** as JSON, which is what `docker logs` and a log collector see. It also goes to the `logs` table in sqlite, which the admin reads. If the sqlite write fails, the stdout line is still written.
 - Runs and logs live in the same file as everything else (`DATABASE_PATH`). They are deleted after `LOG_RETENTION_DAYS` (default `30`), checked at startup and every hour.
-- LLM calls, Codex PRs, workflow runs and run chains are kept for `LEDGER_RETENTION_DAYS` (default `400`), so a month can be compared with the same month a year earlier. A PR that is still open is kept however old it is. Once a run itself is pruned, its PRs still count for its automation and the Outcomes page says the run was pruned.
+- LLM calls, Codex PRs, workflow runs and run chains are kept for `LEDGER_RETENTION_DAYS` (default `400`), so a month can be compared with the same month a year earlier. A PR that is still open is kept however old it is. Once a run itself is pruned, its PRs still count for its automation, and the PR's **Run** link opens a page saying the run was pruned.
 - Dispatch inputs are never stored. The server keeps only the work item they name (`gh:acme/app#123`, `linear:ENG-42`) and a Linear issue link.
 - Secrets and raw webhook payloads are never logged. Crisp and Sentry text is redacted (tokens, the customer's email) before it reaches a log line or a GitHub issue. When you write an automation, log ids and decisions, not payloads.
 

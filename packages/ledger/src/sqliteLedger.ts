@@ -3,12 +3,13 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { migrate } from "@automation-server/core/sqliteSchema";
+import { z } from "zod";
 
 import { monthBounds, monthOf, projectedSpend } from "./budget";
 import { microUsd } from "./facts";
 import type { RunLink } from "./match";
 import { DAY_MS, outcomeCounts, weeklyBuckets, windowOf } from "./metrics";
-import type { Ledger, RecordScope, StoredEffect } from "./ports";
+import type { Ledger, PrResume, RecordScope, RunResume, StoredEffect } from "./ports";
 import { isProducerId } from "./producers";
 import {
   BUDGET_THRESHOLDS_PCT,
@@ -33,7 +34,6 @@ import { isRepoName, parseWorkKey, workKey } from "./workKey";
 
 export type SqliteLedgerOptions = { path: string };
 
-const ALERT_LEASE_MS = 5 * 60_000;
 // GitHub drops a queued run when a newer one replaces it in the codex-auth concurrency group.
 const MISSING_RUN_AFTER_MS = 30 * 60_000;
 const CLOCK_SKEW_MS = 2 * 60_000;
@@ -110,6 +110,18 @@ const producerOf = (value: string): ProducerId => (isProducerId(value) ? value :
 function keyOf(value: string): WorkKey {
   const ref = parseWorkKey(value);
   return ref ? workKey(ref) : corrupt("work key", value);
+}
+
+const prResumeSchema: z.ZodType<PrResume> = z.object({ page: z.number().int().min(1), newest: z.string().nullable() });
+const runResumeSchema: z.ZodType<RunResume> = z.object({
+  startedAt: z.string(),
+  remaining: z.array(z.object({ producer: z.string().refine(isProducerId).transform(producerOf), before: z.string() })),
+});
+
+function resumeOf<T>(schema: z.ZodType<T>, what: string, value: string | null): T | null {
+  if (value === null) return null;
+  const parsed = schema.safeParse(JSON.parse(value));
+  return parsed.success ? parsed.data : corrupt(what, value);
 }
 
 function lifecycleOf(row: PrRow): PullRequestLifecycle {
@@ -310,6 +322,11 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
         PRIMARY KEY (project, month, threshold_pct)
       )`);
     },
+    (db) => {
+      db.run("ALTER TABLE sync_state ADD COLUMN pr_resume TEXT");
+      db.run("ALTER TABLE sync_state ADD COLUMN run_cursor TEXT");
+      db.run("ALTER TABLE sync_state ADD COLUMN run_resume TEXT");
+    },
   ]);
 
   const insertLlm = db.query(
@@ -326,16 +343,16 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
   const spendIn = db.query<{ cost: number | null }, { $project: string; $start: string; $end: string }>(
     "SELECT SUM(cost_micros) AS cost FROM llm_calls WHERE project = $project AND at >= $start AND at < $end",
   );
+  // A pending claim left by a crash cannot tell "never posted" from "posted, not yet marked", so it is never taken over.
   const claim = db.query(
     `INSERT INTO budget_alerts (project, month, threshold_pct, status, at) VALUES ($project, $month, $pct, 'pending', $at)
-     ON CONFLICT (project, month, threshold_pct) DO UPDATE SET at = excluded.at
-     WHERE budget_alerts.status = 'pending' AND budget_alerts.at < $staleBefore`,
+     ON CONFLICT (project, month, threshold_pct) DO NOTHING`,
   );
   const markSent = db.query("UPDATE budget_alerts SET status = 'sent', at = $at WHERE project = $project AND month = $month AND threshold_pct = $pct");
   const release = db.query("DELETE FROM budget_alerts WHERE project = $project AND month = $month AND threshold_pct = $pct AND status = 'pending'");
 
-  const syncStateOf = db.query<{ pr_cursor: string | null; synced_at: string | null }, { $project: string; $repo: string }>(
-    "SELECT pr_cursor, synced_at FROM sync_state WHERE project = $project AND repo = $repo",
+  const syncStateOf = db.query<{ pr_cursor: string | null; pr_resume: string | null; run_cursor: string | null; run_resume: string | null }, { $project: string; $repo: string }>(
+    "SELECT pr_cursor, pr_resume, run_cursor, run_resume FROM sync_state WHERE project = $project AND repo = $repo",
   );
   const upsertPr = db.query(
     `INSERT INTO pull_requests (project, repo, number, producer, work_key, title, url, created_at, state, draft, merged_at, closed_at)
@@ -352,8 +369,10 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
        created_at = excluded.created_at, url = excluded.url, work_key = excluded.work_key, match = excluded.match`,
   );
   const synced = db.query(
-    `INSERT INTO sync_state (project, repo, pr_cursor, synced_at, error, error_at) VALUES ($project, $repo, $cursor, $at, NULL, NULL)
-     ON CONFLICT (project, repo) DO UPDATE SET pr_cursor = COALESCE(excluded.pr_cursor, sync_state.pr_cursor), synced_at = excluded.synced_at, error = NULL, error_at = NULL`,
+    `INSERT INTO sync_state (project, repo, pr_cursor, pr_resume, run_cursor, run_resume, synced_at, error, error_at)
+     VALUES ($project, $repo, $prCursor, $prResume, $runCursor, $runResume, $at, $error, $errorAt)
+     ON CONFLICT (project, repo) DO UPDATE SET pr_cursor = excluded.pr_cursor, pr_resume = excluded.pr_resume, run_cursor = excluded.run_cursor,
+       run_resume = excluded.run_resume, synced_at = excluded.synced_at, error = excluded.error, error_at = excluded.error_at`,
   );
   const syncFailed = db.query(
     `INSERT INTO sync_state (project, repo, error, error_at) VALUES ($project, $repo, $error, $at)
@@ -382,11 +401,13 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
   const outcomePrs = db.query<PrRow, { $project: string; $since: string }>(
     `${PRS_WITH_ORIGIN} AND (pr.state = 'open' OR pr.created_at >= $since OR pr.merged_at >= $since OR pr.closed_at >= $since)`,
   );
-  const prPage = db.query<PrRow, { $project: string; $state: string | null; $origin: string | null; $before: number | null; $limit: number }>(
+  type PrFilters = { $project: string; $state: string | null; $origin: string | null };
+  const prPage = db.query<PrRow, PrFilters & { $before: string | null; $tieAt: string | null; $tieSeq: number | null; $limit: number }>(
     `${PRS_WITH_ORIGIN}
        AND ($state IS NULL OR pr.state = $state)
        AND ($origin IS NULL OR COALESCE(fe.automation, pr.producer) = $origin)
-       AND ($before IS NULL OR (pr.created_at, pr.seq) < (SELECT created_at, seq FROM pull_requests WHERE seq = $before))
+       AND ($before IS NULL OR pr.created_at < $before)
+       AND ($tieAt IS NULL OR (pr.created_at = $tieAt AND pr.seq < $tieSeq))
      ORDER BY pr.created_at DESC, pr.seq DESC LIMIT $limit`,
   );
 
@@ -446,8 +467,7 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
     },
 
     claimAlert(project, month, pct, at) {
-      const staleBefore = new Date(at.getTime() - ALERT_LEASE_MS).toISOString();
-      return claim.run({ $project: project, $month: month, $pct: pct, $at: at.toISOString(), $staleBefore: staleBefore }).changes > 0;
+      return claim.run({ $project: project, $month: month, $pct: pct, $at: at.toISOString() }).changes > 0;
     },
     markAlertSent(project, month, pct, at) {
       markSent.run({ $project: project, $month: month, $pct: pct, $at: at.toISOString() });
@@ -458,7 +478,12 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
 
     syncState(project, repo) {
       const row = syncStateOf.get({ $project: project, $repo: repo });
-      return { prCursor: row?.pr_cursor ?? null, syncedAt: row?.synced_at ?? null };
+      return {
+        prCursor: row?.pr_cursor ?? null,
+        prResume: resumeOf(prResumeSchema, "PR resume", row?.pr_resume ?? null),
+        runCursor: row?.run_cursor ?? null,
+        runResume: resumeOf(runResumeSchema, "run resume", row?.run_resume ?? null),
+      };
     },
 
     dispatchedRuns(project, repo, runIds) {
@@ -519,7 +544,17 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
               $match: run.link?.match ?? null,
             });
           }
-          synced.run({ ...base, $cursor: batch.prCursor, $at: batch.syncedAt });
+          const { progress } = batch;
+          synced.run({
+            ...base,
+            $prCursor: progress.prCursor,
+            $prResume: progress.prResume && JSON.stringify(progress.prResume),
+            $runCursor: progress.runCursor,
+            $runResume: progress.runResume && JSON.stringify(progress.runResume),
+            $at: batch.syncedAt,
+            $error: batch.error,
+            $errorAt: batch.error === null ? null : batch.syncedAt,
+          });
         })
         .immediate(),
 
@@ -593,9 +628,14 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
     },
 
     pullRequests({ project, state, origin, before, limit }) {
-      const rows = prPage.all({ $project: project, $state: state ?? null, $origin: origin ?? null, $before: before ?? null, $limit: limit + 1 });
-      const items = rows.slice(0, limit).map(toPullRequestRow);
-      return { items, nextCursor: rows.length > limit ? (items.at(-1)?.seq ?? null) : null };
+      // The cursor is the last PR's created_at in epoch ms, so it still pages after that PR is pruned. PRs sharing it all go on this page.
+      const filters: PrFilters = { $project: project, $state: state ?? null, $origin: origin ?? null };
+      const rows = prPage.all({ ...filters, $before: before === undefined ? null : new Date(before).toISOString(), $tieAt: null, $tieSeq: null, $limit: limit });
+      const last = rows.at(-1);
+      if (!last || rows.length < limit) return { items: rows.map(toPullRequestRow), nextCursor: null };
+      const ties = prPage.all({ ...filters, $before: null, $tieAt: last.created_at, $tieSeq: last.seq, $limit: -1 });
+      const more = prPage.all({ ...filters, $before: last.created_at, $tieAt: null, $tieSeq: null, $limit: 1 }).length > 0;
+      return { items: [...rows, ...ties].map(toPullRequestRow), nextCursor: more ? Date.parse(last.created_at) : null };
     },
 
     costs(project, month, budget, now): CostMonth {
@@ -634,10 +674,16 @@ export function createSqliteLedger({ path }: SqliteLedgerOptions): Ledger {
         .transaction(() => {
           let removed = 0;
           removed += db.query("DELETE FROM llm_calls WHERE at < $before").run({ $before: before }).changes;
-          removed += db.query("DELETE FROM run_effects WHERE at < $before").run({ $before: before }).changes;
-          removed += db.query("DELETE FROM workflow_runs WHERE created_at < $before").run({ $before: before }).changes;
           // Open PRs stay however old they are: they still count as open.
           removed += db.query("DELETE FROM pull_requests WHERE state != 'open' AND COALESCE(merged_at, closed_at) < $before").run({ $before: before }).changes;
+          // A kept PR's origin is read from the effects on its work key, so those effects stay with it.
+          removed += db
+            .query(
+              `DELETE FROM run_effects WHERE at < $before
+               AND (work_key IS NULL OR NOT EXISTS (SELECT 1 FROM pull_requests pr WHERE pr.project = run_effects.project AND pr.work_key = run_effects.work_key))`,
+            )
+            .run({ $before: before }).changes;
+          removed += db.query("DELETE FROM workflow_runs WHERE created_at < $before").run({ $before: before }).changes;
           removed += db.query("DELETE FROM budget_alerts WHERE month < $month").run({ $month: monthOf(new Date(cutoff)) }).changes;
           return removed;
         })

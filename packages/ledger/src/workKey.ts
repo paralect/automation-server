@@ -55,10 +55,9 @@ export function workKeyFromDispatch(repo: RepoName, inputs: Readonly<Record<stri
 // The branch linear-implement.yml pushes: the identifier lowercased, anything outside [a-z0-9-] turned into "-".
 const linearSlug = (identifier: string) => identifier.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+$/, "");
 
-const ISSUE_REFERENCE = /\b(?:refs|fixes|fixed|closes|closed|resolves|resolved)\s+#(\d+)\b/i;
-
-// Strongest evidence first: the branch the workflow pushed, then the title linear-implement writes, then an issue reference in the body.
-export function workKeyFromPullRequest(pr: { readonly repo: RepoName; readonly headBranch: string; readonly title: string; readonly body: string }): WorkKey | null {
+// The branch the workflow pushed, then the title linear-implement writes. Never an issue reference in the body: a changelog or
+// SEO PR that quotes "closes #42" did not do the work of #42.
+export function workKeyFromPullRequest(pr: { readonly repo: RepoName; readonly headBranch: string; readonly title: string }): WorkKey | null {
   const codex = /^codex\/issue-(\d+)$/.exec(pr.headBranch);
   if (codex) return githubIssue(pr.repo, codex[1] ?? "");
   const linear = /^linear\/(.+)$/.exec(pr.headBranch);
@@ -68,8 +67,7 @@ export function workKeyFromPullRequest(pr: { readonly repo: RepoName; readonly h
     if (titled && linearSlug(titled) === slug) return linearIssue(titled);
     return linearIssue(slug);
   }
-  const referenced = ISSUE_REFERENCE.exec(pr.body)?.[1];
-  return referenced ? githubIssue(pr.repo, referenced) : null;
+  return null;
 }
 
 // The run-name the templates set: "Codex issue fix #123" and "Linear implement ENG-42". Older installs have no run-name, so null.
@@ -80,10 +78,9 @@ export function workKeyFromRunTitle(repo: RepoName, title: string): WorkKey | nu
   return linear ? linearIssue(linear[1] ?? "") : null;
 }
 
-// "Run log: https://github.com/<repo>/actions/runs/<id>" at the end of a Codex PR body names the run that opened it.
+// "Run log: https://github.com/<repo>/actions/runs/<id>" at the end of a Codex PR body names the run that opened it. Only the
+// last such line counts: the workflow appends it after the Codex summary, which can carry any text.
 export function workflowRunIdFromBody(repo: RepoName, body: string): number | null {
-  for (const match of body.matchAll(/Run log:\s*https?:\/\/\S+?\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/actions\/runs\/(\d+)/g)) {
-    if (match[1]?.toLowerCase() === repo) return Number(match[2]);
-  }
-  return null;
+  const last = [...body.matchAll(/Run log:\s*https?:\/\/\S+?\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/actions\/runs\/(\d+)/g)].at(-1);
+  return last?.[1]?.toLowerCase() === repo ? Number(last[2]) : null;
 }

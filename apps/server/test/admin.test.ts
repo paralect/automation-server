@@ -1,7 +1,7 @@
 import { createDispatcher, createScheduler, createSqliteActivityStore, createSqliteStore, type ClaimStore, type Logger, type Page } from "@automation-server/core";
 import { createSqliteHealthStore, createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
-import { parseRepoName, toMicroUsd, workKey, type CostMonth, type OutcomeSummary, type PullRequestRow, type RepoName, type RunTrace, type SyncNowResult } from "@automation-server/ledger";
+import { NO_SYNC_PROGRESS, parseRepoName, toMicroUsd, workKey, type CostMonth, type OutcomeSummary, type PullRequestRow, type RepoName, type RunTrace, type SyncNowResult } from "@automation-server/ledger";
 import { createSqliteLedger } from "@automation-server/ledger/server";
 
 import { createGithubActionsReader } from "@automation-server/api/githubActions";
@@ -780,8 +780,9 @@ describe("results API", () => {
     t.ledger.applyRepoSync({
       project: "default",
       repo: APP,
-      prCursor: iso(1),
+      progress: { ...NO_SYNC_PROGRESS, prCursor: iso(1), runCursor: iso(1) },
       syncedAt: iso(1),
+      error: null,
       workflowRuns: [],
       pullRequests: [
         { repo: APP, number: 30, producer: "codex-issue-fix", workKey: issue3, title: "Fix", url: "https://github.com/acme/app/pull/30", createdAt: iso(48), lifecycle: { state: "merged", mergedAt: iso(24) } },

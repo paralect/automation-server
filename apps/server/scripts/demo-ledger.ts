@@ -1,15 +1,28 @@
 // Seeds a database with 90 days of Codex PR outcomes, workflow runs, run chains and two months of LLM spend, so the
-// Outcomes, Costs and run pages can be tried and screenshotted without live traffic. Safe to run again: every row has a
-// natural key (PR number, run id, generation id) or is skipped when its demo run already has one.
-//
-//   DATABASE_PATH=./data/demo.db bun apps/server/scripts/demo-ledger.ts
+// Outcomes, Costs and run pages can be tried and screenshotted without live traffic. Rerunning it on its own demo
+// database changes nothing: every row has a natural key (PR number, run id, generation id) or is skipped when its demo
+// run already has one.
+import { existsSync } from "node:fs";
+
 import { createSqliteActivityStore, type Event } from "@automation-server/core";
-import { parseRepoName, reachedThresholds, toMicroUsd, workKey, type LlmCall, type PullRequestLifecycle, type PullRequestRecord, type RecordScope, type WorkflowRunRecord, type WorkKey } from "@automation-server/ledger";
+import { NO_SYNC_PROGRESS, parseRepoName, reachedThresholds, toMicroUsd, workKey, type LlmCall, type PullRequestLifecycle, type PullRequestRecord, type RecordScope, type WorkflowRunRecord, type WorkKey } from "@automation-server/ledger";
 import { createSqliteLedger } from "@automation-server/ledger/server";
 import { createSqliteSettingsStore } from "@automation-server/settings";
 
+const USAGE =
+  "Usage: DATABASE_PATH=./data/demo.db bun apps/server/scripts/demo-ledger.ts\n" +
+  "Seeds a new database file. It refuses a file that already exists, such as the server's own database that Bun loads from .env,\n" +
+  "unless DEMO_FORCE=1 is set.";
+
 const path = process.env.DATABASE_PATH;
-if (!path) throw new Error("DATABASE_PATH is required");
+if (!path) {
+  console.error(USAGE);
+  process.exit(1);
+}
+if (existsSync(path) && process.env.DEMO_FORCE !== "1") {
+  console.error(`${path} already exists.\n${USAGE}`);
+  process.exit(1);
+}
 const project = process.env.DEMO_PROJECT ?? "default";
 const repo = parseRepoName(process.env.DEMO_REPO ?? "acme/app");
 if (!repo) throw new Error("DEMO_REPO must be owner/name");
@@ -184,7 +197,7 @@ for (let day = 45; day >= 0; day--) {
   if (day % 9 === 0) ledger.recordLlmCall(project, null, { ...llm(`demo-unpriced-${day}`, "anthropic/claude-haiku-5.5", "triage", at), cost: null });
 }
 
-ledger.applyRepoSync({ project, repo, pullRequests, workflowRuns, prCursor: iso(now - HOUR), syncedAt: iso(now - 12 * 60_000) });
+ledger.applyRepoSync({ project, repo, pullRequests, workflowRuns, progress: { ...NO_SYNC_PROGRESS, prCursor: iso(now - HOUR), runCursor: iso(now - 12 * 60_000) }, syncedAt: iso(now - 12 * 60_000), error: null });
 
 const month = iso(now).slice(0, 7);
 const spent = ledger.monthSpend(project, month);

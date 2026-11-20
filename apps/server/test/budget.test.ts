@@ -1,5 +1,5 @@
 import type { Logger } from "@automation-server/core";
-import { toMicroUsd, type LlmCall } from "@automation-server/ledger";
+import { toMicroUsd, type BudgetAlertPort, type LlmCall } from "@automation-server/ledger";
 import { createSqliteLedger } from "@automation-server/ledger/server";
 import { createSqliteSettingsStore, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
@@ -23,7 +23,7 @@ const call = (usd: number, at = NOV.toISOString()): LlmCall => ({
   durationMs: 5,
 });
 
-const setup = ({ budgetUsd = 50, webhook = true }: { budgetUsd?: number; webhook?: boolean } = {}) => {
+const setup = ({ budgetUsd = 50, webhook = true, markSentFails = false }: { budgetUsd?: number; webhook?: boolean; markSentFails?: boolean } = {}) => {
   const slack = { status: 200, gate: null as Promise<void> | null };
   const posted: string[] = [];
   const fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
@@ -35,7 +35,16 @@ const setup = ({ budgetUsd = 50, webhook = true }: { budgetUsd?: number; webhook
   settings.project(PROJECT).apply({ set: [{ key: "openrouter.monthlyBudgetUsd", json: String(budgetUsd), secret: false }] });
   const env = webhook ? { SLACK_ALERTS_WEBHOOK_URL: HOOK } : {};
   const ledger = createSqliteLedger({ path: ":memory:" });
-  const budget = createBudgetAlerter({ ledger, resolve: (p) => resolveConfig(settings.project(p), env), log: quiet, fetch, adminUrl: "https://admin.example.com" });
+  const port: BudgetAlertPort = {
+    monthSpend: (project, month) => ledger.monthSpend(project, month),
+    claimAlert: (project, month, pct, at) => ledger.claimAlert(project, month, pct, at),
+    markAlertSent: (project, month, pct, at) => {
+      if (markSentFails) throw new Error("SQLITE_BUSY: database is locked");
+      ledger.markAlertSent(project, month, pct, at);
+    },
+    releaseAlert: (project, month, pct) => ledger.releaseAlert(project, month, pct),
+  };
+  const budget = createBudgetAlerter({ ledger: port, resolve: (p) => resolveConfig(settings.project(p), env), log: quiet, fetch, adminUrl: "https://admin.example.com" });
   const spend = (usd: number, at?: string) => ledger.recordLlmCall(PROJECT, null, call(usd, at));
   return { slack, posted, ledger, budget, spend, settings };
 };
@@ -92,6 +101,16 @@ describe("budget alerts", () => {
     await t.budget.check(PROJECT, NOV);
     expect(t.posted).toHaveLength(2);
     expect(t.ledger.costs(PROJECT, "2026-11", null, NOV).alerts.map((a) => a.thresholdPct)).toEqual([80]);
+  });
+
+  test("an alert that reached Slack is never sent again, even when recording it as sent fails", async () => {
+    const t = setup({ markSentFails: true });
+    t.spend(52);
+    await t.budget.check(PROJECT, NOV);
+    expect(t.posted).toHaveLength(2);
+    await t.budget.check(PROJECT, new Date(NOV.getTime() + 10 * 60_000));
+    await t.budget.check(PROJECT, new Date(NOV.getTime() + 86_400_000));
+    expect(t.posted).toHaveLength(2);
   });
 
   test("raising the budget mid-month does not re-arm a threshold already sent", async () => {
