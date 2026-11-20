@@ -1,5 +1,9 @@
 import { z } from "zod"
 
+import type { OutcomeWindowDays, PullRequestState } from "@automation-server/api/routers/index"
+
+import { MONTH_RE } from "./costs"
+
 export const LOG_LEVELS = ["info", "warn", "error"] as const
 export const RUN_STATUSES = ["running", "succeeded", "failed", "duplicate"] as const
 
@@ -63,3 +67,21 @@ export type ActionsSearch = z.infer<typeof actionsSearch>
 
 export const actionsInput = actionsSearch.extend({ page: z.number().int().min(1).max(50).default(1) })
 export const actionRunInput = z.object({ repo: z.string().min(3).max(200), id: z.number().int().positive() })
+
+export const OUTCOME_WINDOW_DAYS = [30, 90] as const satisfies readonly OutcomeWindowDays[]
+export type OutcomeWindow = (typeof OUTCOME_WINDOW_DAYS)[number]
+export const PR_STATES = ["open", "merged", "closed"] as const satisfies readonly PullRequestState[]
+
+export const outcomesSearch = z.object({
+  window: z.union([z.literal(30), z.literal(90)]).optional().catch(undefined),
+  state: z.enum(PR_STATES).optional().catch(undefined),
+  origin: text,
+})
+export type OutcomesSearch = z.infer<typeof outcomesSearch>
+export type PullRequestFilters = Omit<OutcomesSearch, "window">
+export const pullRequestsInput = z.object({ state: z.enum(PR_STATES).optional(), origin: text, before: cursor, limit })
+
+const month = z.string().regex(MONTH_RE)
+export const costsSearch = z.object({ month: month.optional().catch(undefined) })
+export type CostsSearch = z.infer<typeof costsSearch>
+export const costsInput = z.object({ month: month.optional() })

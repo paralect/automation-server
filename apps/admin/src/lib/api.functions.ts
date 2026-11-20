@@ -28,7 +28,18 @@ import { callAutomation } from "@/server/automation-client.server"
 import { rememberProject } from "@/server/project.server"
 import { requireAuth } from "./auth.middleware"
 import { REPO_RE } from "./integration-workflows"
-import { actionRunInput, actionsInput, crispInput, logsInput, runsInput, WINDOWS, windowInput } from "./filters"
+import {
+  actionRunInput,
+  actionsInput,
+  costsInput,
+  crispInput,
+  logsInput,
+  OUTCOME_WINDOW_DAYS,
+  pullRequestsInput,
+  runsInput,
+  WINDOWS,
+  windowInput,
+} from "./filters"
 
 const authed = createServerFn({ method: "GET", strict: { input: true, output: false } }).middleware([requireAuth])
 const authedPost = createServerFn({ method: "POST", strict: { input: true, output: false } }).middleware([requireAuth])
@@ -76,6 +87,10 @@ export const getRun = authed
     callAutomation((api) => api.runs.get(data), { notFoundIsExpected: true })
   )
 
+export const getRunTrace = authed
+  .validator(inProject.extend({ id: entityId }))
+  .handler(({ data }) => callAutomation((api) => api.runs.trace(data), { notFoundIsExpected: true }))
+
 export const replayRun = authedPost
   .validator(inProject.extend({ id: entityId, dryRun: z.boolean().optional() }))
   .handler(({ data }) => callAutomation((api) => api.runs.replay(data), { showMessages: true }))
@@ -91,6 +106,22 @@ export const markCrispRead = authedPost
 export const markAllCrispRead = authedPost.validator(inProject).handler(({ data }) => callAutomation((api) => api.crisp.markAllRead(data)))
 
 export const getCrispStats = authed.validator(inProject).handler(({ data }) => callAutomation((api) => api.crisp.stats(data)))
+
+export const getOutcomes = authed
+  .validator(inProject.extend({ windowDays: z.union([z.literal(OUTCOME_WINDOW_DAYS[0]), z.literal(OUTCOME_WINDOW_DAYS[1])]) }))
+  .handler(({ data }) => callAutomation((api) => api.outcomes.summary(data)))
+
+export const listPullRequests = authed
+  .validator(inProject.extend(pullRequestsInput.shape))
+  .handler(({ data }) => callAutomation((api) => api.outcomes.pullRequests(data)))
+
+export const syncOutcomes = authedPost
+  .validator(inProject)
+  .handler(({ data }) => callAutomation((api) => api.outcomes.syncNow(data), { showMessages: true }))
+
+export const getCostMonth = authed
+  .validator(inProject.extend(costsInput.shape))
+  .handler(({ data }) => callAutomation((api) => api.costs.month(data)))
 
 export const getSystem = authed.validator(inProject).handler(({ data }) => callAutomation((api) => api.system(data)))
 

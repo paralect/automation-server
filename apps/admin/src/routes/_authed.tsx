@@ -37,6 +37,8 @@ const TITLES: Record<string, string> = {
   "/runs": "Runs",
   "/actions": "GitHub Actions",
   "/integrations": "Integrations",
+  "/outcomes": "Outcomes",
+  "/costs": "Costs",
   "/workflows": "Workflows",
   "/system": "System",
   "/project": "Project settings",

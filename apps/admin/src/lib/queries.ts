@@ -3,6 +3,10 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import {
   checkWorkflow,
   getActionRun,
+  getCostMonth,
+  getOutcomes,
+  getRunTrace,
+  listPullRequests,
   listProjects,
   getOverview,
   getRun,
@@ -17,7 +21,16 @@ import {
   listRuns,
   listWorkflowTemplates,
 } from "./api.functions"
-import type { ActionState, ActionsSearch, CrispSearch, LogsSearch, RunsSearch, WindowKey } from "./filters"
+import type {
+  ActionState,
+  ActionsSearch,
+  CrispSearch,
+  LogsSearch,
+  OutcomeWindow,
+  PullRequestFilters,
+  RunsSearch,
+  WindowKey,
+} from "./filters"
 
 export const retryServerErrorOnce = (count: number, error: unknown) =>
   count < 1 && error instanceof Error && error.message === "SERVER_ERROR"
@@ -77,6 +90,36 @@ export const runQuery = (project: string, id: string) =>
     queryKey: [project, "run", id],
     queryFn: () => getRun({ data: { project, id } }),
     refetchInterval: (query) => (query.state.data?.run.status === "running" ? RUN_POLL_MS : false),
+  })
+
+// A sync refreshes outcomes and every run trace, so both live under keys a sync can invalidate as a group.
+export const outcomesKey = (project: string) => [project, "outcomes"] as const
+export const runTraceKey = (project: string) => [project, "run-trace"] as const
+
+export const runTraceQuery = (project: string, id: string) =>
+  queryOptions({
+    queryKey: [...runTraceKey(project), id],
+    queryFn: () => getRunTrace({ data: { project, id } }),
+  })
+
+export const outcomesQuery = (project: string, windowDays: OutcomeWindow) =>
+  queryOptions({
+    queryKey: [...outcomesKey(project), "summary", windowDays],
+    queryFn: () => getOutcomes({ data: { project, windowDays } }),
+  })
+
+export const pullRequestsQuery = (project: string, filters: PullRequestFilters) =>
+  infiniteQueryOptions({
+    queryKey: [...outcomesKey(project), "pull-requests", filters],
+    queryFn: ({ pageParam }) => listPullRequests({ data: { ...filters, project, before: pageParam, limit: 25 } }),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  })
+
+export const costMonthQuery = (project: string, month: string | undefined) =>
+  queryOptions({
+    queryKey: [project, "costs", month ?? "current"],
+    queryFn: () => getCostMonth({ data: { project, month } }),
   })
 
 export const systemQuery = (project: string) =>

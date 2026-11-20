@@ -2,7 +2,9 @@ import * as React from "react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
+  CoinsIcon,
   GaugeIcon,
+  GitPullRequestIcon,
   GithubLogoIcon,
   HeartbeatIcon,
   LightningIcon,
@@ -38,6 +40,8 @@ const NAV = [
   { title: "Integrations", to: "/integrations", icon: PlugsConnectedIcon },
   { title: "Logs", to: "/logs", icon: ScrollIcon },
   { title: "Runs", to: "/runs", icon: LightningIcon },
+  { title: "Outcomes", to: "/outcomes", icon: GitPullRequestIcon },
+  { title: "Costs", to: "/costs", icon: CoinsIcon },
   { title: "GitHub Actions", to: "/actions", icon: GithubLogoIcon },
   { title: "Workflows", to: "/workflows", icon: TreeStructureIcon },
   { title: "System", to: "/system", icon: HeartbeatIcon },
