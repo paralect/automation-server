@@ -6,6 +6,7 @@ import { groupFields, idsOf, isMissingScope, mergeSelection, parseManualId, pick
 const field = (over: Partial<FieldView> & Pick<FieldView, "key" | "kind">): FieldView => ({
   label: over.key,
   required: false,
+  advanced: false,
   source: "default",
   set: false,
   ...over,

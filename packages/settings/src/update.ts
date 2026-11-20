@@ -81,6 +81,7 @@ export type FieldView = {
   readonly help?: string;
   readonly group?: string;
   readonly groupHelp?: string;
+  readonly advanced: boolean;
   readonly options?: readonly string[];
   readonly min?: number;
   readonly max?: number;
@@ -137,6 +138,7 @@ export function describeSettings(
           ...(field.help ? { help: field.help } : {}),
           ...(field.group ? { group: field.group } : {}),
           ...(field.groupHelp ? { groupHelp: field.groupHelp } : {}),
+          advanced: field.advanced === true,
           ...(field.options ? { options: field.options } : {}),
           ...(field.min !== undefined ? { min: field.min } : {}),
           ...(field.max !== undefined ? { max: field.max } : {}),

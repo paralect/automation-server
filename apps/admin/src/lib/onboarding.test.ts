@@ -9,6 +9,7 @@ const field = (key: string, over: Partial<FieldView> = {}): FieldView => ({
   label: key,
   kind: "text",
   required: false,
+  advanced: false,
   source: "default",
   set: false,
   ...over,
