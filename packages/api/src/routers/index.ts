@@ -23,6 +23,14 @@ import {
   type SettingsView,
 } from "@automation-server/settings";
 import { CRISP_DECISIONS, crispOutcomeSchema, type CrispDecision, type CrispOutcome } from "@automation-server/sources/crisp/outcome";
+import {
+  OUTCOME_WINDOWS,
+  type CostMonth,
+  type OutcomeSummary,
+  type PullRequestRow,
+  type RunTrace,
+  type SyncNowResult,
+} from "@automation-server/ledger";
 import { ORPCError, type, type RouterClient } from "@orpc/server";
 import { z } from "zod";
 
@@ -91,6 +99,9 @@ function runInProject(context: Context, project: string, id: string) {
   return found;
 }
 
+const notImplemented = (): never => {
+  throw new ORPCError("NOT_IMPLEMENTED");
+};
 const precondition = (message: string) => new ORPCError("PRECONDITION_FAILED", { message });
 
 async function replayEvent(context: Context, project: string, run: RunRecord, event: StoredEvent | undefined, dryRun: boolean) {
@@ -231,6 +242,10 @@ export const appRouter = {
         if (!started) throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "The replay started but its run could not be recorded" });
         return { runId: started, status: "started" as const };
       }),
+    trace: adminProcedure
+      .input(z.object({ project, id: z.string().min(1) }))
+      .output(type<RunTrace & { trigger: { source: string; externalId: string; url: string | null } }>())
+      .handler(() => notImplemented()),
   },
 
   crisp: {
@@ -285,6 +300,28 @@ export const appRouter = {
       .handler(({ input, context }) => ({
         changed: context.activity.markRunsRead({ project: inProject(context, input.project), automation: CRISP_TRIAGE, readAt: new Date().toISOString() }),
       })),
+  },
+
+  outcomes: {
+    summary: adminProcedure
+      .input(z.object({ project, windowDays: z.union(OUTCOME_WINDOWS.map((d) => z.literal(d))).default(30) }))
+      .output(type<OutcomeSummary>())
+      .handler(() => notImplemented()),
+    pullRequests: adminProcedure
+      .input(z.object({ project, state: z.enum(["open", "merged", "closed"]).optional(), origin: text, ...page }))
+      .output(type<Page<PullRequestRow>>())
+      .handler(() => notImplemented()),
+    syncNow: adminProcedure
+      .input(z.object({ project }))
+      .output(type<SyncNowResult>())
+      .handler(() => notImplemented()),
+  },
+
+  costs: {
+    month: adminProcedure
+      .input(z.object({ project, month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional() }))
+      .output(type<CostMonth>())
+      .handler(() => notImplemented()),
   },
 
   actions: {
@@ -427,3 +464,4 @@ export type {
   WorkflowStatus,
 } from "../workflowInstaller";
 export type { IntegrationLink } from "../workflowTemplates";
+export type * from "@automation-server/ledger";

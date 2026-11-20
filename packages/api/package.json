@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@automation-server/core": "workspace:*",
+    "@automation-server/ledger": "workspace:*",
     "@automation-server/settings": "workspace:*",
     "@automation-server/sources": "workspace:*",
     "@orpc/client": "^1.15.6",
