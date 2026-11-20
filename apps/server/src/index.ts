@@ -27,6 +27,7 @@ import { ENV } from "./env.server";
 import { createPosthogAdmin } from "./integrations/posthog";
 import { INTEGRATION_MODULES } from "./integrations/registry";
 import { createReplayAdmin } from "./replay";
+import { createSlackDirectory } from "./slackDirectory";
 import { createHealthSink } from "./health";
 import { createRuntime } from "./runtime";
 
@@ -122,6 +123,7 @@ const app = createApp({
     settings: { db: settings, env: process.env, reload, test: runtime.test, health: healthStore.get },
     posthog: createPosthogAdmin({ resolve, scheduler }),
     replay: createReplayAdmin({ dispatcher, scheduler, jobs: (project) => runtime.project(project).jobs }),
+    slackDirectory: createSlackDirectory({ resolve }),
     system: (project) => {
       const built = runtime.project(project);
       return {

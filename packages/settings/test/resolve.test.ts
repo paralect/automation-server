@@ -59,7 +59,7 @@ describe("resolution order", () => {
 
   test("slack is configured by the alert webhook or by the bot credentials, and reports the nearest gap", () => {
     expect(resolveConfig(fresh(), {}).slack.configured).toBe(false);
-    expect(resolveConfig(fresh(), {}).slack.missing).toEqual(["webhookUrl"]);
+    expect(resolveConfig(fresh(), {}).slack.missing).toEqual(["Add the bot token and signing secret, or an alerts webhook URL."]);
     expect(resolveConfig(fresh(), { SLACK_ALERTS_WEBHOOK_URL: "https://hooks.slack.com/services/T/B/x" }).slack.configured).toBe(true);
     const partial = resolveConfig(fresh(), { SLACK_BOT_TOKEN: "xoxb-1" }).slack;
     expect(partial.configured).toBe(false);
@@ -68,6 +68,11 @@ describe("resolution order", () => {
     expect(bot.configured).toBe(true);
     expect(bot.values.botEnabled).toBe(false);
     expect(bot.values.allowedUsers).toBeUndefined();
+  });
+
+  test("a oneOf integration names every way to finish only while nothing is set", () => {
+    expect(resolveConfig(fresh(), { SLACK_SIGNING_SECRET: "s" }).slack.missing).toEqual(["botToken"]);
+    expect(resolveConfig(fresh(), { SLACK_SIGNING_SECRET: "s" }).slack.configured).toBe(false);
   });
 
   test("a db secret makes an integration configured", () => {
@@ -168,7 +173,39 @@ describe("planUpdate", () => {
   });
 });
 
+describe("slack list fields", () => {
+  test("allowedChannels takes channel IDs only and allowedUsers keeps its pattern", () => {
+    expect(planUpdate("slack", { values: { allowedChannels: ["C01ABC", "G02DEF"] } }).set).toEqual([
+      { key: "slack.allowedChannels", json: '["C01ABC","G02DEF"]', secret: false },
+    ]);
+    for (const bad of ["general", "#general", "U01ABC", "c01abc"]) {
+      expect(() => planUpdate("slack", { values: { allowedChannels: [bad] } })).toThrow(SettingsInputError);
+    }
+    expect(() => planUpdate("slack", { values: { allowedUsers: ["alice"] } })).toThrow(SettingsInputError);
+    expect(planUpdate("slack", { values: { allowedUsers: ["U01ABC", "W02DEF"] } }).set).toHaveLength(1);
+  });
+
+  test("the lists resolve from env and from the db like any list", () => {
+    expect(resolveConfig(fresh(), { SLACK_BOT_TOKEN: "xoxb-1", SLACK_SIGNING_SECRET: "s" }).slack.values.allowedChannels).toBeUndefined();
+    const store = fresh();
+    store.apply({ set: [{ key: "slack.allowedChannels", json: '["C01ABC"]', secret: false }] });
+    expect(resolveConfig(store, {}).slack.values.allowedChannels).toEqual(["C01ABC"]);
+  });
+});
+
 describe("describeSettings", () => {
+  test("exposes groups in spec order, and integrations without groups stay flat", () => {
+    const view = describeSettings(fresh(), {}, resolveConfig(fresh(), {}));
+    const slack = view.integrations.find((i) => i.id === "slack")!;
+    const groups = [...new Set(slack.fields.map((f) => f.group))];
+    expect(groups).toEqual(["Connection", "Access", "Alerts", "Advanced"]);
+    expect(slack.fields.slice(0, 2).map((f) => f.key)).toEqual(["botToken", "signingSecret"]);
+    expect(slack.fields.find((f) => f.key === "allowedChannels")).toMatchObject({ kind: "slackChannels", group: "Access" });
+    expect(slack.fields.find((f) => f.key === "allowedUsers")).toMatchObject({ kind: "slackUsers", group: "Access" });
+    expect(view.integrations.find((i) => i.id === "github")!.fields.every((f) => f.group === undefined)).toBe(true);
+  });
+
+
   test("never exposes a secret value, only whether it is set and where from", () => {
     const store = fresh();
     store.apply({ set: [{ key: "sentry.clientSecret", json: '"db-secret"', secret: true }] });

@@ -72,6 +72,7 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
       runNow: async () => ({ status: "busy" as const, message: "unused" }),
     },
     replay: { event: async () => ({ outcome: "unknown-automation" as const }), job: async () => ({ status: "unknown-job" as const }) },
+    slackDirectory: { list: async () => ({ items: [], truncated: false }) },
     system: () => ({
       startedAt: new Date().toISOString(),
       sources: Object.keys(runtime.sources("default")),

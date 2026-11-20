@@ -9,7 +9,8 @@ export const slackBotOutcomeSchema = z.object({
   channel: text,
   thread: text,
   user: text,
-  decision: z.enum(["replied", "denied", "rate-limited", "busy"]),
+  // channel-not-allowed is recorded and ignored without a reply, because the mention came from a channel the admin did not choose.
+  decision: z.enum(["replied", "denied", "rate-limited", "busy", "channel-not-allowed"]),
   replyTs: text.optional(),
   // Present only on dry runs, where nothing is posted.
   dryRun: z.literal(true).optional(),

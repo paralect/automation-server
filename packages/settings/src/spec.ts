@@ -1,4 +1,7 @@
-export type FieldKind = "text" | "secret" | "number" | "boolean" | "select" | "list";
+export type FieldKind = "text" | "secret" | "number" | "boolean" | "select" | "list" | "slackUsers" | "slackChannels";
+
+// slackUsers and slackChannels store a plain list of Slack IDs. Only the admin renders them as pickers.
+export const isListKind = (kind: FieldKind): boolean => kind === "list" || kind === "slackUsers" || kind === "slackChannels";
 
 export type FieldSpec = {
   readonly key: string;
@@ -7,6 +10,9 @@ export type FieldSpec = {
   readonly required?: boolean;
   readonly default?: string | number | boolean | readonly string[];
   readonly help?: string;
+  // Fields with the same group render under one heading, in spec order. Integrations without groups render as a flat list.
+  readonly group?: string;
+  readonly groupHelp?: string;
   readonly options?: readonly string[];
   readonly env?: string;
   readonly pattern?: string;
@@ -115,20 +121,21 @@ export const INTEGRATIONS = {
     title: "Slack",
     description: "Alerts when an automation keeps failing, and a bot you tag in Slack.",
     webhookSource: "slack",
-    requiredOneOf: [["webhookUrl"], ["botToken", "signingSecret"]],
+    requiredOneOf: [["botToken", "signingSecret"], ["webhookUrl"]],
     fields: [
-      { key: "webhookUrl", label: "Alerts incoming webhook URL", kind: "secret", env: "SLACK_ALERTS_WEBHOOK_URL", pattern: "^https://", patternHint: "must start with https://", help: "An incoming webhook of the channel that should receive alerts. Leave empty to send no alerts." },
-      { key: "failureThreshold", label: "Failure threshold", kind: "number", default: 3, min: 1, max: 50, help: "Alert once when an automation fails this many times in a row. It alerts again only after a success resets the streak." },
-      { key: "alertOnTokenHealth", label: "Alert on token health", kind: "boolean", default: true, help: "Also alert when a connected token stops working or is about to expire." },
-      { key: "channelLabel", label: "Channel label", kind: "text", help: "Shown in the alert text, for example #alerts." },
-      { key: "botToken", label: "Bot token", kind: "secret", env: "SLACK_BOT_TOKEN", pattern: "^xoxb-", help: "Bot User OAuth Token (xoxb-...) of your Slack app. Needed for the bot." },
-      { key: "signingSecret", label: "Signing secret", kind: "secret", env: "SLACK_SIGNING_SECRET", help: "Signing Secret of your Slack app. Verifies that events come from Slack." },
-      { key: "botEnabled", label: "Bot enabled", kind: "boolean", default: false, help: "Lets people tag the bot. It only answers members listed under Allowed users." },
-      { key: "allowedUsers", label: "Allowed users", kind: "list", pattern: "^[UW][A-Z0-9]+$", help: "Slack member IDs (U01ABC...) allowed to use the bot. Empty means nobody." },
-      { key: "requireApproval", label: "Require approval for changes", kind: "boolean", default: true, help: "When on, the bot shows the exact arguments of every change it wants to make and runs it only after the requester replies approve in the thread. Turn it off only if you accept that anyone on the allowlist, and any text the bot reads, can steer it into creating issues and starting workflows." },
-      { key: "agentModel", label: "Agent model", kind: "text", help: "OpenRouter model that answers the bot. Empty uses the OpenRouter escalation model. Must support structured outputs." },
-      { key: "botName", label: "Bot name", kind: "text", help: "Shown in the approval message as @name approve, for example Automation Bot." },
-      { key: "apiBaseUrl", label: "API base URL", kind: "text", default: "https://slack.com/api", pattern: "^https://", patternHint: "must start with https://", help: "Change only to reach a proxy or a test double." },
+      { key: "botToken", label: "Bot token", kind: "secret", group: "Connection", groupHelp: "From your Slack app. Save these first, then choose who can use the bot.", env: "SLACK_BOT_TOKEN", pattern: "^xoxb-", help: "Bot User OAuth Token (xoxb-...) of your Slack app. Needed for the bot." },
+      { key: "signingSecret", label: "Signing secret", kind: "secret", group: "Connection", env: "SLACK_SIGNING_SECRET", help: "Signing Secret of your Slack app. Verifies that events come from Slack." },
+      { key: "botEnabled", label: "Bot enabled", kind: "boolean", group: "Access", groupHelp: "Who can use the bot, and where.", default: false, help: "Lets people tag the bot. It only answers the users chosen below." },
+      { key: "allowedUsers", label: "Allowed users", kind: "slackUsers", group: "Access", pattern: "^[UW][A-Z0-9]+$", help: "Members allowed to use the bot. Nobody is allowed until you choose at least one." },
+      { key: "allowedChannels", label: "Allowed channels", kind: "slackChannels", group: "Access", pattern: "^[CG][A-Z0-9]+$", help: "Channels where the bot answers. Empty means any channel the bot has been invited to. Mentions elsewhere are ignored without a reply." },
+      { key: "requireApproval", label: "Require approval for changes", kind: "boolean", group: "Access", default: true, help: "When on, the bot shows the exact arguments of every change it wants to make and runs it only after the requester replies approve in the thread. Turn it off only if you accept that anyone on the allowlist, and any text the bot reads, can steer it into creating issues and starting workflows." },
+      { key: "webhookUrl", label: "Alerts webhook URL", kind: "secret", group: "Alerts", groupHelp: "Optional. Posts a message when an automation keeps failing or a token stops working.", env: "SLACK_ALERTS_WEBHOOK_URL", pattern: "^https://", patternHint: "must start with https://", help: "An incoming webhook of the channel that should receive alerts. Leave empty to send no alerts." },
+      { key: "failureThreshold", label: "Failure threshold", kind: "number", group: "Alerts", default: 3, min: 1, max: 50, help: "Alert once when an automation fails this many times in a row. It alerts again only after a success resets the streak." },
+      { key: "alertOnTokenHealth", label: "Alert on token health", kind: "boolean", group: "Alerts", default: true, help: "Also alert when a connected token stops working or is about to expire." },
+      { key: "channelLabel", label: "Channel label", kind: "text", group: "Alerts", help: "Shown in the alert text, for example #alerts." },
+      { key: "agentModel", label: "Agent model", kind: "text", group: "Advanced", help: "OpenRouter model that answers the bot. Empty uses the OpenRouter escalation model. Must support structured outputs." },
+      { key: "botName", label: "Bot name", kind: "text", group: "Advanced", help: "Shown in the approval message as @name approve, for example Automation Bot." },
+      { key: "apiBaseUrl", label: "API base URL", kind: "text", group: "Advanced", default: "https://slack.com/api", pattern: "^https://", patternHint: "must start with https://", help: "Change only to reach a proxy or a test double." },
     ],
   },
 } as const satisfies Record<string, IntegrationSpec>;
@@ -141,7 +148,7 @@ type FieldValue<F> = F extends { kind: "number" }
   ? number
   : F extends { kind: "boolean" }
     ? boolean
-    : F extends { kind: "list" }
+    : F extends { kind: "list" | "slackUsers" | "slackChannels" }
       ? string[]
       : string;
 

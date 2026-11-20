@@ -15,7 +15,7 @@ const mentionEvent = (user: string, patch: Record<string, unknown> = {}, externa
   payload: { team: "T1", channel: "C1", user, text: "create a ticket", ts: "100.1", threadTs: null, ...patch },
 });
 
-const setup = ({ allowedUsers = ["UOK"], dry = false, handler, limiter }: { allowedUsers?: string[]; dry?: boolean; handler?: SlackBotHandler; limiter?: SlackBotLimiter } = {}) => {
+const setup = ({ allowedUsers = ["UOK"], allowedChannels, dry = false, handler, limiter }: { allowedUsers?: string[]; allowedChannels?: string[]; dry?: boolean; handler?: SlackBotHandler; limiter?: SlackBotLimiter } = {}) => {
   const posted: PostMessage[] = [];
   const logs: string[] = [];
   const log: Logger = {
@@ -31,7 +31,7 @@ const setup = ({ allowedUsers = ["UOK"], dry = false, handler, limiter }: { allo
       return { ts: "200.1" };
     },
   };
-  const bot = { ...createSlackBot({ client, allowedUsers, ...(handler ? { handler } : {}), ...(limiter ? { limiter } : {}) }), project: "p" };
+  const bot = { ...createSlackBot({ client, allowedUsers, ...(allowedChannels ? { allowedChannels } : {}), ...(handler ? { handler } : {}), ...(limiter ? { limiter } : {}) }), project: "p" };
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const dispatcher = createDispatcher({
     automations: () => [dry ? withDryRun(bot) : bot],
@@ -124,6 +124,90 @@ describe("slack-bot automation", () => {
     await t.send(mentionEvent("UNOPE"));
     const run = t.activity.queryRuns({ limit: 1 }).items[0]!;
     expect(t.activity.getRun(run.id)?.run.outcome).toMatchObject({ decision: "denied", user: "UNOPE", replyTs: "200.1" });
+  });
+
+  describe("allowed channels", () => {
+    const counting = () => {
+      const seen: string[] = [];
+      const handler: SlackBotHandler = async ({ event }) => (seen.push(event.payload.text), { reply: "ok" });
+      return { seen, handler };
+    };
+    const outcomes = (t: ReturnType<typeof setup>) =>
+      t.activity.queryRuns({ limit: 20 }).items.map((r) => t.activity.getRun(r.id)?.run.outcome as { decision: string; channel: string });
+
+    test("an empty list answers in any channel", async () => {
+      const t = setup({ allowedChannels: [] });
+      await t.send(mentionEvent("UOK", { channel: "CANY" }));
+      expect(t.posted.map((p) => p.channel)).toEqual(["CANY"]);
+    });
+
+    test("a listed channel is answered and any other is ignored without a word", async () => {
+      const { seen, handler } = counting();
+      const t = setup({ allowedChannels: ["CGOOD"], handler });
+      await t.send(mentionEvent("UOK", { channel: "CGOOD" }, "Ev1"));
+      await t.send(mentionEvent("UOK", { channel: "CELSE" }, "Ev2"));
+      expect(t.posted.map((p) => p.channel)).toEqual(["CGOOD"]);
+      expect(seen).toHaveLength(1);
+    });
+
+    test("an ignored mention is recorded as a decision on a succeeded run and posts nothing", async () => {
+      const t = setup({ allowedChannels: ["CGOOD"] });
+      await t.send(mentionEvent("UOK", { channel: "CELSE" }));
+      expect(t.posted).toEqual([]);
+      const run = t.activity.queryRuns({ limit: 1 }).items[0]!;
+      expect(run.status).toBe("succeeded");
+      const outcome = slackBotOutcomeSchema.parse(t.activity.getRun(run.id)?.run.outcome);
+      expect(outcome).toMatchObject({ decision: "channel-not-allowed", channel: "CELSE", user: "UOK" });
+      expect(outcome.replyTs).toBeUndefined();
+      expect(t.logs.some((l) => l.includes("ignored: channel not allowed"))).toBe(true);
+    });
+
+    test("a user who is not allowed still gets the denial in an allowed channel, and nothing in another one", async () => {
+      const t = setup({ allowedChannels: ["CGOOD"] });
+      await t.send(mentionEvent("UNOPE", { channel: "CGOOD" }, "Ev1"));
+      await t.send(mentionEvent("UNOPE", { channel: "CELSE" }, "Ev2"));
+      expect(t.posted).toEqual([{ channel: "CGOOD", threadTs: "100.1", text: DENIED_REPLY }]);
+    });
+
+    test("approve and cancel from another channel never reach the handler", async () => {
+      const { seen, handler } = counting();
+      const t = setup({ allowedChannels: ["CGOOD"], handler });
+      await t.send(mentionEvent("UOK", { channel: "CELSE", text: "approve", threadTs: "50.5" }, "Ev1"));
+      await t.send(mentionEvent("UOK", { channel: "CELSE", text: "cancel", threadTs: "50.5" }, "Ev2"));
+      expect(seen).toEqual([]);
+      expect(t.posted).toEqual([]);
+    });
+
+    test("approve from a user who is not allowed does not reach the handler either", async () => {
+      const { seen, handler } = counting();
+      const t = setup({ allowedChannels: ["CGOOD"], handler });
+      await t.send(mentionEvent("UNOPE", { channel: "CGOOD", text: "approve", threadTs: "50.5" }));
+      expect(seen).toEqual([]);
+      expect(t.posted.map((p) => p.text)).toEqual([DENIED_REPLY]);
+    });
+
+    test("approve in an allowed channel from an allowed user reaches the handler", async () => {
+      const { seen, handler } = counting();
+      const t = setup({ allowedChannels: ["CGOOD"], handler });
+      await t.send(mentionEvent("UOK", { channel: "CGOOD", text: "approve", threadTs: "50.5" }));
+      expect(seen).toEqual(["approve"]);
+    });
+
+    test("an ignored channel spends no quota, so it cannot starve the allowed one", async () => {
+      const limiter = createSlackBotLimiter({ now: () => 9_000_000, denialReply: DENIED_REPLY });
+      const t = setup({ allowedChannels: ["CGOOD"], limiter });
+      for (let i = 0; i < 12; i++) await t.send(mentionEvent("UOK", { channel: "CELSE" }, `Ev${i}`));
+      await t.send(mentionEvent("UOK", { channel: "CGOOD" }, "Ev99"));
+      expect(t.posted.map((p) => p.text)).toEqual(["Got it: create a ticket"]);
+      expect(outcomes(t).filter((o) => o.decision === "channel-not-allowed")).toHaveLength(12);
+    });
+
+    test("a dry run of an ignored mention reports the decision as a dry run", async () => {
+      const t = setup({ allowedChannels: ["CGOOD"], dry: true });
+      await t.send(mentionEvent("UOK", { channel: "CELSE" }));
+      const run = t.activity.queryRuns({ limit: 1 }).items[0]!;
+      expect(t.activity.getRun(run.id)?.run.outcome).toMatchObject({ decision: "channel-not-allowed", dryRun: true });
+    });
   });
 
   describe("limits", () => {

@@ -58,9 +58,9 @@ export const slack = defineModule({
   build(config, { log, fetch, pending, project }) {
     const { slack, openrouter } = config;
     if (!slack.configured) return {};
-    const { botEnabled, botToken, signingSecret, allowedUsers = [], apiBaseUrl, agentModel, botName, requireApproval } = slack.values;
+    const { botEnabled, botToken, signingSecret, allowedUsers = [], allowedChannels = [], apiBaseUrl, agentModel, botName, requireApproval } = slack.values;
     if (!botEnabled || !botToken || !signingSecret) return {};
-    if (allowedUsers.length === 0) log.warn("slack bot is on but no member IDs are allowed, so it will only answer with a denial");
+    if (allowedUsers.length === 0) log.warn("slack bot is on but no users are allowed, so it will only answer with a denial");
 
     const canWrite = pending !== undefined && project !== undefined;
     if (!requireApproval) log.warn("slack bot approval is off: writes run as soon as the model proposes them");
@@ -75,7 +75,7 @@ export const slack = defineModule({
     const client = createSlackBotClient({ token: botToken, apiBaseUrl, fetch });
     return {
       sources: [createSlackSource({ signingSecret })],
-      automations: [createSlackBot({ client, allowedUsers, handler: createAgentHandler(agent, canWrite ? { pending, project, tools, requireApproval, botName } : undefined) })],
+      automations: [createSlackBot({ client, allowedUsers, allowedChannels, handler: createAgentHandler(agent, canWrite ? { pending, project, tools, requireApproval, botName } : undefined) })],
     };
   },
   scheduledCheck: ({ slack }) => Boolean(slack.values.botToken),
@@ -95,6 +95,7 @@ export const slack = defineModule({
       details.webhook = "/webhooks/slack";
       details.botEnabled = slack.values.botEnabled ? "yes" : "no";
       details.allowedUsers = String(slack.values.allowedUsers?.length ?? 0);
+      details.allowedChannels = slack.values.allowedChannels?.length ? String(slack.values.allowedChannels.length) : "any";
       details.signingSecret = slack.values.signingSecret ? "set" : "missing";
     }
 

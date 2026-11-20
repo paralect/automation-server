@@ -13,15 +13,17 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { SlackPicker } from "@/components/slack-picker"
 import { IntegrationWorkflow } from "@/components/integration-workflow"
 import { Time } from "@/components/time"
 import { previewPosthogReport, runPosthogNow, testConnection, updateSettings } from "@/lib/api.functions"
 import { errorText } from "@/lib/errors"
 import { expiryLabel, expiryState, healthDot, type HealthDot } from "@/lib/health"
 import { fieldOf, isGithubReady, savedRepo, type LinkedTemplate } from "@/lib/integration-workflows"
-import { settingsQuery, systemQuery } from "@/lib/queries"
+import { settingsQuery, slackDirectoryKey, systemQuery } from "@/lib/queries"
 import { useProjectId } from "@/lib/project"
-import { buildPayload, initialState, isDirty, type FormState, type SecretAction } from "@/lib/settings-form"
+import { buildPayload, initialState, isDirty, missingText, type FormState, type SecretAction } from "@/lib/settings-form"
+import { groupFields, isListKind, pickerKindOf, pickersEnabled, PICKERS_DISABLED_NOTICE } from "@/lib/slack-picker"
 
 const SOURCE_NOTE: Partial<Record<FieldView["source"], string>> = {
   env: "From the server environment.",
@@ -96,7 +98,7 @@ export function IntegrationCard({ integration }: { integration: IntegrationView 
     mutationFn: () => testConnection({ data: { project, integrationId: integration.id } }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: settingsQuery(project).queryKey }),
   })
-  const missing = integration.missing.map((key) => integration.fields.find((f) => f.key === key)?.label ?? key)
+  const missing = missingText(integration.missing, integration.fields)
   return (
     <Card className="transition-shadow hover:ring-foreground/20">
       <CardHeader>
@@ -110,9 +112,7 @@ export function IntegrationCard({ integration }: { integration: IntegrationView 
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-2">
         <CardDescription>{integration.description}</CardDescription>
-        {!integration.configured && missing.length > 0 && (
-          <p className="text-xs text-muted-foreground">Missing: {missing.join(", ")}.</p>
-        )}
+        {!integration.configured && missing && <p className="text-xs text-muted-foreground">{missing}</p>}
         {integration.configured && <HealthSummary health={integration.health} />}
         {test.error ? (
           <FieldError>{errorText(test.error)}</FieldError>
@@ -170,6 +170,9 @@ export function IntegrationSettings({
     onSuccess: (view) => {
       queryClient.setQueryData(settingsQuery(project).queryKey, view)
       void queryClient.invalidateQueries({ queryKey: systemQuery(project).queryKey })
+      void queryClient.invalidateQueries({ queryKey: settingsQuery(project).queryKey })
+      // A new token may open another workspace, so the lists read with the old one are stale.
+      if (id === "slack") for (const kind of ["users", "channels"] as const) void queryClient.invalidateQueries({ queryKey: slackDirectoryKey(project, kind) })
     },
   })
   const test = useMutation({ mutationFn: () => testConnection({ data: { project, integrationId: id } }) })
@@ -197,7 +200,9 @@ export function IntegrationSettings({
     save.mutate(built.payload)
   }
 
-  const missing = integration.missing.map((key) => fields.find((f) => f.key === key)?.label ?? key)
+  const missing = missingText(integration.missing, fields)
+  const pickers = pickersEnabled(fields)
+  const groups = groupFields(fields)
   const repoSetting = workflow?.integration.repoSetting
   const workflowRepo =
     workflow && repoSetting
@@ -232,41 +237,62 @@ export function IntegrationSettings({
               Set SETTINGS_ENCRYPTION_KEY on the server to save tokens and secrets here. Other fields still save.
             </p>
           )}
-          {!integration.configured && missing.length > 0 && (
-            <p className="text-xs text-muted-foreground">Missing: {missing.join(", ")}.</p>
-          )}
-          {integration.webhookSource && <WebhookUrl url={webhookUrl} title={integration.title} />}
-          <FieldGroup className="gap-4">
-            {fields.map((field) => (
-              <Field key={field.key}>
-                <FieldLabel htmlFor={`${id}-${field.key}`}>
-                  {field.label}
-                  {field.required && <span className="text-muted-foreground">(required)</span>}
-                </FieldLabel>
-                {field.kind === "secret" ? (
-                  <SecretInput
-                    id={`${id}-${field.key}`}
-                    field={field}
-                    value={String(state[field.key] ?? "")}
-                    onChange={(value) => set(field.key, value)}
-                    action={secretActions[field.key] ?? "keep"}
-                    onAction={(action) => setSecretAction(field.key, action)}
-                    replacing={replacing.has(field.key)}
-                    onReplace={(on) => setReplace(field.key, on)}
-                    writable={secretsWritable}
-                  />
-                ) : (
-                  <PlainInput
-                    id={`${id}-${field.key}`}
-                    field={field}
-                    value={state[field.key] ?? ""}
-                    onChange={(value) => set(field.key, value)}
-                  />
-                )}
-                <FieldNote field={field} />
-              </Field>
-            ))}
-          </FieldGroup>
+          {!integration.configured && missing && <p className="text-xs text-muted-foreground">{missing}</p>}
+          {integration.webhookSource && !groups[0]?.name && <WebhookUrl url={webhookUrl} title={integration.title} />}
+          {groups.map((group, index) => (
+            <section key={group.name ?? ""} aria-labelledby={group.name ? `${id}-group-${index}` : undefined} className={cn("flex flex-col gap-4", index > 0 && group.name && "border-t pt-4")}>
+              {group.name && (
+                <div className="flex flex-col gap-0.5">
+                  <h2 id={`${id}-group-${index}`} className="text-sm font-medium">
+                    {group.name}
+                  </h2>
+                  {group.help && <p className="text-xs text-muted-foreground">{group.help}</p>}
+                </div>
+              )}
+              {index === 0 && group.name && integration.webhookSource && <WebhookUrl url={webhookUrl} title={integration.title} />}
+              {!pickers && group.fields.some((f) => pickerKindOf(f.kind)) && <p role="note" className="rounded-md border border-dashed p-2.5 text-xs text-muted-foreground">{PICKERS_DISABLED_NOTICE}</p>}
+              <FieldGroup className="gap-4">
+                {group.fields.map((field) => (
+                  <Field key={field.key}>
+                    <FieldLabel htmlFor={`${id}-${field.key}`}>
+                      {field.label}
+                      {field.required && <span className="text-muted-foreground">(required)</span>}
+                    </FieldLabel>
+                    {field.kind === "secret" ? (
+                      <SecretInput
+                        id={`${id}-${field.key}`}
+                        field={field}
+                        value={String(state[field.key] ?? "")}
+                        onChange={(value) => set(field.key, value)}
+                        action={secretActions[field.key] ?? "keep"}
+                        onAction={(action) => setSecretAction(field.key, action)}
+                        replacing={replacing.has(field.key)}
+                        onReplace={(on) => setReplace(field.key, on)}
+                        writable={secretsWritable}
+                      />
+                    ) : pickerKindOf(field.kind) ? (
+                      <SlackPicker
+                        id={`${id}-${field.key}`}
+                        kind={pickerKindOf(field.kind)!}
+                        value={String(state[field.key] ?? "")}
+                        onChange={(value) => set(field.key, value)}
+                        enabled={pickers}
+                        project={project}
+                      />
+                    ) : (
+                      <PlainInput
+                        id={`${id}-${field.key}`}
+                        field={field}
+                        value={state[field.key] ?? ""}
+                        onChange={(value) => set(field.key, value)}
+                      />
+                    )}
+                    <FieldNote field={field} />
+                  </Field>
+                ))}
+              </FieldGroup>
+            </section>
+          ))}
           {workflow && (
             <IntegrationWorkflow
               template={workflow}
@@ -326,7 +352,7 @@ function PlainInput({
   }
   const text = typeof value === "string" ? value : ""
   const placeholder = field.default === undefined ? undefined : String(field.default)
-  if (field.kind === "list") {
+  if (isListKind(field.kind)) {
     return (
       <Textarea
         id={id}

@@ -7,6 +7,7 @@ import {
   getOverview,
   getRun,
   getSettings,
+  getSlackDirectory,
   getCrispStats,
   getSystem,
   getWorkflowStatus,
@@ -111,6 +112,19 @@ export const settingsQuery = (project: string) =>
   queryOptions({
     queryKey: [project, "settings"],
     queryFn: () => getSettings({ data: { project } }),
+  })
+
+const DIRECTORY_STALE_MS = 30_000
+
+export const slackDirectoryKey = (project: string, kind: "users" | "channels") => [project, "slack-directory", kind] as const
+
+// The server caches the Slack lists for a minute, so a short client cache only saves the round trip.
+export const slackDirectoryQuery = (project: string, kind: "users" | "channels", search: string) =>
+  queryOptions({
+    queryKey: [...slackDirectoryKey(project, kind), search],
+    queryFn: () => getSlackDirectory({ data: { project, kind, ...(search ? { search } : {}) } }),
+    staleTime: DIRECTORY_STALE_MS,
+    retry: false,
   })
 
 export const workflowTemplatesQuery = () =>

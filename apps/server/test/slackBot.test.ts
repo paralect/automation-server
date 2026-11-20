@@ -149,6 +149,22 @@ describe("slack bot over the webhook route", () => {
     expect(t.replies()).toHaveLength(1);
   });
 
+  test("with allowed channels set, a mention elsewhere is ignored silently and a listed channel is answered", async () => {
+    const t = setup({ extraSettings: [{ key: "slack.allowedChannels", json: '["CGOOD"]', secret: false }], model: [{ type: "final", tool: null, argsJson: null, text: "should not run" }] });
+    await t.deliver(t.mention({ channel: "CELSE" }, { event_id: "Ev1" }));
+    await t.deliver(t.mention({ channel: "CELSE", user: "UNOPE" }, { event_id: "Ev2" }));
+    await t.dispatcher.drain(1000);
+    expect(t.replies()).toEqual([]);
+    expect(t.modelRequests).toEqual([]);
+    expect(t.calls).toEqual([]);
+    const decisions = t.activity.queryRuns({ limit: 10 }).items.map((r) => (t.activity.getRun(r.id)?.run.outcome as { decision: string }).decision);
+    expect(decisions).toEqual(["channel-not-allowed", "channel-not-allowed"]);
+
+    await t.deliver(t.mention({ channel: "CGOOD" }, { event_id: "Ev3" }));
+    await t.dispatcher.drain(1000);
+    expect(t.replies().map((r) => r.channel)).toEqual(["CGOOD"]);
+  });
+
   test("Slack's retry of the same event_id runs once through the real claim", async () => {
     const t = setup();
     await t.deliver(t.mention());
@@ -171,7 +187,7 @@ describe("slack bot over the webhook route", () => {
     await t.deliver(t.mention({ user: "UNOPE" }));
     await t.deliver(t.mention({ user: "UNOPE" }));
     await t.dispatcher.drain(1000);
-    expect(t.replies()).toEqual([{ channel: "C1", thread_ts: "100.1", text: "You are not allowed to use this bot. Ask an admin to add your member ID." }]);
+    expect(t.replies()).toEqual([{ channel: "C1", thread_ts: "100.1", text: "You are not allowed to use this bot. Ask an admin to add you to the allowed users." }]);
   });
 
   test("the bot's own messages never trigger it", async () => {

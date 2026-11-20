@@ -66,6 +66,7 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
         runNow: async () => ({ status: "busy" as const, message: "unused" }),
       },
       replay: { event: async () => ({ outcome: "unknown-automation" as const }), job: async () => ({ status: "unknown-job" as const }) },
+      slackDirectory: { list: async () => ({ items: [], truncated: false }) },
       system: () => ({ startedAt: "", sources: [], automations: [], jobs: [], retentionDays: 30, webhookUrls: {} }),
     },
   });

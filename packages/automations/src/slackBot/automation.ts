@@ -9,7 +9,7 @@ import { createSlackBotLimiter, type Admission, type SlackBotLimiter } from "./l
 
 export const SLACK_BOT = "slack-bot";
 
-export const DENIED_REPLY = "You are not allowed to use this bot. Ask an admin to add your member ID.";
+export const DENIED_REPLY = "You are not allowed to use this bot. Ask an admin to add you to the allowed users.";
 
 const MAX_ECHO_CHARS = 2000;
 const MAX_LOGGED_CHARS = 200;
@@ -41,6 +41,8 @@ export type SlackBotHandler = (input: SlackBotHandlerInput) => Promise<SlackBotH
 export type SlackBotConfig = {
   client: SlackBotClient;
   allowedUsers: readonly string[];
+  // Empty means any channel the bot was invited to. Otherwise mentions elsewhere are ignored without a reply.
+  allowedChannels?: readonly string[];
   handler?: SlackBotHandler;
   // Rate limits and the in-flight cap. A bot built without one gets its own, so the limits are never off.
   limiter?: SlackBotLimiter;
@@ -66,8 +68,9 @@ function agentOutcome({ status, steps = [], error }: SlackBotHandlerResult): Sla
   };
 }
 
-export function createSlackBot({ client, allowedUsers, handler = echoHandler, limiter = createSlackBotLimiter({ denialReply: DENIED_REPLY }) }: SlackBotConfig): Automation {
+export function createSlackBot({ client, allowedUsers, allowedChannels = [], handler = echoHandler, limiter = createSlackBotLimiter({ denialReply: DENIED_REPLY }) }: SlackBotConfig): Automation {
   const allowed = new Set(allowedUsers);
+  const channels = new Set(allowedChannels);
   const config: SlackBotSettings = { allowedUsers: [...allowedUsers] };
 
   return defineAutomation({
@@ -78,6 +81,13 @@ export function createSlackBot({ client, allowedUsers, handler = echoHandler, li
       const mention = event.payload;
       const thread = mention.threadTs ?? mention.ts;
       const target = { channel: mention.channel, thread, user: mention.user };
+
+      // Checked before the limiter, thread fetch and agent so an ignored channel costs nothing and says nothing, approve and cancel included.
+      if (channels.size > 0 && !channels.has(mention.channel)) {
+        log.info("ignored: channel not allowed", { ...target, decision: "channel-not-allowed" });
+        report?.({ ...target, decision: "channel-not-allowed", ...(dryRun ? { dryRun: true as const } : {}) } satisfies SlackBotOutcome);
+        return;
+      }
 
       const permitted = allowed.has(mention.user);
       // A dry run posts nothing and may be a replay, so it must not spend the asker's quota or a slot.

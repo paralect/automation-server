@@ -22,7 +22,9 @@ const fieldSchema = (field: FieldSpec): z.ZodType => {
       return z.boolean();
     case "select":
       return z.enum([...(field.options ?? [])] as [string, ...string[]]);
-    case "list": {
+    case "list":
+    case "slackUsers":
+    case "slackChannels": {
       const item = field.pattern ? z.string().trim().regex(new RegExp(field.pattern)) : z.string().trim();
       return z.array(item.min(1).max(500)).max(100);
     }
@@ -77,6 +79,8 @@ export type FieldView = {
   readonly kind: FieldSpec["kind"];
   readonly required: boolean;
   readonly help?: string;
+  readonly group?: string;
+  readonly groupHelp?: string;
   readonly options?: readonly string[];
   readonly min?: number;
   readonly max?: number;
@@ -131,6 +135,8 @@ export function describeSettings(
           kind: field.kind,
           required: field.required === true,
           ...(field.help ? { help: field.help } : {}),
+          ...(field.group ? { group: field.group } : {}),
+          ...(field.groupHelp ? { groupHelp: field.groupHelp } : {}),
           ...(field.options ? { options: field.options } : {}),
           ...(field.min !== undefined ? { min: field.min } : {}),
           ...(field.max !== undefined ? { max: field.max } : {}),
