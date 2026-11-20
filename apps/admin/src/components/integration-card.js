@@ -1,0 +1,345 @@
+import { useState } from "react";
+import { Link } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { CheckCircleIcon, CopyIcon, GearSixIcon, PlugIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import { cn } from "cn";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { SlackPicker } from "@/components/slack-picker";
+import { IntegrationWorkflow } from "@/components/integration-workflow";
+import { Time } from "@/components/time";
+import { previewPosthogReport, runPosthogNow, testConnection, updateSettings } from "@/lib/api.functions";
+import { errorText } from "@/lib/errors";
+import { expiryLabel, expiryState, healthDot } from "@/lib/health";
+import { fieldOf, isGithubReady, savedRepo } from "@/lib/integration-workflows";
+import { settingsQuery, slackDirectoryKey, systemQuery } from "@/lib/queries";
+import { useProjectId } from "@/lib/project";
+import { buildPayload, initialState, isDirty, missingText } from "@/lib/settings-form";
+import { groupFields, isListKind, pickerKindOf, pickersEnabled, PICKERS_DISABLED_NOTICE } from "@/lib/slack-picker";
+const SOURCE_NOTE = {
+    env: "From the server environment.",
+    default: "Default value.",
+};
+const LOGOS = {
+    github: "/integrations/github.svg",
+    sentry: "/integrations/sentry.svg",
+    linear: "/integrations/linear.svg",
+    posthog: "/integrations/posthog.svg",
+    crisp: "/integrations/crisp.svg",
+    slack: "/integrations/slack.svg",
+};
+// A white tile keeps every brand mark in its official colors on both themes.
+export function IntegrationLogo({ id, className }) {
+    const src = LOGOS[id];
+    return (<div className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg bg-white p-2 ring-1 ring-foreground/10", className)}>
+      {src ? <img src={src} alt="" className="max-h-full max-w-full object-contain"/> : <PlugIcon className="size-5 text-neutral-500"/>}
+    </div>);
+}
+export function StatusBadge({ integration }) {
+    return integration.configured ? (<Badge variant="secondary">Configured</Badge>) : (<Badge variant="outline">Needs setup</Badge>);
+}
+const DOT_STYLE = {
+    ok: { className: "bg-emerald-500", label: "Healthy" },
+    failed: { className: "bg-red-500", label: "Failing" },
+    unknown: { className: "bg-neutral-400", label: "Not checked yet" },
+};
+function HealthSummary({ health }) {
+    const dot = DOT_STYLE[healthDot(health)];
+    const expiry = expiryState(health?.expiresAt, new Date());
+    const label = expiryLabel(expiry);
+    return (<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        <span role="img" aria-label={dot.label} title={dot.label} className={cn("size-2 rounded-full", dot.className)}/>
+        {health ? (<>
+            Checked <Time iso={health.checkedAt} relativeOnly/>
+          </>) : (dot.label)}
+      </span>
+      {label && (<Badge variant={expiry.kind === "expired" ? "destructive" : "outline"} className={cn(expiry.kind === "expiring" && expiry.warning && "bg-amber-500/15 text-amber-700 dark:text-amber-400")}>
+          {label}
+        </Badge>)}
+    </div>);
+}
+export function IntegrationCard({ integration }) {
+    const queryClient = useQueryClient();
+    const project = useProjectId();
+    const test = useMutation({
+        mutationFn: () => testConnection({ data: { project, integrationId: integration.id } }),
+        onSettled: () => queryClient.invalidateQueries({ queryKey: settingsQuery(project).queryKey }),
+    });
+    const missing = missingText(integration.missing, integration.fields);
+    return (<Card className="transition-shadow hover:ring-foreground/20">
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <IntegrationLogo id={integration.id}/>
+          <CardTitle className="text-sm">{integration.title}</CardTitle>
+        </div>
+        <CardAction>
+          <StatusBadge integration={integration}/>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-1 flex-col gap-2">
+        <CardDescription>{integration.description}</CardDescription>
+        {!integration.configured && missing && <p className="text-xs text-muted-foreground">{missing}</p>}
+        {integration.configured && <HealthSummary health={integration.health}/>}
+        {test.error ? (<FieldError>{errorText(test.error)}</FieldError>) : (test.data && <p role="status" className={cn("text-xs", !test.data.ok && "text-destructive")}>{test.data.message}</p>)}
+      </CardContent>
+      <CardFooter className="gap-2">
+        <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/integrations/$id" params={{ id: integration.id }}/>}>
+          <GearSixIcon />
+          Configure
+        </Button>
+        {integration.configured && (<Button variant="ghost" size="sm" onClick={() => test.mutate()} disabled={test.isPending}>
+            {test.isPending ? "Testing..." : "Test"}
+          </Button>)}
+      </CardFooter>
+    </Card>);
+}
+export function IntegrationSettings({ integration, integrations, workflow, secretsWritable, webhookUrl, }) {
+    const queryClient = useQueryClient();
+    const project = useProjectId();
+    const { id, fields } = integration;
+    const [state, setState] = useState(() => initialState(fields));
+    const [secretActions, setSecretActions] = useState({});
+    const [replacing, setReplacing] = useState(new Set());
+    const [formError, setFormError] = useState();
+    const built = buildPayload(fields, state, secretActions);
+    const dirty = built.ok && isDirty(built.payload);
+    const save = useMutation({
+        mutationFn: (payload) => updateSettings({ data: { project, integrationId: id, ...payload } }),
+        onSuccess: (view) => {
+            queryClient.setQueryData(settingsQuery(project).queryKey, view);
+            void queryClient.invalidateQueries({ queryKey: systemQuery(project).queryKey });
+            void queryClient.invalidateQueries({ queryKey: settingsQuery(project).queryKey });
+            // A new token may open another workspace, so the lists read with the old one are stale.
+            if (id === "slack")
+                for (const kind of ["users", "channels"])
+                    void queryClient.invalidateQueries({ queryKey: slackDirectoryKey(project, kind) });
+        },
+    });
+    const test = useMutation({ mutationFn: () => testConnection({ data: { project, integrationId: id } }) });
+    const set = (key, value) => setState((prev) => ({ ...prev, [key]: value }));
+    const setReplace = (key, on) => {
+        setReplacing((prev) => {
+            const next = new Set(prev);
+            if (on)
+                next.add(key);
+            else
+                next.delete(key);
+            return next;
+        });
+        if (!on)
+            set(key, "");
+    };
+    const setSecretAction = (key, action) => setSecretActions((prev) => ({ ...prev, [key]: action }));
+    const onSubmit = (event) => {
+        event.preventDefault();
+        if (!built.ok) {
+            setFormError(built.error);
+            return;
+        }
+        setFormError(undefined);
+        save.mutate(built.payload);
+    };
+    const missing = missingText(integration.missing, fields);
+    const pickers = pickersEnabled(fields);
+    const groups = groupFields(fields);
+    const repoSetting = workflow?.integration.repoSetting;
+    const workflowRepo = workflow && repoSetting
+        ? repoSetting.integration === id
+            ? String(state[repoSetting.key] ?? "")
+            : savedRepo(workflow, integrations)
+        : undefined;
+    const repoField = repoSetting && fieldOf(integrations, repoSetting.integration, repoSetting.key);
+    const repoLabel = repoSetting && repoField
+        ? repoSetting.integration === id
+            ? repoField.label
+            : `${repoField.label} on the GitHub integration`
+        : "the repository";
+    return (<form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <IntegrationLogo id={id} className="size-12"/>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-medium">{integration.title}</h1>
+            <StatusBadge integration={integration}/>
+          </div>
+          <p className="text-sm text-muted-foreground">{integration.description}</p>
+        </div>
+      </div>
+      <Card className="max-w-2xl">
+        <CardContent className="flex flex-col gap-4">
+          {!secretsWritable && (<p className="text-xs text-muted-foreground">
+              Set SETTINGS_ENCRYPTION_KEY on the server to save tokens and secrets here. Other fields still save.
+            </p>)}
+          {!integration.configured && missing && <p className="text-xs text-muted-foreground">{missing}</p>}
+          {integration.webhookSource && !groups[0]?.name && <WebhookUrl url={webhookUrl} title={integration.title}/>}
+          {groups.map((group, index) => (<section key={group.name ?? ""} aria-labelledby={group.name ? `${id}-group-${index}` : undefined} className={cn("flex flex-col gap-4", index > 0 && group.name && "border-t pt-4")}>
+              {group.name && (<div className="flex flex-col gap-0.5">
+                  <h2 id={`${id}-group-${index}`} className="text-sm font-medium">
+                    {group.name}
+                  </h2>
+                  {group.help && <p className="text-xs text-muted-foreground">{group.help}</p>}
+                </div>)}
+              {index === 0 && group.name && integration.webhookSource && <WebhookUrl url={webhookUrl} title={integration.title}/>}
+              {!pickers && group.fields.some((f) => pickerKindOf(f.kind)) && <p role="note" className="rounded-md border border-dashed p-2.5 text-xs text-muted-foreground">{PICKERS_DISABLED_NOTICE}</p>}
+              <FieldGroup className="gap-4">
+                {group.fields.map((field) => (<Field key={field.key}>
+                    <FieldLabel htmlFor={`${id}-${field.key}`}>
+                      {field.label}
+                      {field.required && <span className="text-muted-foreground">(required)</span>}
+                    </FieldLabel>
+                    {field.kind === "secret" ? (<SecretInput id={`${id}-${field.key}`} field={field} value={String(state[field.key] ?? "")} onChange={(value) => set(field.key, value)} action={secretActions[field.key] ?? "keep"} onAction={(action) => setSecretAction(field.key, action)} replacing={replacing.has(field.key)} onReplace={(on) => setReplace(field.key, on)} writable={secretsWritable}/>) : pickerKindOf(field.kind) ? (<SlackPicker id={`${id}-${field.key}`} kind={pickerKindOf(field.kind)} value={String(state[field.key] ?? "")} onChange={(value) => set(field.key, value)} enabled={pickers} project={project}/>) : (<PlainInput id={`${id}-${field.key}`} field={field} value={state[field.key] ?? ""} onChange={(value) => set(field.key, value)}/>)}
+                    <FieldNote field={field}/>
+                  </Field>))}
+              </FieldGroup>
+            </section>))}
+          {workflow && (<IntegrationWorkflow template={workflow} repo={workflowRepo} repoLabel={repoLabel} githubReady={isGithubReady(integrations)}/>)}
+          {id === "posthog" && <PosthogActions />}
+        </CardContent>
+        <CardFooter className="flex flex-col items-stretch gap-3 border-t">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" disabled={!dirty || save.isPending}>
+              {save.isPending ? "Saving..." : "Save"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => test.mutate()} disabled={test.isPending} title="Tests the saved settings">
+              {test.isPending ? "Testing..." : "Test connection"}
+            </Button>
+            {dirty ? (<span className="text-xs text-muted-foreground">Unsaved changes</span>) : (save.isSuccess && <span className="text-xs text-muted-foreground">Saved</span>)}
+          </div>
+          <FieldError>{formError ?? (save.error ? errorText(save.error) : undefined)}</FieldError>
+          {test.error ? <FieldError>{errorText(test.error)}</FieldError> : test.data && <TestResult result={test.data}/>}
+        </CardFooter>
+      </Card>
+    </form>);
+}
+function FieldNote({ field }) {
+    const note = [field.help, field.kind === "secret" ? undefined : SOURCE_NOTE[field.source]].filter(Boolean).join(" ");
+    return note ? <FieldDescription>{note}</FieldDescription> : null;
+}
+function PlainInput({ id, field, value, onChange, }) {
+    if (field.kind === "boolean") {
+        return <Switch id={id} checked={value === true} onCheckedChange={onChange}/>;
+    }
+    const text = typeof value === "string" ? value : "";
+    const placeholder = field.default === undefined ? undefined : String(field.default);
+    if (isListKind(field.kind)) {
+        return (<Textarea id={id} value={text} onChange={(e) => onChange(e.target.value)} placeholder="One per line" rows={2}/>);
+    }
+    if (field.kind === "select" && field.options) {
+        return (<Select value={text} onValueChange={(next) => onChange(String(next ?? ""))}>
+        <SelectTrigger id={id} className="w-56">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {field.options.map((option) => (<SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>))}
+        </SelectContent>
+      </Select>);
+    }
+    return (<Input id={id} type={field.kind === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.kind === "number" ? "any" : undefined} value={text} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false}/>);
+}
+function SecretInput({ id, field, value, onChange, action, onAction, replacing, onReplace, writable, }) {
+    if (action === "clear") {
+        return (<div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Cleared on save.</span>
+        <Button type="button" variant="ghost" size="sm" onClick={() => onAction("keep")}>
+          Undo
+        </Button>
+      </div>);
+    }
+    if (field.set && !replacing) {
+        return (<div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">Set</Badge>
+        {field.source === "env" && <span className="text-xs text-muted-foreground">from the server environment</span>}
+        <Button type="button" variant="outline" size="sm" onClick={() => onReplace(true)} disabled={!writable}>
+          Replace
+        </Button>
+        {field.source === "db" && (<Button type="button" variant="ghost" size="sm" onClick={() => onAction("clear")}>
+            Clear
+          </Button>)}
+      </div>);
+    }
+    return (<div className="flex items-center gap-2">
+      <Input id={id} type="password" value={value} onChange={(e) => onChange(e.target.value)} placeholder={writable ? (field.set ? "New value" : "Not set") : "Needs SETTINGS_ENCRYPTION_KEY on the server"} disabled={!writable} autoComplete="new-password" spellCheck={false}/>
+      {replacing && (<Button type="button" variant="ghost" size="sm" onClick={() => onReplace(false)}>
+          Cancel
+        </Button>)}
+    </div>);
+}
+function WebhookUrl({ url, title }) {
+    const [copied, setCopied] = useState(false);
+    if (!url)
+        return null;
+    const relative = url.startsWith("/");
+    return (<Field>
+      <FieldLabel htmlFor={`${title}-webhook`}>Webhook URL</FieldLabel>
+      <div className="flex items-center gap-2">
+        <Input id={`${title}-webhook`} value={url} readOnly className="font-mono" onFocus={(e) => e.target.select()}/>
+        <Button type="button" variant="outline" size="icon" aria-label="Copy webhook URL" onClick={() => void navigator.clipboard.writeText(url).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        })}>
+          {copied ? <CheckCircleIcon /> : <CopyIcon />}
+        </Button>
+      </div>
+      <FieldDescription>
+        Paste this into the {title} webhook settings.
+        {relative && " Set PUBLIC_URL on the server to show the full URL."}
+      </FieldDescription>
+    </Field>);
+}
+function TestResult({ result }) {
+    const Icon = result.ok ? CheckCircleIcon : WarningCircleIcon;
+    const details = Object.entries(result.details ?? {});
+    return (<div role="status" className="flex flex-col gap-1 text-xs">
+      <p className={`flex items-center gap-1.5 ${result.ok ? "" : "text-destructive"}`}>
+        {result.available && <Icon className="size-3.5 shrink-0"/>}
+        {result.message}
+      </p>
+      {details.length > 0 && (<dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-muted-foreground">
+          {details.map(([key, value]) => (<div key={key} className="contents">
+              <dt>{key}</dt>
+              <dd className="font-mono break-all">{value}</dd>
+            </div>))}
+        </dl>)}
+    </div>);
+}
+function PosthogActions() {
+    const project = useProjectId();
+    const preview = useMutation({ mutationFn: () => previewPosthogReport({ data: { project } }) });
+    const send = useMutation({ mutationFn: () => runPosthogNow({ data: { project } }) });
+    return (<div className="flex flex-col gap-3 rounded-lg border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-auto text-xs font-medium">Weekly report</span>
+        <Button type="button" variant="outline" size="sm" onClick={() => preview.mutate()} disabled={preview.isPending}>
+          {preview.isPending ? "Building..." : "Preview report"}
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => {
+            if (window.confirm("Send the PostHog report to Slack now?"))
+                send.mutate();
+        }} disabled={send.isPending}>
+          {send.isPending ? "Sending..." : "Send now"}
+        </Button>
+      </div>
+      {preview.error && <FieldError>{errorText(preview.error)}</FieldError>}
+      {preview.data &&
+            (preview.data.ok ? (<pre className="max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{preview.data.text}</pre>) : (<FieldError>{preview.data.message}</FieldError>))}
+      {send.error && <FieldError>{errorText(send.error)}</FieldError>}
+      {send.data && (<p role="status" className={`text-xs ${send.data.status === "succeeded" ? "" : "text-destructive"}`}>
+          {send.data.message}
+          {"runId" in send.data && send.data.runId && (<>
+              {" "}
+              <Link to="/runs/$id" params={{ id: send.data.runId }} className="underline underline-offset-4">
+                View run
+              </Link>
+            </>)}
+        </p>)}
+    </div>);
+}

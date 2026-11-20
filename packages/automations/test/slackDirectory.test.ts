@@ -94,29 +94,51 @@ describe("usersList", () => {
 
 describe("channelsList", () => {
   test("asks for public and private channels without archived ones and flags where the bot is not a member", async () => {
-    const { fn, calls } = stub(() => ({
-      ok: true,
-      channels: [
-        { id: "C1", name: "general", is_member: true },
-        { id: "G2", name: "secret", is_member: false },
-        { id: "C3", name: "old", is_member: true, is_archived: true },
-      ],
-    }));
+    const { fn, calls } = stub((call) =>
+      call.url.endsWith("users.conversations")
+        ? { ok: true, channels: [] }
+        : {
+            ok: true,
+            channels: [
+              { id: "C1", name: "general", is_member: true },
+              { id: "G2", name: "secret", is_member: false },
+              { id: "C3", name: "old", is_member: true, is_archived: true },
+            ],
+          },
+    );
     const directory = await createSlackBotClient({ token: TOKEN, fetch: fn }).channelsList();
     expect(directory.items).toEqual([
       { id: "C1", label: "#general", member: true },
       { id: "G2", label: "#secret", member: false },
     ]);
-    expect(calls[0]!.url).toBe("https://slack.com/api/conversations.list");
-    expect(calls[0]!.params.get("types")).toBe("public_channel,private_channel");
-    expect(calls[0]!.params.get("exclude_archived")).toBe("true");
-    expect(calls[0]!.params.get("limit")).toBe("200");
+    expect(calls.map((c) => c.url)).toEqual(["https://slack.com/api/users.conversations", "https://slack.com/api/conversations.list"]);
+    for (const call of calls) {
+      expect(call.params.get("types")).toBe("public_channel,private_channel");
+      expect(call.params.get("exclude_archived")).toBe("true");
+      expect(call.params.get("limit")).toBe("200");
+    }
+  });
+
+  test("lists the bot's own channels first, private ones included, even past the conversations.list cap", async () => {
+    const { fn } = stub((call, n) =>
+      call.url.endsWith("users.conversations")
+        ? { ok: true, channels: [{ id: "G9", name: "private-team" }, { id: "C1", name: "general" }] }
+        : { ok: true, channels: [{ id: "C1", name: "general", is_member: true }, { id: `C${n + 100}`, name: `c${n}` }], response_metadata: { next_cursor: "more" } },
+    );
+    const directory = await createSlackBotClient({ token: TOKEN, fetch: fn }).channelsList();
+    expect(directory.items.slice(0, 3)).toEqual([
+      { id: "G9", label: "#private-team", member: true },
+      { id: "C1", label: "#general", member: true },
+      { id: "C102", label: "#c2", member: false },
+    ]);
+    expect(directory.items.filter((i) => i.id === "C1")).toHaveLength(1);
+    expect(directory.truncated).toBe(true);
   });
 
   test("caps the pages the same way", async () => {
     const { fn, calls } = stub((_, n) => ({ ok: true, channels: [{ id: `C${n}`, name: `c${n}` }], response_metadata: { next_cursor: "more" } }));
     const directory = await createSlackBotClient({ token: TOKEN, fetch: fn }).channelsList();
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(10);
     expect(directory.truncated).toBe(true);
   });
 });

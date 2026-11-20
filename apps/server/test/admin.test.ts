@@ -671,11 +671,16 @@ describe("slack directory API", () => {
   });
 
   test("channels carry the bot's membership", async () => {
-    const { slackFetch } = slackWorld(() => ({ ok: true, channels: [{ id: "C1", name: "general", is_member: true }, { id: "C2", name: "random", is_member: false }] }));
+    const { slackFetch } = slackWorld((method) =>
+      method === "users.conversations"
+        ? { ok: true, channels: [{ id: "G3", name: "private-team" }] }
+        : { ok: true, channels: [{ id: "C1", name: "general", is_member: true }, { id: "C2", name: "random", is_member: false }] },
+    );
     const t = setup({ adminToken: TOKEN, encryptionKey: "k", slackFetch });
     await saveToken(t);
     const res = await rpc(t, "slack/directory", { kind: "channels" });
     expect(res.body.items).toEqual([
+      { id: "G3", label: "#private-team", member: true },
       { id: "C1", label: "#general", member: true },
       { id: "C2", label: "#random", member: false },
     ]);

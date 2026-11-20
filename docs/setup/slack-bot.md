@@ -183,7 +183,7 @@ Set up OpenRouter (see [OpenRouter](openrouter.md)), and any service you want th
 
 ### Add by ID
 
-The lists come from Slack's `users.list` and `conversations.list`, read with the saved bot token on the server (the token never reaches the browser). If the pickers show an error, the dialog says why, for example which scope to add. A person the list cannot return, such as someone from another workspace in a Slack Connect channel, can still be added: in the dialog type the ID in **Add by ID** and click **Add**. To copy a member ID in Slack, open the profile, click the three dots (**More**) and choose **Copy member ID** (it looks like `U01ABCDEF23`). A channel ID (`C01ABCDEF23`, or `G...` for private ones) is at the bottom of the channel's **About** tab. An ID that is saved but not in the directory shows as the raw ID with `not found`. It is kept.
+The lists come from Slack's `users.list`, `users.conversations` and `conversations.list`, read with the saved bot token on the server (the token never reaches the browser). If the pickers show an error, the dialog says why, for example which scope to add. A person the list cannot return, such as someone from another workspace in a Slack Connect channel, can still be added: in the dialog type the ID in **Add by ID** and click **Add**. To copy a member ID in Slack, open the profile, click the three dots (**More**) and choose **Copy member ID** (it looks like `U01ABCDEF23`). A channel ID (`C01ABCDEF23`, or `G...` for private ones) is at the bottom of the channel's **About** tab. An ID that is saved but not in the directory shows as the raw ID with `not found`. It is kept.
 
 ## Rate limits
 
