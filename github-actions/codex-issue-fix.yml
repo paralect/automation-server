@@ -1,4 +1,5 @@
 name: Codex issue fix
+run-name: "Codex issue fix #${{ github.event.issue.number || inputs.issue_number }}"
 
 # Opens a draft PR with a Codex-written fix for each new issue, or for the
 # issue named in a manual or server dispatch. Codex runs the fix-issue skill,
@@ -170,7 +171,7 @@ jobs:
           git push --force-with-lease origin "$branch"
           {
             cat "$RUNNER_TEMP/pr-body.md" 2>/dev/null || true
-            printf '\n\nRefs #%s\n' "$ISSUE_NUMBER"
+            printf '\n\nRefs #%s\nRun log: %s/%s/actions/runs/%s\n' "$ISSUE_NUMBER" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
           } > "$RUNNER_TEMP/pr-body-final.md"
           gh pr create --draft \
             --base "$BASE_BRANCH" \

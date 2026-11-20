@@ -1,20 +1,26 @@
-import { createDispatcher, createScheduler, createSqliteActivityStore, createSqliteStore, type ClaimStore, type Logger } from "@automation-server/core";
+import { createDispatcher, createScheduler, createSqliteActivityStore, createSqliteStore, type ClaimStore, type Logger, type Page } from "@automation-server/core";
 import { createSqliteHealthStore, createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { NO_SYNC_PROGRESS, parseRepoName, toMicroUsd, workKey, type CostMonth, type OutcomeSummary, type PullRequestRow, type RepoName, type RunTrace, type SyncNowResult } from "@automation-server/ledger";
+import { createSqliteLedger } from "@automation-server/ledger/server";
 
 import { createGithubActionsReader } from "@automation-server/api/githubActions";
 import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
 
 import { createApp } from "../src/app";
+import { createBudgetAlerter } from "../src/budget";
 import { webhookUrls } from "../src/config";
 import { createPosthogAdmin } from "../src/integrations/posthog";
 import { INTEGRATION_MODULES } from "../src/integrations/registry";
+import { createLedgerObserver } from "../src/ledgerObserver";
+import { createOutcomesAdmin } from "../src/outcomes";
 import { createReplayAdmin } from "../src/replay";
 import { createSlackDirectory } from "../src/slackDirectory";
 import { createHealthSink } from "../src/health";
 import { createRuntime } from "../src/runtime";
 
 const TOKEN = "t".repeat(40);
+const APP: RepoName = parseRepoName("acme/app") ?? expect.unreachable("acme/app is a repository name");
 const quiet: Logger = { info() {}, warn() {}, error() {} };
 
 const withProject = (path: string, input: unknown) =>
@@ -28,7 +34,16 @@ function setup(options: { slackFetch?: typeof fetch; adminToken?: string; encryp
   const resolve = (p: string) => resolveConfig(settings.project(p), envFor(p, env));
   const healthStore = createSqliteHealthStore({ path: ":memory:" });
   const health = createHealthSink({ store: healthStore, notify: async () => {} });
-  const runtime = createRuntime({ modules: INTEGRATION_MODULES, projects: () => settings.projects().map((p) => p.id), resolve, deps: { log: quiet, fetch: githubFetch }, health });
+  const ledger = createSqliteLedger({ path: ":memory:" });
+  const budget = createBudgetAlerter({ ledger, resolve, log: quiet, fetch: slackFetch });
+  const runtime = createRuntime({
+    observerFor: (project) => createLedgerObserver({ project, ledger, budget, log: quiet }),
+    modules: INTEGRATION_MODULES,
+    projects: () => settings.projects().map((p) => p.id),
+    resolve,
+    deps: { log: quiet, fetch: githubFetch, ledger },
+    health,
+  });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const store = claims ?? createSqliteStore({ path: ":memory:" });
   const dispatcher = createDispatcher({ automations: runtime.automations, store, log: quiet, activity });
@@ -40,6 +55,8 @@ function setup(options: { slackFetch?: typeof fetch; adminToken?: string; encryp
     log: quiet,
     admin: {
       activity,
+      ledger,
+      outcomes: createOutcomesAdmin({ scheduler, jobs: (project) => runtime.project(project).jobs }),
       actions: () => createGithubActionsReader({
         repos: ["acme/widgets"],
         token: "gh",
@@ -72,7 +89,7 @@ function setup(options: { slackFetch?: typeof fetch; adminToken?: string; encryp
       headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
       body: JSON.stringify({ json: withProject(path, input) }),
     });
-  return { activity, call, app, settings, runtime };
+  return { activity, call, app, settings, runtime, ledger, dispatcher };
 }
 
 describe("admin API auth", () => {
@@ -723,5 +740,87 @@ describe("slack directory API", () => {
   test("rejects a kind it does not know", async () => {
     const t = setup({ adminToken: TOKEN, encryptionKey: "k" });
     expect((await rpc(t, "slack/directory", { kind: "emoji" })).status).toBe(400);
+  });
+});
+
+describe("results API", () => {
+  const body = async <T>(res: Response) => ((await res.json()) as { json: T }).json;
+
+  test("runs.trace returns the chain, LLM usage and the Sentry link of a stored run; an unknown run is 404", async () => {
+    const t = setup();
+    const runId = t.activity.startRun({
+      project: "default",
+      automation: "sentry-to-github-issue",
+      source: "sentry",
+      kind: "issue_alert",
+      externalId: "4711",
+      startedAt: new Date().toISOString(),
+      event: { source: "sentry", kind: "issue_alert", externalId: "4711", receivedAt: new Date().toISOString(), payload: { eventWebUrl: "https://acme.sentry.io/e/1", issue: { permalink: "https://acme.sentry.io/issues/4711/" } } },
+    });
+    const scope = { runId, automation: "sentry-to-github-issue", dryRun: false };
+    t.ledger.recordEffect("default", scope, { kind: "issue_created", repo: APP, workKey: workKey({ kind: "github-issue", repo: APP, number: 12 }), url: "https://github.com/acme/app/issues/12", at: new Date().toISOString() });
+    t.ledger.recordLlmCall("default", scope, { provider: "openrouter", model: "m", purpose: "triage", generationId: "g1", promptTokens: 5, completionTokens: 1, cost: toMicroUsd(0.5), at: new Date().toISOString(), durationMs: 3 });
+
+    const res = await t.call("runs/trace", { id: runId }, TOKEN);
+    expect(res.status).toBe(200);
+    const trace = await body<RunTrace & { trigger: unknown }>(res);
+    expect(trace.trigger).toEqual({ source: "sentry", externalId: "4711", url: "https://acme.sentry.io/issues/4711/" });
+    expect(trace.workItems.map((w) => [w.key, w.createdByThisRun])).toEqual([[workKey({ kind: "github-issue", repo: APP, number: 12 }), true]]);
+    expect(trace.llm.totals).toMatchObject({ calls: 1, cost: toMicroUsd(0.5) });
+    expect((await t.call("runs/trace", { id: "nope" }, TOKEN)).status).toBe(404);
+    expect((await t.call("runs/trace", { project: "other", id: runId }, TOKEN)).status).toBe(404);
+  });
+
+  test("outcomes.summary and outcomes.pullRequests read synced PRs with their origin", async () => {
+    const t = setup();
+    const now = Date.now();
+    const iso = (hoursAgo: number) => new Date(now - hoursAgo * 3_600_000).toISOString();
+    const issue3 = workKey({ kind: "github-issue", repo: APP, number: 3 });
+    t.ledger.recordEffect("default", { runId: "r1", automation: "crisp-triage", dryRun: false }, { kind: "workflow_dispatched", repo: APP, workKey: issue3, url: null, workflowFile: "codex-issue-fix.yml", ref: "main", workflowRunId: null, at: iso(50) });
+    t.ledger.applyRepoSync({
+      project: "default",
+      repo: APP,
+      progress: { ...NO_SYNC_PROGRESS, prCursor: iso(1), runCursor: iso(1) },
+      syncedAt: iso(1),
+      error: null,
+      workflowRuns: [],
+      pullRequests: [
+        { repo: APP, number: 30, producer: "codex-issue-fix", workKey: issue3, title: "Fix", url: "https://github.com/acme/app/pull/30", createdAt: iso(48), lifecycle: { state: "merged", mergedAt: iso(24) } },
+        { repo: APP, number: 31, producer: "codex-seo-autopilot", workKey: null, title: "SEO", url: "https://github.com/acme/app/pull/31", createdAt: iso(10), lifecycle: { state: "open", draft: true } },
+      ],
+    });
+    const summary = await body<OutcomeSummary>(await t.call("outcomes/summary", { windowDays: 30 }, TOKEN));
+    expect(summary.overall).toEqual({ opened: 2, merged: 1, closed: 0, open: 1, usefulRate: 1, medianHoursToMerge: 24 });
+    expect(summary.byOrigin.map((o) => o.origin)).toContainEqual({ kind: "automation", name: "crisp-triage" });
+    expect((await t.call("outcomes/summary", { windowDays: 7 }, TOKEN)).status).toBe(400);
+
+    const page = await body<Page<PullRequestRow>>(await t.call("outcomes/pullRequests", { state: "merged" }, TOKEN));
+    expect(page.items.map((p) => [p.number, p.origin.name, p.originRunId])).toEqual([[30, "crisp-triage", "r1"]]);
+  });
+
+  test("outcomes.syncNow is not-configured without a GitHub token, and with one runs the sync job against GitHub", async () => {
+    expect(await body<SyncNowResult>(await setup().call("outcomes/syncNow", {}, TOKEN))).toMatchObject({ status: "not-configured" });
+
+    const githubFetch = (async (url: string | URL | Request) =>
+      new URL(String(url)).pathname === "/repos/acme/widgets/pulls"
+        ? Response.json([{ number: 5, title: "Fix", html_url: "https://github.com/acme/widgets/pull/5", state: "open", draft: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), head: { ref: "codex/issue-4" } }])
+        : new Response("{}", { status: 404 })) as typeof fetch;
+    const t = setup({ adminToken: TOKEN, githubFetch, env: { GITHUB_TOKEN: "ghp_x", GITHUB_REPO: "acme/widgets" } });
+    expect(await body<SyncNowResult>(await t.call("outcomes/syncNow", {}, TOKEN))).toMatchObject({ status: "succeeded" });
+    expect(t.activity.queryRuns({ limit: 1 }).items[0]).toMatchObject({ automation: "outcome-sync", source: "schedule", status: "succeeded" });
+    const page = await body<Page<PullRequestRow>>(await t.call("outcomes/pullRequests", {}, TOKEN));
+    expect<unknown>(page.items.map((p) => [p.repo, p.number, p.workKey])).toEqual([["acme/widgets", 5, "gh:acme/widgets#4"]]);
+  });
+
+  test("costs.month defaults to the current month and carries the budget from settings", async () => {
+    const t = setup({ adminToken: TOKEN, encryptionKey: "k" });
+    t.settings.project("default").apply({ set: [{ key: "openrouter.monthlyBudgetUsd", json: "25", secret: false }] });
+    t.ledger.recordLlmCall("default", null, { provider: "openrouter", model: "m", purpose: "triage", generationId: null, promptTokens: 5, completionTokens: 1, cost: toMicroUsd(2), at: new Date().toISOString(), durationMs: 3 });
+    const month = await body<CostMonth>(await t.call("costs/month", {}, TOKEN));
+    expect(month.month).toBe(new Date().toISOString().slice(0, 7));
+    expect(month.budget).toBe(toMicroUsd(25));
+    expect(month.totals.cost).toBe(toMicroUsd(2));
+    expect((await body<CostMonth>(await t.call("costs/month", { month: "2020-01" }, TOKEN))).totals.calls).toBe(0);
+    expect((await t.call("costs/month", { month: "2020-13" }, TOKEN)).status).toBe(400);
   });
 });

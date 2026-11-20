@@ -5,6 +5,7 @@ import { canReplay } from "@automation-server/api/replay"
 
 import { DryRunBadge, LevelBadge, StatusBadge } from "@/components/badges"
 import { JsonFields } from "@/components/json-fields"
+import { RunResult } from "@/components/run-result"
 import { EmptyState, PageHeader, QueryError } from "@/components/states"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
@@ -133,6 +134,8 @@ function RunDetail() {
           )}
         </CardContent>
       </Card>
+
+      <RunResult project={project} runId={run.id} />
 
       {planned.length > 0 && (
         <Card>

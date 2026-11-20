@@ -1,4 +1,6 @@
 import type { ActionState, LogLevel, RunStatus } from "./filters"
+import type { BudgetTone } from "./costs"
+import type { PrBadgeState } from "./outcomes"
 
 type BadgeStyle = {
   variant: "default" | "secondary" | "destructive" | "outline"
@@ -32,4 +34,23 @@ export const ACTION_BADGE: Record<ActionState, BadgeStyle> = {
   failure: { variant: "destructive" },
   cancelled: { variant: "outline", className: "text-muted-foreground" },
   skipped: { variant: "outline", className: "text-muted-foreground" },
+}
+
+export const PR_BADGE: Record<PrBadgeState, BadgeStyle> = {
+  draft: { variant: "outline", className: "border-dashed text-muted-foreground" },
+  open: { variant: "outline", className: "text-blue-600 dark:text-blue-400" },
+  merged: { variant: "secondary", className: "bg-pr-merged/12 text-emerald-700 dark:text-emerald-400" },
+  closed: { variant: "outline", className: "text-muted-foreground" },
+}
+
+export const BUDGET_FILL: Record<BudgetTone, string> = {
+  ok: "bg-primary",
+  warn: "bg-amber-500",
+  over: "bg-destructive",
+}
+
+export const BUDGET_TEXT: Record<BudgetTone, string> = {
+  ok: "text-muted-foreground",
+  warn: "text-amber-700 dark:text-amber-400",
+  over: "text-destructive",
 }

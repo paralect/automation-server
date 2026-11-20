@@ -2,6 +2,7 @@ import { defineAutomation, type Automation } from "@automation-server/core/autom
 import type { Event } from "@automation-server/core/event";
 import { createCrispClient, CrispApiError } from "@automation-server/sources/crisp/client";
 import { CRISP_SEGMENTS, isCrispSession, type CrispSessionEvent, type CustomerRequest } from "@automation-server/sources/crisp/event";
+import type { Observer } from "@automation-server/ledger";
 
 import { createGithubClient, GithubApiError } from "../github";
 import { createOpenRouterClient } from "../openrouter";
@@ -24,6 +25,7 @@ export type CrispTriageConfig = {
   autofixAreas: readonly string[];
   workflowFile: string;
   fetch?: typeof fetch;
+  observe: Observer;
 };
 
 const ESCALATE: readonly Category[] = ["bug", "regression", "data_fix"];
@@ -51,8 +53,8 @@ function actionable(err: unknown, repo: string, file: string): unknown {
 export function createCrispTriage(config: CrispTriageConfig): Automation {
   if (config.mode !== "shadow" && !config.github) throw new Error(`Crisp triage mode ${config.mode} needs the GitHub token and issues repository`);
   const crisp = createCrispClient({ ...config.crisp, fetch: config.fetch });
-  const llm = createOpenRouterClient({ ...config.openrouter, fetch: config.fetch });
-  const github = config.github ? createGithubClient({ ...config.github, fetch: config.fetch }) : null;
+  const llm = createOpenRouterClient({ ...config.openrouter, fetch: config.fetch, observe: config.observe });
+  const github = config.github ? createGithubClient({ ...config.github, fetch: config.fetch, observe: config.observe }) : null;
   const schema = triageSchema(config.areas);
   const repoName = config.github ? `${config.github.repo.owner}/${config.github.repo.name}` : "";
 

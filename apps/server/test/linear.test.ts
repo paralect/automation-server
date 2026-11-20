@@ -2,13 +2,20 @@ import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Lo
 import { createWorkflowInstaller } from "@automation-server/api/workflowInstaller";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { workKey } from "@automation-server/ledger";
+import { createSqliteLedger } from "@automation-server/ledger/server";
+import { Database } from "bun:sqlite";
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createGithubActionsReader } from "@automation-server/api/githubActions";
 
 import { createApp } from "../src/app";
 import { INTEGRATION_MODULES } from "../src/integrations/registry";
+import { createBudgetAlerter } from "../src/budget";
+import { createLedgerObserver } from "../src/ledgerObserver";
 import { createRuntime } from "../src/runtime";
 
 const SECRET = "lin_wh_secret";
@@ -19,8 +26,8 @@ const fixture = JSON.parse(
 
 type Call = { method: string; path: string; body: unknown };
 
-function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: number } = {}) {
-  const { linear = true, github = true, workflowStatus = 204 } = values;
+function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: number; ledgerPath?: string } = {}) {
+  const { linear = true, github = true, workflowStatus = 204, ledgerPath = ":memory:" } = values;
   const calls: Call[] = [];
   const logs: string[] = [];
   const fakeGithub = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -47,7 +54,16 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
       ...(github ? [set("github.token", GH_TOKEN, true)] : []),
     ],
   });
-  const runtime = createRuntime({ modules: INTEGRATION_MODULES, projects: () => settings.projects().map((p) => p.id), resolve: (p) => resolveConfig(settings.project(p), envFor(p, {})), deps: { log, fetch: fakeGithub } });
+  const resolve = (p: string) => resolveConfig(settings.project(p), envFor(p, {}));
+  const ledger = createSqliteLedger({ path: ledgerPath });
+  const budget = createBudgetAlerter({ ledger, resolve, log });
+  const runtime = createRuntime({
+    observerFor: (project) => createLedgerObserver({ project, ledger, budget, log }),
+    modules: INTEGRATION_MODULES,
+    projects: () => settings.projects().map((p) => p.id),
+    resolve,
+    deps: { log, fetch: fakeGithub },
+  });
   const activity = createSqliteActivityStore({ path: ":memory:" });
   const dispatcher = createDispatcher({ automations: runtime.automations, store: createSqliteStore({ path: ":memory:" }), log, activity });
   const app = createApp({
@@ -57,6 +73,8 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
     log,
     admin: {
       activity,
+      ledger,
+      outcomes: { syncNow: async () => ({ status: "not-configured" as const, message: "unused" }) },
       actions: () => createGithubActionsReader({ repos: [], token: "t", fetch: fakeGithub }),
       adminToken: undefined,
       settings: { db: settings, env: {}, reload: runtime.rebuild, test: runtime.test, health: () => ({}) },
@@ -77,7 +95,7 @@ function setup(values: { linear?: boolean; github?: boolean; workflowStatus?: nu
     return app.request("/webhooks/linear", { method: "POST", body, headers: { "linear-signature": signature } });
   };
   const dispatches = () => calls.filter((c) => c.path.endsWith("/dispatches"));
-  return { runtime, dispatcher, activity, calls, logs, deliver, dispatches };
+  return { runtime, dispatcher, activity, ledger, calls, logs, deliver, dispatches };
 }
 
 describe("linear integration", () => {
@@ -111,6 +129,7 @@ describe("linear integration", () => {
             issue_url: "https://linear.app/acme/issue/ENG-42/fix-login",
             issue_description: "Users land on a 404 after login.",
           },
+          return_run_details: true,
         },
       },
     ]);
@@ -133,5 +152,40 @@ describe("linear integration", () => {
   test("the connection test checks that the workflow is installed and active", async () => {
     const t = setup();
     expect(await t.runtime.test("default", "linear")).toMatchObject({ ok: true, message: "Webhook is ready and linear-implement.yml is active in acme/app" });
+  });
+
+  test("the dispatch is recorded on its run as the Linear work item, keeping the issue link and none of the issue text", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ledger-"));
+    try {
+      const ledgerPath = join(dir, "automation.db");
+      const t = setup({ ledgerPath });
+      await t.deliver();
+      await t.dispatcher.drain(2000);
+      const run = t.activity.queryRuns({ limit: 1 }).items[0];
+      expect(run).toMatchObject({ automation: "linear-label-to-pr", status: "succeeded" });
+      const trace = t.ledger.trace("default", run?.id ?? "", new Date());
+      expect(trace.workItems).toEqual([
+        {
+          key: workKey({ kind: "linear-issue", identifier: "ENG-42" }),
+          ref: { kind: "linear-issue", identifier: "ENG-42" },
+          url: "https://linear.app/acme/issue/ENG-42/fix-login",
+          createdByThisRun: false,
+          dispatches: [{ at: expect.any(String), workflowFile: "linear-implement.yml", ref: "main" }],
+          workflowRuns: [],
+          pullRequests: [],
+          missingRun: false,
+        },
+      ]);
+      t.ledger.close();
+      const raw = new Database(ledgerPath, { readonly: true });
+      const tables = raw.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+      const dump = JSON.stringify(tables.map(({ name }) => raw.query(`SELECT * FROM "${name}"`).all()));
+      raw.close();
+      expect(dump).toContain("ENG-42");
+      expect(dump).not.toContain("Users land on a 404");
+      expect(dump).not.toContain("Fix login redirect");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

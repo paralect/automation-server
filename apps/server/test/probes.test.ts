@@ -1,6 +1,7 @@
 import type { Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import { INTEGRATION_MODULES } from "../src/integrations/registry";
 import { createRuntime } from "../src/runtime";
@@ -19,7 +20,7 @@ const setup = (env: Record<string, string>, handler: Handler, testTimeoutMs?: nu
     requests.push({ url: url.href, auth: new Headers(init?.headers).get("authorization") });
     return handler(url, init);
   }) as typeof globalThis.fetch;
-  const runtime = createRuntime({
+  const runtime = createRuntime({ observerFor: () => UNOBSERVED,
     modules: INTEGRATION_MODULES,
     projects: () => ["default"],
     resolve: (p) => resolveConfig(store.project(p), envFor(p, env)),

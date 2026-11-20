@@ -34,7 +34,7 @@ async function webhookTest({ linear, github }: ResolvedConfig, doFetch: typeof f
 
 export const linear = defineModule({
   id: "linear",
-  build({ linear, github }, { log, fetch }) {
+  build({ linear, github }, { log, fetch, observe }) {
     if (!linear.configured) return {};
     const source = createLinearSource({ webhookSecret: linear.values.webhookSecret });
 
@@ -52,6 +52,7 @@ export const linear = defineModule({
           workflowFile: linear.values.workflowFile,
           ref: linear.values.ref,
           fetch,
+          observe,
         }),
       ],
     };

@@ -10,6 +10,7 @@ import {
   createSqlitePendingActionStore,
   createSqliteStore,
 } from "@automation-server/core";
+import { createSqliteLedger } from "@automation-server/ledger/server";
 import {
   createSqliteHealthStore,
   createSqliteSettingsStore,
@@ -22,10 +23,13 @@ import {
 
 import { createAlertNotifier } from "./alerts";
 import { createApp } from "./app";
+import { createBudgetAlerter } from "./budget";
 import { buildConfig, webhookUrls } from "./config";
 import { ENV } from "./env.server";
 import { createPosthogAdmin } from "./integrations/posthog";
 import { INTEGRATION_MODULES } from "./integrations/registry";
+import { createLedgerObserver } from "./ledgerObserver";
+import { createOutcomesAdmin } from "./outcomes";
 import { createReplayAdmin } from "./replay";
 import { createSlackDirectory } from "./slackDirectory";
 import { createHealthSink } from "./health";
@@ -36,6 +40,7 @@ const config = buildConfig(ENV);
 const store = createSqliteStore({ path: config.databasePath });
 const activity = createSqliteActivityStore({ path: config.databasePath, legacyProject: DEFAULT_PROJECT_ID });
 const pending = createSqlitePendingActionStore({ path: config.databasePath });
+const ledger = createSqliteLedger({ path: config.databasePath });
 const settings = createSqliteSettingsStore({ path: config.databasePath, encryptionKey: config.encryptionKey });
 const startedAt = new Date().toISOString();
 
@@ -60,6 +65,11 @@ const pruneOld = () => {
   } catch (err) {
     log.error("pending action prune failed", { error: errorMessage(err) });
   }
+  try {
+    ledger.prune(new Date(Date.now() - config.ledgerRetentionDays * DAY_MS).toISOString());
+  } catch (err) {
+    log.error("ledger prune failed", { error: errorMessage(err) });
+  }
 };
 pruneOld();
 const pruneTimer = setInterval(pruneOld, HOUR_MS);
@@ -68,11 +78,13 @@ pruneTimer.unref();
 const resolve = (project: string) => resolveConfig(settings.project(project), envFor(project, process.env));
 const healthStore = createSqliteHealthStore({ path: config.databasePath });
 const { onRunFinished, notifyHealth } = createAlertNotifier({ resolve, activity, log, adminUrl: config.adminPublicUrl, health: healthStore });
+const budget = createBudgetAlerter({ ledger, resolve, log, adminUrl: config.adminPublicUrl });
 const runtime = createRuntime({
   modules: INTEGRATION_MODULES,
   projects: () => settings.projects().map((p) => p.id),
   resolve,
-  deps: { log, pending },
+  deps: { log, pending, ledger },
+  observerFor: (project) => createLedgerObserver({ project, ledger, budget, log }),
   health: createHealthSink({ store: healthStore, notify: notifyHealth }),
 });
 
@@ -117,6 +129,8 @@ const app = createApp({
   corsOrigin: ENV.CORS_ORIGIN,
   admin: {
     activity,
+    ledger,
+    outcomes: createOutcomesAdmin({ scheduler, jobs: (project) => runtime.project(project).jobs }),
     actions,
     workflows: (project) => createWorkflowInstaller({ token: resolve(project).github.values.token }),
     adminToken: config.adminToken,
@@ -160,6 +174,7 @@ async function shutdown(signal: string) {
     store.close();
     healthStore.close();
     pending.close();
+    ledger.close();
     settings.close();
     log.info("shutdown complete");
     activity.close();

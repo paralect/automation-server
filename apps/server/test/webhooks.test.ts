@@ -1,6 +1,8 @@
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { beforeEach, describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
+import { createSqliteLedger } from "@automation-server/ledger/server";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -55,7 +57,7 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
     GITHUB_REPO: "acme/widgets",
     SENTRY_LEVELS: "error",
   };
-  const runtime = createRuntime({
+  const runtime = createRuntime({ observerFor: () => UNOBSERVED,
     modules: INTEGRATION_MODULES,
     projects: () => settings.projects().map((p) => p.id), resolve: (p) => resolveConfig(settings.project(p), envFor(p, env)),
     deps: { log, fetch: fakeGithub },
@@ -72,6 +74,8 @@ function setup({ maxBodyBytes }: { maxBodyBytes?: number } = {}) {
       runNow: async () => ({ status: "busy" as const, message: "unused" }),
     },
     replay: { event: async () => ({ outcome: "unknown-automation" as const }), job: async () => ({ status: "unknown-job" as const }) },
+    ledger: createSqliteLedger({ path: ":memory:" }),
+    outcomes: { syncNow: async () => ({ status: "not-configured" as const, message: "unused" }) },
     slackDirectory: { list: async () => ({ items: [], truncated: false }) },
     system: () => ({
       startedAt: new Date().toISOString(),

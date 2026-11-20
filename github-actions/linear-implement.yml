@@ -1,4 +1,5 @@
 name: Linear implement
+run-name: Linear implement ${{ inputs.issue_identifier }}
 
 # Implements a Linear issue with Codex and opens a PR. automation-server
 # dispatches it when the trigger label is added to an issue (see

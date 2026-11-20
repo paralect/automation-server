@@ -1,6 +1,7 @@
 import type { Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import { slack } from "../src/integrations/slack";
 import { createRuntime } from "../src/runtime";
@@ -10,7 +11,7 @@ const HOOK = "https://hooks.slack.com/services/T000/B000/SECRETSECRET";
 
 const setup = (env: Record<string, string>, fetch: typeof globalThis.fetch) => {
   const store = createSqliteSettingsStore({ path: ":memory:", encryptionKey: "k" });
-  return createRuntime({
+  return createRuntime({ observerFor: () => UNOBSERVED,
     modules: [slack],
     projects: () => ["default"],
     resolve: (p) => resolveConfig(store.project(p), envFor(p, env)),

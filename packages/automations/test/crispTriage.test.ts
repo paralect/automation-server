@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import type { Logger } from "@automation-server/core/logger";
 import type { CrispSessionEvent, CustomerRequest } from "@automation-server/sources/crisp/event";
@@ -72,6 +73,7 @@ const make = (f: typeof fetch, over: Partial<CrispTriageConfig> = {}) =>
     crisp: { websiteId: "site-1", identifier: "id", key: "key" },
     openrouter: { apiKey: "or-key", triageModel: "anthropic/claude-haiku-5.5", escalationModel: "anthropic/claude-sonnet-5.5" },
     github: { repo: { owner: "o", name: "r" }, token: "gh-token" },
+    observe: UNOBSERVED,
     triggerSegment: "Triage",
     autoTriage: false,
     mode: "fix",
@@ -165,7 +167,7 @@ describe("crisp-triage", () => {
 
     const dispatch = calls.find((c) => c.url.endsWith("/dispatches"));
     expect(dispatch?.url).toBe("https://api.github.com/repos/o/r/actions/workflows/codex-issue-fix.yml/dispatches");
-    expect(dispatch?.body).toEqual({ ref: "main", inputs: { issue_number: "12" } });
+    expect(dispatch?.body).toEqual({ ref: "main", inputs: { issue_number: "12" }, return_run_details: true });
 
     const note = (calls.find((c) => c.url.endsWith("/message"))?.body as { content: string }).content;
     expect(note).toContain(ISSUE_URL);

@@ -1,4 +1,5 @@
 import type { ActivityStore, ReplayRequest, ReplayResult } from "@automation-server/core";
+import type { LedgerReader, SyncNowResult } from "@automation-server/ledger";
 import type { ConnectionTestResult, EnvSource, IntegrationId, SettingsDb, StoredHealth } from "@automation-server/settings";
 
 import type { ActionsReader } from "./githubActions";
@@ -44,8 +45,14 @@ export type ReplayAdmin = {
   job(project: string, automation: string, key: string, replayOf: string): Promise<ReplayJobResult>;
 };
 
+export type OutcomesAdmin = {
+  syncNow(project: string): Promise<SyncNowResult>;
+};
+
 export type Context = {
   activity: ActivityStore;
+  ledger: LedgerReader;
+  outcomes: OutcomesAdmin;
   actions: (project: string) => ActionsReader;
   workflows: (project: string) => WorkflowInstaller;
   system: (project: string) => SystemInfo;

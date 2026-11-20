@@ -1,3 +1,4 @@
+import type { Observer } from "@automation-server/ledger";
 import type { SentryIssueAlert } from "@automation-server/sources/sentry/types";
 
 export type SentryToGithubIssueConfig = {
@@ -8,6 +9,7 @@ export type SentryToGithubIssueConfig = {
   minEventCount: number;
   apiBaseUrl?: string;
   fetch?: typeof fetch;
+  observe: Observer;
 };
 
 export type HandleDecision = { handle: boolean; reason?: string };

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 import { z } from "zod";
 
 import { createOpenRouterClient } from "../src/openrouter";
@@ -7,7 +8,7 @@ import { json, mockFetch } from "./github.test";
 const KEY = "sk-or-v1-SUPERSECRET";
 const schema = z.object({ answer: z.enum(["yes", "no"]) });
 const ask = (f: typeof fetch) =>
-  createOpenRouterClient({ apiKey: KEY, fetch: f }).structured({ model: "m/one", system: "s", user: "u", name: "verdict", schema });
+  createOpenRouterClient({ apiKey: KEY, fetch: f, observe: UNOBSERVED }).structured({ model: "m/one", system: "s", user: "u", name: "verdict", schema });
 const reply = (content: string) => json(200, { choices: [{ message: { content } }] });
 
 describe("openrouter client", () => {
@@ -45,7 +46,7 @@ describe("openrouter client", () => {
 
   test("key() reads the key's label and usage", async () => {
     const { fn, calls } = mockFetch(() => json(200, { data: { label: "prod", limit: null, usage: 1.5 } }));
-    expect(await createOpenRouterClient({ apiKey: KEY, fetch: fn }).key()).toEqual({ label: "prod", limit: null, usage: 1.5, expiresAt: null });
+    expect(await createOpenRouterClient({ apiKey: KEY, fetch: fn, observe: UNOBSERVED }).key()).toEqual({ label: "prod", limit: null, usage: 1.5, expiresAt: null });
     expect(calls[0]?.url).toBe("https://openrouter.ai/api/v1/key");
   });
 
@@ -55,7 +56,7 @@ describe("openrouter client", () => {
       seen.push(init?.redirect);
       return json(200, { data: { label: "prod", limit: null, usage: 1.5 } });
     }) as unknown as typeof fetch;
-    await createOpenRouterClient({ apiKey: KEY, fetch: fn }).key();
+    await createOpenRouterClient({ apiKey: KEY, fetch: fn, observe: UNOBSERVED }).key();
     expect(seen).toEqual(["error"]);
   });
 });

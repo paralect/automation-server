@@ -1,4 +1,4 @@
-import { createGithubActionsReader, toState } from "@automation-server/api/githubActions";
+import { createGithubActionsReader } from "@automation-server/api/githubActions";
 import { describe, expect, test } from "bun:test";
 
 const run = (id: number, createdAt: string, extra: Record<string, unknown> = {}) => ({
@@ -31,23 +31,6 @@ function fakeGithub(routes: Record<string, () => Response>) {
   }) as typeof globalThis.fetch;
   return { fetch, calls };
 }
-
-describe("toState", () => {
-  test.each([
-    ["queued", null, "queued"],
-    ["requested", null, "queued"],
-    ["waiting", null, "waiting"],
-    ["in_progress", null, "running"],
-    ["completed", "success", "success"],
-    ["completed", "timed_out", "failure"],
-    ["completed", "startup_failure", "failure"],
-    ["completed", "cancelled", "cancelled"],
-    ["completed", "skipped", "skipped"],
-    ["completed", "action_required", "waiting"],
-  ] as const)("%s/%s is %s", (status, conclusion, state) => {
-    expect(toState(status, conclusion)).toBe(state);
-  });
-});
 
 describe("GitHub Actions reader", () => {
   test("merges repos newest first and reports a failing repo without failing the list", async () => {

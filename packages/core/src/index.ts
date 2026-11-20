@@ -12,3 +12,4 @@ export * from "./pendingActions";
 export * from "./sqlitePendingActionStore";
 export * from "./job";
 export * from "./scheduler";
+export { currentRun, type RunScope } from "./runScope";

@@ -1,6 +1,7 @@
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, type Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 import { createHmac } from "node:crypto";
 
 import { createWebhookRoutes } from "../src/webhooks";
@@ -68,7 +69,7 @@ function setup(values: { openrouter?: boolean; mode?: string; github?: boolean }
       ...(github ? [set("github.token", "ghp_x", true), set("github.repo", "acme/app")] : []),
     ],
   });
-  const runtime = createRuntime({
+  const runtime = createRuntime({ observerFor: () => UNOBSERVED,
     modules: INTEGRATION_MODULES,
     projects: () => settings.projects().map((p) => p.id),
     resolve: (p) => resolveConfig(settings.project(p), envFor(p, {})),

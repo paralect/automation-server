@@ -19,9 +19,11 @@ import { Route as AuthedSystemRouteImport } from './routes/_authed/system'
 import { Route as AuthedWorkflowsRouteImport } from './routes/_authed/workflows'
 import { Route as AuthedActionsIndexRouteImport } from './routes/_authed/actions/index'
 import { Route as AuthedActionsIdRouteImport } from './routes/_authed/actions/$id'
+import { Route as AuthedCostsIndexRouteImport } from './routes/_authed/costs/index'
 import { Route as AuthedCrispIndexRouteImport } from './routes/_authed/crisp/index'
 import { Route as AuthedIntegrationsIndexRouteImport } from './routes/_authed/integrations/index'
 import { Route as AuthedIntegrationsIdRouteImport } from './routes/_authed/integrations/$id'
+import { Route as AuthedOutcomesIndexRouteImport } from './routes/_authed/outcomes/index'
 import { Route as AuthedRunsIndexRouteImport } from './routes/_authed/runs/index'
 import { Route as AuthedRunsIdRouteImport } from './routes/_authed/runs/$id'
 
@@ -74,6 +76,11 @@ const AuthedActionsIdRoute = AuthedActionsIdRouteImport.update({
   path: '/actions/$id',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedCostsIndexRoute = AuthedCostsIndexRouteImport.update({
+  id: '/costs/',
+  path: '/costs/',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedCrispIndexRoute = AuthedCrispIndexRouteImport.update({
   id: '/crisp/',
   path: '/crisp/',
@@ -87,6 +94,11 @@ const AuthedIntegrationsIndexRoute = AuthedIntegrationsIndexRouteImport.update({
 const AuthedIntegrationsIdRoute = AuthedIntegrationsIdRouteImport.update({
   id: '/integrations/$id',
   path: '/integrations/$id',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedOutcomesIndexRoute = AuthedOutcomesIndexRouteImport.update({
+  id: '/outcomes/',
+  path: '/outcomes/',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedRunsIndexRoute = AuthedRunsIndexRouteImport.update({
@@ -112,8 +124,10 @@ export interface FileRoutesByFullPath {
   '/integrations/$id': typeof AuthedIntegrationsIdRoute
   '/runs/$id': typeof AuthedRunsIdRoute
   '/actions/': typeof AuthedActionsIndexRoute
+  '/costs/': typeof AuthedCostsIndexRoute
   '/crisp/': typeof AuthedCrispIndexRoute
   '/integrations/': typeof AuthedIntegrationsIndexRoute
+  '/outcomes/': typeof AuthedOutcomesIndexRoute
   '/runs/': typeof AuthedRunsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -128,8 +142,10 @@ export interface FileRoutesByTo {
   '/integrations/$id': typeof AuthedIntegrationsIdRoute
   '/runs/$id': typeof AuthedRunsIdRoute
   '/actions': typeof AuthedActionsIndexRoute
+  '/costs': typeof AuthedCostsIndexRoute
   '/crisp': typeof AuthedCrispIndexRoute
   '/integrations': typeof AuthedIntegrationsIndexRoute
+  '/outcomes': typeof AuthedOutcomesIndexRoute
   '/runs': typeof AuthedRunsIndexRoute
 }
 export interface FileRoutesById {
@@ -146,8 +162,10 @@ export interface FileRoutesById {
   '/_authed/integrations/$id': typeof AuthedIntegrationsIdRoute
   '/_authed/runs/$id': typeof AuthedRunsIdRoute
   '/_authed/actions/': typeof AuthedActionsIndexRoute
+  '/_authed/costs/': typeof AuthedCostsIndexRoute
   '/_authed/crisp/': typeof AuthedCrispIndexRoute
   '/_authed/integrations/': typeof AuthedIntegrationsIndexRoute
+  '/_authed/outcomes/': typeof AuthedOutcomesIndexRoute
   '/_authed/runs/': typeof AuthedRunsIndexRoute
 }
 export interface FileRouteTypes {
@@ -164,8 +182,10 @@ export interface FileRouteTypes {
     | '/integrations/$id'
     | '/runs/$id'
     | '/actions/'
+    | '/costs/'
     | '/crisp/'
     | '/integrations/'
+    | '/outcomes/'
     | '/runs/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -180,8 +200,10 @@ export interface FileRouteTypes {
     | '/integrations/$id'
     | '/runs/$id'
     | '/actions'
+    | '/costs'
     | '/crisp'
     | '/integrations'
+    | '/outcomes'
     | '/runs'
   id:
     | '__root__'
@@ -197,8 +219,10 @@ export interface FileRouteTypes {
     | '/_authed/integrations/$id'
     | '/_authed/runs/$id'
     | '/_authed/actions/'
+    | '/_authed/costs/'
     | '/_authed/crisp/'
     | '/_authed/integrations/'
+    | '/_authed/outcomes/'
     | '/_authed/runs/'
   fileRoutesById: FileRoutesById
 }
@@ -279,6 +303,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedActionsIdRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/costs/': {
+      id: '/_authed/costs/'
+      path: '/costs'
+      fullPath: '/costs/'
+      preLoaderRoute: typeof AuthedCostsIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/crisp/': {
       id: '/_authed/crisp/'
       path: '/crisp'
@@ -298,6 +329,13 @@ declare module '@tanstack/react-router' {
       path: '/integrations/$id'
       fullPath: '/integrations/$id'
       preLoaderRoute: typeof AuthedIntegrationsIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/outcomes/': {
+      id: '/_authed/outcomes/'
+      path: '/outcomes'
+      fullPath: '/outcomes/'
+      preLoaderRoute: typeof AuthedOutcomesIndexRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/runs/': {
@@ -328,8 +366,10 @@ interface AuthedRouteChildren {
   AuthedIntegrationsIdRoute: typeof AuthedIntegrationsIdRoute
   AuthedRunsIdRoute: typeof AuthedRunsIdRoute
   AuthedActionsIndexRoute: typeof AuthedActionsIndexRoute
+  AuthedCostsIndexRoute: typeof AuthedCostsIndexRoute
   AuthedCrispIndexRoute: typeof AuthedCrispIndexRoute
   AuthedIntegrationsIndexRoute: typeof AuthedIntegrationsIndexRoute
+  AuthedOutcomesIndexRoute: typeof AuthedOutcomesIndexRoute
   AuthedRunsIndexRoute: typeof AuthedRunsIndexRoute
 }
 
@@ -344,8 +384,10 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedIntegrationsIdRoute: AuthedIntegrationsIdRoute,
   AuthedRunsIdRoute: AuthedRunsIdRoute,
   AuthedActionsIndexRoute: AuthedActionsIndexRoute,
+  AuthedCostsIndexRoute: AuthedCostsIndexRoute,
   AuthedCrispIndexRoute: AuthedCrispIndexRoute,
   AuthedIntegrationsIndexRoute: AuthedIntegrationsIndexRoute,
+  AuthedOutcomesIndexRoute: AuthedOutcomesIndexRoute,
   AuthedRunsIndexRoute: AuthedRunsIndexRoute,
 }
 

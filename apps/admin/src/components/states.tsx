@@ -32,11 +32,12 @@ export function QueryError({ error, onRetry }: { error: unknown; onRetry: () => 
   )
 }
 
-export function EmptyState({ title, hint }: { title: string; hint?: string }) {
+export function EmptyState({ title, hint, children }: { title: string; hint?: string; children?: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed p-10 text-center">
       <p className="text-sm font-medium">{title}</p>
-      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+      {hint && <p className="max-w-prose text-sm text-muted-foreground">{hint}</p>}
+      {children && <div className="mt-3 flex flex-wrap justify-center gap-2">{children}</div>}
     </div>
   )
 }

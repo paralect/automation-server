@@ -1,10 +1,8 @@
+import { toWorkflowState, type WorkflowState } from "@automation-server/ledger";
 import { z } from "zod";
 
 import { errorMessage } from "./errors";
 import { GITHUB_API, githubErrorDetail, githubHeaders } from "./githubApi";
-
-export const ACTION_STATES = ["queued", "waiting", "running", "success", "failure", "cancelled", "skipped"] as const;
-export type ActionState = (typeof ACTION_STATES)[number];
 
 export type WorkflowRun = {
   readonly id: number;
@@ -17,7 +15,7 @@ export type WorkflowRun = {
   readonly branch: string | null;
   readonly sha: string;
   readonly actor: { readonly login: string; readonly avatarUrl: string } | null;
-  readonly state: ActionState;
+  readonly state: WorkflowState;
   readonly conclusion: string | null;
   readonly createdAt: string;
   readonly startedAt: string;
@@ -28,7 +26,7 @@ export type WorkflowRun = {
 export type WorkflowStep = {
   readonly number: number;
   readonly name: string;
-  readonly state: ActionState;
+  readonly state: WorkflowState;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
 };
@@ -36,7 +34,7 @@ export type WorkflowStep = {
 export type WorkflowJob = {
   readonly id: number;
   readonly name: string;
-  readonly state: ActionState;
+  readonly state: WorkflowState;
   readonly conclusion: string | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
@@ -55,7 +53,7 @@ export type ActionsRunList = {
   readonly nextPage: number | null;
 };
 
-export type ActionsRunQuery = { repo?: string; workflow?: string; state?: ActionState; page: number };
+export type ActionsRunQuery = { repo?: string; workflow?: string; state?: WorkflowState; page: number };
 
 export type ActionsReader = {
   readonly repos: string[];
@@ -63,31 +61,8 @@ export type ActionsReader = {
   getRun(repo: string, id: number): Promise<{ run: WorkflowRun; jobs: WorkflowJob[] } | null>;
 };
 
-// GitHub splits a run's lifecycle into `status` and, once completed, `conclusion`. The admin needs one value.
-export function toState(status: string | null | undefined, conclusion: string | null | undefined): ActionState {
-  if (status !== "completed") {
-    if (status === "in_progress") return "running";
-    if (status === "waiting") return "waiting";
-    return "queued";
-  }
-  switch (conclusion) {
-    case "success":
-    case "neutral":
-      return "success";
-    case "cancelled":
-      return "cancelled";
-    case "skipped":
-    case "stale":
-      return "skipped";
-    case "action_required":
-      return "waiting";
-    default:
-      return "failure";
-  }
-}
-
 // The `status` query parameter of the runs endpoint accepts both statuses and conclusions.
-const STATE_FILTER: Record<ActionState, string> = {
+const STATE_FILTER: Record<WorkflowState, string> = {
   queued: "queued",
   waiting: "waiting",
   running: "in_progress",
@@ -151,7 +126,7 @@ const toRun = (repo: string, r: z.infer<typeof ghRun>): WorkflowRun => ({
   branch: r.head_branch ?? null,
   sha: r.head_sha,
   actor: r.actor ? { login: r.actor.login, avatarUrl: r.actor.avatar_url } : null,
-  state: toState(r.status, r.conclusion),
+  state: toWorkflowState(r.status, r.conclusion),
   conclusion: r.conclusion ?? null,
   createdAt: r.created_at,
   startedAt: r.run_started_at ?? r.created_at,
@@ -297,7 +272,7 @@ export function createGithubActionsReader(config: GithubActionsReaderConfig): Ac
           jobs: jobs.map((j) => ({
             id: j.id,
             name: j.name,
-            state: toState(j.status, j.conclusion),
+            state: toWorkflowState(j.status, j.conclusion),
             conclusion: j.conclusion ?? null,
             startedAt: j.started_at ?? null,
             completedAt: j.completed_at ?? null,
@@ -306,7 +281,7 @@ export function createGithubActionsReader(config: GithubActionsReaderConfig): Ac
             steps: (j.steps ?? []).map((s) => ({
               number: s.number,
               name: s.name,
-              state: toState(s.status, s.conclusion),
+              state: toWorkflowState(s.status, s.conclusion),
               startedAt: s.started_at ?? null,
               completedAt: s.completed_at ?? null,
             })),

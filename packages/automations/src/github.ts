@@ -1,3 +1,4 @@
+import type { Observer } from "@automation-server/ledger";
 import { z } from "zod";
 
 import { redactUntrusted } from "./redact";
@@ -7,6 +8,8 @@ export type GithubClientConfig = {
   token: string;
   apiBaseUrl?: string;
   fetch?: typeof fetch;
+  // Required so every builder decides: the project's observer, or UNOBSERVED on purpose.
+  observe: Observer;
 };
 
 export type GithubLabel = { name: string; color?: string; description?: string };
@@ -63,6 +66,7 @@ const toSummary = (i: z.infer<typeof issueSummary>): GithubIssueSummary => ({
 const SCOPE_QUALIFIER = /\b(?:repo|org|user|owner|enterprise):\S*/gi;
 
 const repoInfo = z.object({ default_branch: z.string() });
+const runDetails = z.object({ workflow_run_id: z.number().int().positive() });
 
 export class GithubApiError extends Error {
   readonly status: number;
@@ -151,7 +155,9 @@ export function createGithubClient(config: GithubClientConfig) {
       const path = `${repoPath}/issues`;
       const res = await request("POST", path, issue);
       if (!res.ok) throw await fail("POST", path, res);
-      return createdIssue.parse(await res.json());
+      const created = createdIssue.parse(await res.json());
+      config.observe.github({ kind: "issue_created", repo: `${owner}/${name}`, number: created.number, url: created.html_url });
+      return created;
     },
 
     async searchIssues(query: string, limit: number): Promise<GithubIssueSummary[]> {
@@ -180,8 +186,20 @@ export function createGithubClient(config: GithubClientConfig) {
 
     async dispatchWorkflow(workflowFile: string, ref: string, inputs: Readonly<Record<string, string>>): Promise<void> {
       const path = `${repoPath}/actions/workflows/${encodeURIComponent(workflowFile)}/dispatches`;
-      const res = await request("POST", path, { ref, inputs });
+      // With return_run_details GitHub answers 200 with the new run's id instead of a bare 204, so the run links to this dispatch exactly.
+      let res = await request("POST", path, { ref, inputs, return_run_details: true });
+      // GitHub Enterprise Server before 3.21 rejects the unknown field with 422. A real 422 (no workflow_dispatch trigger, unknown ref) fails the same way again.
+      if (res.status === 422) res = await request("POST", path, { ref, inputs });
       if (!res.ok) throw await fail("POST", path, res);
+      const details = res.status === 200 ? runDetails.safeParse(await res.json().catch(() => null)) : null;
+      config.observe.github({
+        kind: "workflow_dispatched",
+        repo: `${owner}/${name}`,
+        workflowFile,
+        ref,
+        inputs,
+        workflowRunId: details?.success ? details.data.workflow_run_id : null,
+      });
     },
   };
 }

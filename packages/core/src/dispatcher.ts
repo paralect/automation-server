@@ -3,6 +3,7 @@ import type { Automation } from "./automation";
 import type { Event } from "./event";
 import type { Logger } from "./logger";
 import { drainWithTimeout, errorMessage, notifyRunFinished, recordActivity, scopeFields, withFields, type RunFinishedHandler } from "./internal";
+import { runInScope } from "./runScope";
 import { claimKey, type ClaimStore } from "./store";
 
 export class ClaimStoreError extends Error {
@@ -100,13 +101,15 @@ export function createDispatcher({ automations: getAutomations, store, log, prep
     };
     const done = (async () => {
       try {
-        await automation.run(event, {
-          log: child,
-          ...(dryRun ? { dryRun } : {}),
-          report: (reported) => {
-            outcome = reported;
-          },
-        });
+        await runInScope({ runId: runId ?? null, project: automation.project, automation: automation.name, dryRun }, () =>
+          automation.run(event, {
+            log: child,
+            ...(dryRun ? { dryRun } : {}),
+            report: (reported) => {
+              outcome = reported;
+            },
+          }),
+        );
       } catch (err) {
         if (!dryRun) {
           try {

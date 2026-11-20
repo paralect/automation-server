@@ -8,6 +8,7 @@ import {
   createSlackBotClient,
   postToSlack,
 } from "@automation-server/automations";
+import type { Observer } from "@automation-server/ledger";
 import { createSlackSource } from "@automation-server/sources";
 import { parseRepo, type ResolvedConfig } from "@automation-server/settings";
 
@@ -43,11 +44,11 @@ function workflowRefs({ linear }: ResolvedConfig): Record<string, string> {
   return ref.trim() ? { [workflowFile]: ref.trim() } : {};
 }
 
-function writeTools(config: ResolvedConfig, { fetch }: Deps) {
+function writeTools(config: ResolvedConfig, { fetch, observe }: Deps & { observe: Observer }) {
   const { github, linear } = config;
   const { apiKey } = linear.values;
   return buildWriteTools({
-    github: github.configured && github.values.repo ? { token: github.values.token, repo: parseRepo(github.values.repo), workflowFiles: allowedWorkflows(config), workflowRefs: workflowRefs(config) } : undefined,
+    github: github.configured && github.values.repo ? { token: github.values.token, repo: parseRepo(github.values.repo), workflowFiles: allowedWorkflows(config), workflowRefs: workflowRefs(config), observe } : undefined,
     linear: apiKey ? { apiKey, triggerLabel: linear.configured ? linear.values.triggerLabel : undefined } : undefined,
     fetch,
   });
@@ -55,7 +56,7 @@ function writeTools(config: ResolvedConfig, { fetch }: Deps) {
 
 export const slack = defineModule({
   id: "slack",
-  build(config, { log, fetch, pending, project }) {
+  build(config, { log, fetch, pending, project, observe }) {
     const { slack, openrouter } = config;
     if (!slack.configured) return {};
     const { botEnabled, botToken, signingSecret, allowedUsers = [], allowedChannels = [], apiBaseUrl, agentModel, botName, requireApproval } = slack.values;
@@ -64,9 +65,9 @@ export const slack = defineModule({
 
     const canWrite = pending !== undefined && project !== undefined;
     if (!requireApproval) log.warn("slack bot approval is off: writes run as soon as the model proposes them");
-    const tools = [...readTools(config, { fetch }), ...(canWrite ? writeTools(config, { fetch }) : [])];
+    const tools = [...readTools(config, { fetch }), ...(canWrite ? writeTools(config, { fetch, observe }) : [])];
     const agent = createAgent({
-      model: openrouter.configured ? createOpenRouterClient({ apiKey: openrouter.values.apiKey, fetch }) : null,
+      model: openrouter.configured ? createOpenRouterClient({ apiKey: openrouter.values.apiKey, fetch, observe }) : null,
       modelName: agentModel || openrouter.values.escalationModel || "anthropic/claude-sonnet-5.5",
       tools,
     });

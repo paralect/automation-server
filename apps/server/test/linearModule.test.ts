@@ -1,6 +1,7 @@
 import type { Logger } from "@automation-server/core";
 import { createSqliteSettingsStore, envFor, resolveConfig } from "@automation-server/settings";
 import { describe, expect, test } from "bun:test";
+import { UNOBSERVED } from "@automation-server/ledger";
 
 import { linear } from "../src/integrations/linear";
 import { createRuntime } from "../src/runtime";
@@ -24,7 +25,7 @@ const setup = (apiKey: string | undefined, viewer: Response) => {
       ...(apiKey ? [set("linear.apiKey", apiKey, true)] : []),
     ],
   });
-  const runtime = createRuntime({
+  const runtime = createRuntime({ observerFor: () => UNOBSERVED,
     modules: [linear],
     projects: () => ["default"],
     resolve: (p) => resolveConfig(store.project(p), envFor(p, {})),

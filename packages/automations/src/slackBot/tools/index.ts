@@ -1,3 +1,5 @@
+import { UNOBSERVED, type Observer } from "@automation-server/ledger";
+
 import { createGithubClient } from "../../github";
 import { createLinearClient } from "../../linear";
 import type { PosthogReportConfig } from "../../posthogWeeklyReport/job";
@@ -21,7 +23,8 @@ export type ReadToolsConfig = {
 
 export function buildReadTools({ github, sentry, posthog, linear, fetch }: ReadToolsConfig): AnyTool[] {
   return [
-    ...(github ? githubTools(createGithubClient({ repo: github.repo, token: github.token, fetch }), `${github.repo.owner}/${github.repo.name}`) : []),
+    // Read tools never write, so there is nothing to observe.
+    ...(github ? githubTools(createGithubClient({ repo: github.repo, token: github.token, fetch, observe: UNOBSERVED }), `${github.repo.owner}/${github.repo.name}`) : []),
     ...(sentry ? sentryTools({ ...sentry, fetch }) : []),
     ...(posthog ? posthogTools(posthog, { fetch }) : []),
     ...(linear ? linearTools(createLinearClient({ apiKey: linear.apiKey, fetch })) : []),
@@ -30,7 +33,13 @@ export function buildReadTools({ github, sentry, posthog, linear, fetch }: ReadT
 
 // Write tools are only built for an integration that is configured and that the project allowed the bot to change.
 export type WriteToolsConfig = {
-  readonly github?: { readonly token: string; readonly repo: { owner: string; name: string }; readonly workflowFiles: readonly string[]; readonly workflowRefs?: Readonly<Record<string, string>> };
+  readonly github?: {
+    readonly token: string;
+    readonly repo: { owner: string; name: string };
+    readonly workflowFiles: readonly string[];
+    readonly workflowRefs?: Readonly<Record<string, string>>;
+    readonly observe: Observer;
+  };
   readonly linear?: { readonly apiKey: string; readonly triggerLabel?: string };
   readonly fetch?: typeof fetch;
 };
@@ -39,7 +48,7 @@ export function buildWriteTools({ github, linear, fetch }: WriteToolsConfig): An
   return [
     ...(github
       ? githubWriteTools({
-          client: createGithubClient({ repo: github.repo, token: github.token, fetch }),
+          client: createGithubClient({ repo: github.repo, token: github.token, fetch, observe: github.observe }),
           repo: `${github.repo.owner}/${github.repo.name}`,
           workflowFiles: github.workflowFiles,
           ...(github.workflowRefs ? { workflowRefs: github.workflowRefs } : {}),
