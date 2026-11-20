@@ -67,6 +67,16 @@ Two caps protect you.
 
 The triage sends one short classification request per conversation, plus a second one when it escalates. With the default models this is a fraction of a cent per conversation. A limit of 5 dollars is plenty for a test and a small team.
 
+### Get an alert before the limit
+
+The server records the cost of every call it makes and shows it on the **Costs** page. To be told before the key runs dry:
+
+1. In the admin, open **Integrations** → **OpenRouter**.
+2. Under **Budget**, set **Monthly budget (USD)**, for example `50`. `0` turns it off.
+3. Make sure the **Slack** integration has an alerts webhook URL. The budget alert goes to the same channel as failure alerts.
+
+When this month's spend reaches 80% of the budget, and again at 100%, Slack gets one message for each. The budget does not stop any call. Keep the key's credit limit as the hard cap. The budget counts only calls made by this server, so other uses of the same key are not in it. More on the Costs page is in [observability.md](../observability.md#llm-cost).
+
 ## 5. Choose the models
 
 Both fields take an OpenRouter model ID, which is `author/model-slug`.

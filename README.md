@@ -54,7 +54,7 @@ Dispatcher  --------------- claim (automation, externalId) in sqlite; duplicates
 Automation(s)  ------------ match the event, do the work, release the claim on failure
 ```
 
-Every run and log line is recorded and shown in the admin, see [docs/observability.md](docs/observability.md). What happens when a run fails or stops halfway, and how to retry it, is in [docs/reliability.md](docs/reliability.md).
+Every run and log line is recorded and shown in the admin, together with the Codex PRs a run led to, whether they were merged, and what its LLM calls cost. See [docs/observability.md](docs/observability.md). What happens when a run fails or stops halfway, and how to retry it, is in [docs/reliability.md](docs/reliability.md).
 
 ## Integrations
 
@@ -153,6 +153,7 @@ Server-wide settings:
 | `CORS_ORIGIN` | no | | Origin allowed on the browser-facing oRPC routes. Not used by webhooks. |
 | `ADMIN_API_TOKEN` | no | | Bearer token for the admin API under `/rpc`. Use at least 32 random characters. The admin API is disabled when empty. |
 | `LOG_RETENTION_DAYS` | no | `30` | Days to keep stored logs and finished runs. |
+| `LEDGER_RETENTION_DAYS` | no | `400` | Days to keep LLM costs, Codex PR outcomes and run chains. |
 | `SETTINGS_ENCRYPTION_KEY` | no | | Encrypts secrets saved from the admin (AES-256-GCM). At least 32 random characters. Keep it stable: changing it makes saved secrets unreadable. Saving a secret is refused while it is unset. |
 | `PUBLIC_URL` | no | | Public base URL of the server, used to show full webhook URLs in the admin. |
 | `ADMIN_PUBLIC_URL` | no | | Public base URL of the admin. Slack failure alerts use it to link to the run page. |
@@ -214,7 +215,7 @@ automation-server/
 - [Architecture](docs/architecture.md)
 - [Deployment](docs/deployment.md)
 - [Adding an integration](docs/adding-an-integration.md)
-- [Observability: logs and runs](docs/observability.md)
+- [Observability: runs, logs and results](docs/observability.md)
 - [Reliability: failures, retries and partial runs](docs/reliability.md)
 - [Setup guides with screenshots](docs/setup/README.md)
 - [Sentry integration](docs/integrations/sentry.md)

@@ -55,11 +55,13 @@ Things every workflow has in common:
 1. It starts in one of two ways. A new GitHub issue is opened by the owner, a member or a collaborator of the repository (outsiders cannot trigger it, because the issue text is untrusted input for an agent that holds credentials). Or automation-server dispatches it for one issue number.
 2. Codex reads the issue and runs the `fix-issue` skill. The skill sorts the issue into a real bug, a Sentry error, or too vague to act on.
 3. For a bug it finds the root cause, prefers to write a **test that fails for the reported reason** (this is mandatory for `crisp` issues), makes the smallest fix that turns the test green, and runs the repository checks. A feature request or a vague report gets no change.
-4. The workflow pushes a branch and opens a **draft** PR whose description is Codex's own summary. If Codex made no change, the workflow comments on the issue with a link to the run log, where Codex's reasoning is.
+4. The workflow pushes a branch and opens a **draft** PR whose description is Codex's own summary. The description ends with `Refs #<issue>` and `Run log: <run URL>`. If Codex made no change, the workflow comments on the issue with a link to the run log, where Codex's reasoning is.
 
 **Where the server fits.** Issues labelled `sentry` are created by the [Sentry integration](../docs/integrations/sentry.md) and are skipped on open: event text comes from anyone who holds the public DSN, so a person reads the issue and starts the fix from the Actions tab (input `issue_number`). Those runs take the Sentry path of the skill. Issues labelled `crisp` are created by the [Crisp integration](../docs/integrations/crisp.md) and are skipped on open: only the ones the triage routes to a fix are dispatched by the server.
 
 **Result.** A draft PR, or an issue comment pointing at the run log when there is none.
+
+The run is named `Codex issue fix #<issue>` in the Actions tab. The server reads that name and the `Run log` line to tie the run and the PR to the issue, see [How the server follows the PRs](#how-the-server-follows-the-prs).
 
 ### Linear implement (`linear-implement.yml`)
 
@@ -101,6 +103,14 @@ A push that only touches the changelog folder is ignored, so merging the changel
 3. If it changed something, the workflow opens a PR `seo-autopilot/<date>-<run id>`. While an earlier SEO PR is still open the run is skipped, because the skill's memory only exists on the default branch after a merge.
 
 **Result.** At most one open SEO PR at a time. This workflow is independent of the server and the admin integrations.
+
+## How the server follows the PRs
+
+automation-server reads the PRs and runs of these workflows with its GitHub token and shows whether each PR was merged, on its **Outcomes** page and on the page of the run that started the work. See [Codex PR outcomes](../docs/observability.md#codex-pr-outcomes).
+
+- A PR counts when its branch is one these workflows push: `codex/issue-*`, `linear/*`, `seo-autopilot/*` or `changelog/*`. Keep those branch names if you adapt a workflow.
+- `codex-issue-fix.yml` and `linear-implement.yml` name their runs after the issue (`Codex issue fix #123`, `Linear implement ENG-42`), and their PR descriptions end with a `Run log:` line. That is how a run started by a person, not by the server, is still tied to its issue.
+- Copies installed before these lines were added show as **differs** on the admin **Workflows** page. Reinstall them from there. Until then the PRs are still tracked by branch, but a run that a person started may not be tied to its issue.
 
 ## Notes on `codex-issue-fix.yml`
 
@@ -181,6 +191,7 @@ Copy it to `.github/workflows/linear-implement.yml` in the repository that shoul
 
 - Inputs: `issue_identifier`, `issue_title`, `issue_url`, `issue_description`. The server truncates a description that would push the inputs past GitHub's 65,535 character limit and appends a note with the issue link.
 - The PR branch is `linear/<identifier>` and the title starts with the identifier, so Linear's GitHub integration links the PR to the issue. A rerun for the same issue updates the branch and does not open a second PR.
+- The run is named `Linear implement <identifier>` in the Actions tab, and the PR description ends with `Linear: <issue URL>` and `Run log: <run URL>`.
 - The PR is opened ready for review, not as a draft, against the branch the workflow ran on.
 - The Codex step has no GitHub token and the checkout does not persist credentials. The push step refuses changes under `.github` or `.agents`, and a change or PR body that contains a value from `auth.json`.
 - If Codex makes no change, the run ends with a warning that quotes the start of its final message.
