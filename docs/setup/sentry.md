@@ -44,13 +44,14 @@ Every value can be saved from the admin Integrations page without a restart, or 
 
 After saving, Sentry opens the integration page. Under **Credentials** it shows the **Client Secret**. Click **Copy** next to it, then paste it into Admin, Integrations, Sentry, **Client secret** (`SENTRY_CLIENT_SECRET`). The server uses it to verify the signature of every webhook. Treat it like a password.
 
-In the admin the Sentry form looks like this.
+Before its first save the Sentry page in the admin is one form.
 
-![The Sentry form in the admin: 1 webhook URL to paste into Sentry, 2 Replace the client secret, 3 optional auth token](img/admin-07-sentry-form.png)
+![The Sentry form before its first save: 1 webhook URL to paste into Sentry, 2 Client secret, 3 optional Auth token, 4 Save](img/admin-07-sentry-form.png)
 
 1. **Webhook URL.** Copy it with the button on the right. This is what you paste into Sentry in step 2.
-2. **Client secret.** Click **Replace**, paste the secret you just copied from Sentry, save.
+2. **Client secret.** Paste the secret you just copied from Sentry. Once Sentry is saved, change it with **Edit** on **Connection**, then **Replace**.
 3. **Auth token.** Optional, see step 4.
+4. **Save.**
 
 The Sentry page also has **Levels**, **Environments** and **Minimum event count** below. They decide which alerts become GitHub issues.
 

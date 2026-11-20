@@ -117,17 +117,18 @@ The server ignores deliveries for any other website.
 
 The webhook is served once the four required fields are set. The triage runs once OpenRouter is configured too.
 
-![The Crisp form in the admin: 1 webhook URL, 2 Website ID, 3 token identifier, 4 token key, 5 signing secret, 6 trigger segment, 7 mode](img/admin-09-crisp-form.png)
+![The Crisp form before its first save: 1 webhook URL, 2 Website ID, 3 token identifier, 4 token key, 5 signing secret, 6 mode, 7 trigger segment, 8 Save](img/admin-09-crisp-form.png)
 
 1. **Webhook URL.** Paste it into Crisp, step 5.
 2. **Website ID.** From step 6.
 3. **Plugin token identifier.** From the production token in step 3.
-4. **Plugin token key.** Click **Replace** and paste the token key.
-5. **Web Hooks signing secret.** Click **Replace** and paste the secret from step 5.
-6. **Trigger segment.** The tag that starts a triage. Default `triage`.
-7. **Mode.** `shadow`, `issue`, `fix` or `dry-run`. Start with `shadow`.
+4. **Plugin token key.** Paste the token key.
+5. **Web Hooks signing secret.** Paste the secret from step 5.
+6. **Mode.** `shadow`, `issue`, `fix` or `dry-run`. Start with `shadow`.
+7. **Trigger segment.** The tag that starts a triage. Default `triage`.
+8. **Save.**
 
-The fields below Mode (minimum confidence, product areas, autofix areas, workflow file) are optional and explained in [the integration page](../integrations/crisp.md#configuration).
+The other fields (triage resolved conversations, product areas, autofix areas, and minimum confidence and workflow file under **Advanced**) are optional and explained in [the integration page](../integrations/crisp.md#configuration).
 
 ## 8. Create the trigger segment
 

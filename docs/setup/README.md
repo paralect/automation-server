@@ -51,9 +51,11 @@ The **Setup** page walks through the order below inside the admin itself, and ti
 
 Open **Integrations**. Each added service is a row. Rows that need attention (setup not finished, a failed check, a token that expired or expires within 14 days) are listed first and say why. Click a row to open its page. **Add integration** adds another service.
 
-![The Integrations page with a card for each of GitHub, Sentry, Linear, PostHog, OpenRouter and Crisp](img/admin-02-integrations.png)
+![The Integrations page: PostHog under Needs attention because its Slack webhook URL is missing, then GitHub, Sentry, Linear, OpenRouter and Crisp under Connected, and the Add integration button](img/admin-02-integrations.png)
 
 An integration that is not set up yet opens as one form with a single **Save**. Once it is configured, its page is a summary of the saved settings in sections such as **Connection**. Click **Edit** on a section to change its fields, then **Save** or **Cancel**. Only that section is saved. Rarely changed fields sit in the last section, **Advanced**, which says **All defaults** or names the fields you changed.
+
+![The Crisp page once configured: 1 Edit on the Triage section, 2 the Advanced line reading All defaults, 3 Test connection](img/admin-16-integration-summary.png)
 
 The fields work the same way everywhere:
 
@@ -62,7 +64,7 @@ The fields work the same way everywhere:
 - **Plain fields** (repository, label, model). Type the value and click **Save**. Saving applies at once, no restart.
 - **Test connection** (GitHub, Linear, PostHog, OpenRouter, Crisp, Slack), next to the title. Checks the saved values against the real service. Run it after every save.
 
-Each guide below shows the form with the fields numbered in the order you fill them. The screenshots predate the section layout, so the fields may sit under an **Edit** button rather than in one long form.
+Each guide below shows the form before its first save, with the fields numbered in the order you fill them.
 
 ## What each automation does
 

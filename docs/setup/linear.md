@@ -45,7 +45,7 @@ To copy the full URL, open the admin Integrations page and open Linear. The **Co
 
 The Linear form in the admin, with every field you will touch in the next steps.
 
-![The Linear form in the admin: 1 webhook URL, 2 Replace the webhook secret, 3 trigger label, 4 target repository, 5 Test connection](img/admin-06-linear-form.png)
+![The Linear form before its first save: 1 webhook URL, 2 Webhook secret, 3 Trigger label, 4 Target repository, 5 Save, 6 Test connection](img/admin-06-linear-form.png)
 
 ## 3. Create the webhook in Linear
 

@@ -17,7 +17,7 @@ The admin is the one screen you use. It shows what the server did, holds the set
 
 ![The admin Overview: the sidebar with every page, counters for the last 24 hours, a chart of runs and the latest failures](docs/setup/img/admin-01-overview.png)
 
-![The admin Integrations page with a card for GitHub, Sentry, Linear, PostHog, OpenRouter and Crisp](docs/setup/img/admin-02-integrations.png)
+![The admin Integrations page: one row per integration, grouped into Needs attention and Connected](docs/setup/img/admin-02-integrations.png)
 
 ### Automations and workflows in one table
 

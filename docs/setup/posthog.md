@@ -82,7 +82,7 @@ Treat the URL as a secret. Anyone who has it can post to the channel. The report
 1. Open the admin and go to **Integrations**. Open **PostHog**.
 2. Fill in the fields.
 
-![The PostHog form in the admin: 1 host, 2 project ID, 3 Replace the API key, 4 Enabled switch, 5 Replace the Slack webhook URL, 6 Preview report and Send now](img/admin-10-posthog-form.png)
+![The PostHog form before its first save: 1 Host, 2 Project ID, 3 Personal API key, 4 Slack webhook URL, 5 Save](img/admin-10-posthog-form.png)
 
 | Field | Value |
 | --- | --- |
