@@ -2,6 +2,7 @@ import type { ActivityStore } from "./activity";
 import type { Job } from "./job";
 import type { Logger } from "./logger";
 import { drainWithTimeout, errorMessage, notifyRunFinished, recordActivity, scopeFields, withFields, type RunFinishedHandler } from "./internal";
+import { runInScope } from "./runScope";
 import { claimKey, type ClaimStore } from "./store";
 
 export const SCHEDULE_SOURCE = "schedule";
@@ -74,7 +75,7 @@ export function createScheduler({ jobs, store, log, activity, onRunFinished, now
     };
     let error: string | undefined;
     try {
-      await job.run({ log: child, key, now: at });
+      await runInScope({ runId: runId ?? null, project: job.project, automation: job.name, dryRun: false }, () => job.run({ log: child, key, now: at }));
     } catch (err) {
       error = errorMessage(err);
     }
