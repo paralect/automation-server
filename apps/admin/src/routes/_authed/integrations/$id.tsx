@@ -2,7 +2,7 @@ import { Link, createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeftIcon } from "@phosphor-icons/react"
 
-import { IntegrationSettings } from "@/components/integration-card"
+import { IntegrationSettings } from "@/components/integration-settings"
 import { EmptyState, QueryError } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"

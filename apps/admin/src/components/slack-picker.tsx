@@ -4,6 +4,7 @@ import { ArrowsClockwiseIcon, XIcon } from "@phosphor-icons/react"
 import { cn } from "cn"
 import type { DirectoryItem } from "@automation-server/api/routers/index"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -56,6 +57,20 @@ function Chips({ chips, onRemove, disabled }: { chips: readonly Chip[]; onRemove
         </li>
       ))}
     </ul>
+  )
+}
+
+// Read-only chips for the settings summary. Without a saved token the IDs show raw.
+export function SlackIdBadges({ kind, ids, enabled, project }: { kind: PickerKind; ids: readonly string[]; enabled: boolean; project: string }) {
+  const directory = useQuery({ ...slackDirectoryQuery(project, kind, ""), enabled })
+  return (
+    <span className="flex flex-wrap gap-1">
+      {resolveChips(ids, directory.data?.items).map((chip) => (
+        <Badge key={chip.id} variant="secondary" className={cn(!chip.found && "font-mono")}>
+          {chip.label}
+        </Badge>
+      ))}
+    </span>
   )
 }
 
