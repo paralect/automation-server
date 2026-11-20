@@ -65,7 +65,7 @@ export type SlackBotClient = {
 export type SlackDirectoryClient = {
   // People a bot could be allowed for: no deleted accounts, bots, app users or Slackbot. Needs users:read.
   usersList(): Promise<Directory>;
-  // Public and private channels that are not archived. Needs channels:read and groups:read.
+  // Public and private channels that are not archived, the bot's own first. Needs channels:read and groups:read.
   channelsList(): Promise<Directory>;
 };
 
@@ -201,15 +201,19 @@ export function createSlackBotClient({ token, apiBaseUrl = SLACK_API, fetch: doF
       return { items: rows, truncated };
     },
     async channelsList() {
-      const { rows, truncated } = await paginate("conversations.list", { types: "public_channel,private_channel", exclude_archived: true }, (body) => {
-        const parsed = channelsBody.safeParse(body);
-        if (!parsed.success) return null;
-        const rows = parsed.data.channels
-          .filter((c) => !c.is_archived)
-          .map((c): DirectoryEntry => ({ id: c.id, label: `#${c.name ?? c.id}`, member: c.is_member === true }));
-        return { rows, next: parsed.data.response_metadata?.next_cursor };
-      });
-      return { items: rows, truncated };
+      const read = (method: string, params: Record<string, unknown>) =>
+        paginate(method, { ...params, types: "public_channel,private_channel", exclude_archived: true }, (body) => {
+          const parsed = channelsBody.safeParse(body);
+          if (!parsed.success) return null;
+          return { rows: parsed.data.channels.filter((c) => !c.is_archived), next: parsed.data.response_metadata?.next_cursor };
+        });
+      // The bot's own channels come first and in full: a big workspace can push them past the conversations.list cap.
+      const joined = await read("users.conversations", {});
+      const all = await read("conversations.list", {});
+      const items = new Map<string, DirectoryEntry>();
+      for (const c of joined.rows) items.set(c.id, { id: c.id, label: `#${c.name ?? c.id}`, member: true });
+      for (const c of all.rows) if (!items.has(c.id)) items.set(c.id, { id: c.id, label: `#${c.name ?? c.id}`, member: c.is_member === true });
+      return { items: [...items.values()], truncated: joined.truncated || all.truncated };
     },
   };
 }

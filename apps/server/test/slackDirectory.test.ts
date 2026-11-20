@@ -43,7 +43,7 @@ describe("slack directory cache", () => {
     const { directory, calls } = world();
     await directory.list({ project: "default", kind: "users" });
     await directory.list({ project: "default", kind: "channels" });
-    expect(calls.map((c) => c.method)).toEqual(["users.list", "conversations.list"]);
+    expect(calls.map((c) => c.method)).toEqual(["users.list", "users.conversations", "conversations.list"]);
   });
 
   test("a new token is never answered from the old token's rows", async () => {
