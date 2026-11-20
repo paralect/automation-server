@@ -1,9 +1,10 @@
+import type { SlackBlock } from "@chat-adapter/slack/blocks";
 import { createDispatcher, createSqliteActivityStore, createSqliteStore, withDryRun, type Event, type Logger } from "@automation-server/core";
 import { slackBotOutcomeSchema } from "@automation-server/sources/slack/outcome";
 import { describe, expect, test } from "bun:test";
 
 import { createSlackBot, DENIED_REPLY, type SlackBotHandler } from "../src/slackBot/automation";
-import { escapeSlackText, type PostMessage, type SlackBotClient } from "../src/slackBot/client";
+import { escapeSlackText, SlackApiError, type PostMessage, type SlackBotClient } from "../src/slackBot/client";
 import { BUSY_REPLY, createSlackBotLimiter, RATE_LIMITED_REPLY, type SlackBotLimiter } from "../src/slackBot/limiter";
 
 const mentionEvent = (user: string, patch: Record<string, unknown> = {}, externalId = "Ev1"): Event => ({
@@ -17,6 +18,7 @@ const mentionEvent = (user: string, patch: Record<string, unknown> = {}, externa
 
 const setup = ({ allowedUsers = ["UOK"], allowedChannels, dry = false, handler, limiter }: { allowedUsers?: string[]; allowedChannels?: string[]; dry?: boolean; handler?: SlackBotHandler; limiter?: SlackBotLimiter } = {}) => {
   const posted: PostMessage[] = [];
+  const cards: (readonly SlackBlock[])[] = [];
   const logs: string[] = [];
   const log: Logger = {
     info: (m, f) => void logs.push(JSON.stringify({ m, f })),
@@ -26,8 +28,9 @@ const setup = ({ allowedUsers = ["UOK"], allowedChannels, dry = false, handler, 
   const client: SlackBotClient = {
     authTest: async () => ({ botName: "b", botUserId: "UBOT", team: "t", teamId: "T1" }),
     replies: async () => [],
-    postMessage: async (message) => {
+    postMessage: async ({ blocks, ...message }) => {
       posted.push(message);
+      cards.push(blocks ?? []);
       return { ts: "200.1" };
     },
   };
@@ -43,7 +46,7 @@ const setup = ({ allowedUsers = ["UOK"], allowedChannels, dry = false, handler, 
     dispatcher.enqueue(event);
     await dispatcher.drain(1000);
   };
-  return { posted, logs, send, activity };
+  return { posted, cards, logs, send, activity };
 };
 
 describe("slack-bot automation", () => {
@@ -51,6 +54,18 @@ describe("slack-bot automation", () => {
     const t = setup();
     await t.send(mentionEvent("UOK"));
     expect(t.posted).toEqual([{ channel: "C1", threadTs: "100.1", text: "Got it: create a ticket" }]);
+  });
+
+  test("a plain reply is posted as a one-section card, and a handler's own card is posted as is", async () => {
+    const plain = setup();
+    await plain.send(mentionEvent("UOK"));
+    expect(plain.cards).toEqual([[{ type: "section", text: { type: "mrkdwn", text: "Got it: create a ticket" } }]]);
+
+    const blocks: SlackBlock[] = [{ type: "header", text: { type: "plain_text", text: "Report" } }];
+    const own = setup({ handler: async () => ({ reply: "Report", blocks }) });
+    await own.send(mentionEvent("UOK"));
+    expect(own.cards).toEqual([blocks]);
+    expect(own.posted[0]!.text).toBe("Report");
   });
 
   test("a reply inside a thread goes to the thread root", async () => {
@@ -318,6 +333,28 @@ describe("slack-bot automation", () => {
     expect(text).not.toContain("<!channel>");
     const run = t.activity.queryRuns({ limit: 1 }).items[0]!;
     expect(run.status).toBe("succeeded");
+  });
+
+  test("a card Slack rejects is posted again as plain text, other errors are not retried", async () => {
+    const sent: PostMessage[] = [];
+    const client: SlackBotClient = {
+      authTest: async () => ({ botName: "b", botUserId: "u", team: "t", teamId: "T" }),
+      replies: async () => [],
+      postMessage: async (message) => {
+        sent.push(message);
+        if (message.blocks?.length) throw new SlackApiError("Slack chat.postMessage failed: invalid_blocks", "invalid_blocks");
+        return { ts: "1" };
+      },
+    };
+    const logs: string[] = [];
+    const log: Logger = { info() {}, warn: (m) => void logs.push(m), error() {} };
+    const bot = { ...createSlackBot({ client, allowedUsers: ["UOK"] }), project: "p" };
+    const dispatcher = createDispatcher({ automations: () => [bot], store: createSqliteStore({ path: ":memory:" }), log });
+    dispatcher.enqueue(mentionEvent("UOK"));
+    await dispatcher.drain(1000);
+    expect(sent.map((m) => Boolean(m.blocks?.length))).toEqual([true, false]);
+    expect(sent[1]).toEqual({ channel: "C1", threadTs: "100.1", text: "Got it: create a ticket" });
+    expect(logs).toContain("slack rejected the card, posting the reply as text");
   });
 
   test("a failed post fails the run and releases the claim so Slack's retry can reply", async () => {

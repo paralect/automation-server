@@ -16,7 +16,7 @@ const BASE_ENV = { SLACK_BOT_TOKEN: TOKEN, SLACK_SIGNING_SECRET: SIGNING };
 
 type SlackCall = { method: string; auth: string | null; body: Record<string, unknown> };
 
-type Step = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null };
+type Step = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null; specJson?: string | null };
 
 const setup = ({
   botEnabled = true,
@@ -47,7 +47,7 @@ const setup = ({
       const request = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] };
       modelRequests.push({ system: request.messages[0]!.content, user: request.messages[1]!.content });
       const step = model.shift();
-      return step ? Response.json({ choices: [{ message: { content: JSON.stringify(step) } }] }) : new Response("{}", { status: 500 });
+      return step ? Response.json({ choices: [{ message: { content: JSON.stringify({ specJson: null, ...step }) } }] }) : new Response("{}", { status: 500 });
     }
     if (target === "https://api.linear.app/graphql") {
       const { query } = JSON.parse(String(init?.body)) as { query: string };
@@ -105,8 +105,10 @@ const setup = ({
     });
   };
   const unsigned = (payload: unknown) => app.request("/webhooks/slack", { method: "POST", body: JSON.stringify(payload) });
-  const replies = () => calls.filter((c) => c.method === "chat.postMessage").map((c) => c.body);
-  return { deliver, unsigned, mention, replies, calls, hookCalls, logs, dispatcher, runtime, activity, modelRequests, linearWrites };
+  // The card is checked on its own: here only the text Slack shows in notifications and history.
+  const replies = () => calls.filter((c) => c.method === "chat.postMessage").map(({ body: { blocks: _, ...body } }) => body);
+  const cards = () => calls.filter((c) => c.method === "chat.postMessage").map((c) => c.body.blocks);
+  return { deliver, unsigned, mention, replies, cards, calls, hookCalls, logs, dispatcher, runtime, activity, modelRequests, linearWrites };
 };
 
 describe("slack bot over the webhook route", () => {
@@ -119,6 +121,32 @@ describe("slack bot over the webhook route", () => {
     expect(t.replies()).toEqual([{ channel: "C1", thread_ts: "100.1", text: NOT_CONFIGURED_REPLY }]);
     expect(t.calls[0]!.auth).toBe(`Bearer ${TOKEN}`);
     expect(t.activity.queryRuns({ limit: 1 }).items[0]!.status).toBe("succeeded");
+  });
+
+  test("the model's answer card reaches Slack as native blocks, escaped, with its fallback as the text", async () => {
+    const spec = {
+      root: "c",
+      elements: {
+        c: { type: "Card", props: { title: "Linear: billing" }, children: ["t", "tbl"] },
+        t: { type: "Text", props: { content: "*1* issue <!channel>" }, children: [] },
+        tbl: { type: "Table", props: { caption: "Issues", headers: ["Issue", "State"], rows: [["ENG-1", "Todo"]] }, children: [] },
+      },
+    };
+    const t = setup({
+      env: { ...BASE_ENV, LINEAR_API_KEY: "lin_api_secretsecretsecret" },
+      model: [
+        { type: "tool", tool: "linear.searchIssues", argsJson: '{"query":"billing"}', text: null },
+        { type: "final", tool: null, argsJson: null, text: null, specJson: JSON.stringify(spec) },
+      ],
+    });
+    await t.deliver(t.mention({ text: "<@UBOT> what Linear issues mention billing?" }));
+    await t.dispatcher.drain(1000);
+    const [blocks] = t.cards() as { type: string }[][];
+    expect(blocks!.map((b) => b.type)).toEqual(["header", "section", "data_table"]);
+    expect(JSON.stringify(blocks)).toContain("*1* issue &lt;!channel&gt;");
+    expect(t.replies()[0]!.text).toContain("Linear: billing");
+    expect(t.replies()[0]!.text).not.toContain("<!channel>");
+    expect(t.modelRequests[0]!.system).toContain("specJson");
   });
 
   test("with OpenRouter and a Linear key the model sees only the Linear tools, calls one, and the reply is escaped", async () => {

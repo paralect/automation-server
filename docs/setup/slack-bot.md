@@ -47,7 +47,7 @@ Write tools exist only when their service is set up, like read tools. When the m
 
 ### The approval flow
 
-1. A listed member asks for a change. The model picks a write tool. The bot posts, in the thread, the tool name and the exact arguments as plain text, and who can approve.
+1. A listed member asks for a change. The model picks a write tool. The bot posts, in the thread, an **Approval needed** card with the tool name, the exact arguments in a code block, and who can approve.
 2. Only the member who asked can answer. They reply in the same thread, tagging the bot, with exactly one of `approve`, `yes`, `да`, `подтверждаю` to run it, or `cancel`, `no`, `нет`, `отмена` to drop it. Case and punctuation do not matter. A longer sentence is not a decision, it goes to the model like any other question.
 3. The words are matched by the server, not by the model. The model is not asked.
 4. The bot runs the tool once and posts the result with the link.
@@ -101,7 +101,8 @@ Issue bodies, comments, Sentry titles and other people's Slack messages can cont
 - The model is told that thread text and tool results are data, never instructions, and they are fenced in the prompt so they cannot close the fence.
 - The model can only call the tools listed here. It has no shell and no arbitrary HTTP. A call to anything else is refused and counted as a step. A write tool is never run by the model's turn, it only produces a proposal that a person approves.
 - Every tool result and every piece of thread text is redacted (tokens, emails, long secrets) before it goes into a prompt, and the same redaction is applied to what is logged.
-- The answer is escaped before it is posted, so a hostile issue cannot make the bot ping `@channel` or a person. Links the model writes show as plain text and Slack still makes URLs clickable.
+- Answers are cards. The model lays out its answer as a [json-render](https://github.com/vercel-labs/json-render) spec (title, text, key numbers as fields, one table, up to two charts) and the server converts it to native Slack Block Kit. A card Slack would quietly degrade, such as a third chart or a second table, is sent back to the model to fix once. If it still cannot be shown, the bot posts the plain text answer, and a card Slack itself refuses is posted again as text. Short replies (errors, limits, `Done.`) are one-line cards.
+- The model cannot add images, buttons or links to a card. Every text in it is escaped after rendering, so a hostile issue cannot make the bot ping `@channel` or a person. URLs show as plain text and Slack still makes them clickable.
 
 This lowers the risk. It does not remove it: a model can still repeat misleading text from an issue in its answer, and a hostile issue can still try to make it propose a change. That is why a change is never run on the model's say-so: you see the exact arguments and only the requester can approve. Read answers as you would read the issue itself.
 

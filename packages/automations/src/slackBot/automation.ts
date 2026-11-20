@@ -4,7 +4,10 @@ import type { SlackBotOutcome } from "@automation-server/sources/slack/outcome";
 
 import { redactUntrusted, singleLine, truncate } from "../redact";
 import type { AgentStatus, StepLog } from "./agent";
-import { escapeSlackText, type SlackBotClient } from "./client";
+import type { SlackBlock } from "@chat-adapter/slack/blocks";
+
+import { textCard } from "./card";
+import { escapeSlackText, SlackApiError, type SlackBotClient } from "./client";
 import { createSlackBotLimiter, type Admission, type SlackBotLimiter } from "./limiter";
 
 export const SLACK_BOT = "slack-bot";
@@ -29,8 +32,10 @@ export type SlackBotHandlerInput = {
 export type SlackBotStatus = AgentStatus | "executed" | "cancelled" | "expired";
 
 // The reply is posted as is, so a handler must hand back text that is already safe for Slack. Steps and status are optional, a plain reply is enough.
+// Blocks are the rendered card. Without them the reply is posted as a one-element text card, and the reply stays the notification text either way.
 export type SlackBotHandlerResult = {
   readonly reply: string;
+  readonly blocks?: readonly SlackBlock[];
   readonly steps?: readonly StepLog[];
   readonly status?: SlackBotStatus;
   readonly error?: string;
@@ -66,6 +71,18 @@ function agentOutcome({ status, steps = [], error }: SlackBotHandlerResult): Sla
     steps: steps.map(({ tool, ok, durationMs, stage }) => ({ tool, ok, durationMs, ...(stage ? { stage } : {}) })),
     ...(error ? { error } : {}),
   };
+}
+
+// A card Slack refuses must not cost the person their answer: the same reply goes out again as plain text.
+async function post(client: SlackBotClient, message: Parameters<SlackBotClient["postMessage"]>[0], log: AutomationContext["log"]): Promise<{ ts: string }> {
+  if (!message.blocks?.length) return client.postMessage(message);
+  try {
+    return await client.postMessage(message);
+  } catch (err) {
+    if (!(err instanceof SlackApiError) || !err.code?.startsWith("invalid_blocks")) throw err;
+    log.warn("slack rejected the card, posting the reply as text", { channel: message.channel, blocks: message.blocks.length });
+    return client.postMessage({ channel: message.channel, threadTs: message.threadTs, text: message.text });
+  }
 }
 
 export function createSlackBot({ client, allowedUsers, allowedChannels = [], handler = echoHandler, limiter = createSlackBotLimiter({ denialReply: DENIED_REPLY }) }: SlackBotConfig): Automation {
@@ -123,7 +140,7 @@ export function createSlackBot({ client, allowedUsers, allowedChannels = [], han
           return;
         }
 
-        const { ts } = await client.postMessage({ channel: mention.channel, threadTs: thread, text: result.reply });
+        const { ts } = await post(client, { channel: mention.channel, threadTs: thread, text: result.reply, blocks: result.blocks ?? textCard(result.reply).blocks }, log);
         log.info(admission.kind === "run" ? "replied in thread" : admission.kind === "denied" ? "denied unlisted user" : `sent ${decision} notice`, { ...target, replyTs: ts, ...(result.status ? { status: result.status } : {}) });
         report?.({ ...target, decision, replyTs: ts, ...(agent ? { agent } : {}) } satisfies SlackBotOutcome);
       } finally {

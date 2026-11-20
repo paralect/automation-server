@@ -4,7 +4,7 @@ import type { SlackBlock } from "@chat-adapter/slack/blocks";
 import { buildReportSpec, reportBlocks } from "./card";
 import { createHogqlClient } from "./client";
 import { fetchReportData } from "./queries";
-import { buildReport } from "./report";
+import { buildReport, type ReportData } from "./report";
 import { isDue } from "./schedule";
 import { postToSlack } from "./slack";
 
@@ -27,8 +27,10 @@ const clientFor = (config: PosthogReportConfig, fetch: typeof globalThis.fetch |
 
 export type GeneratedReport = { readonly text: string; readonly blocks: SlackBlock[] };
 
-export async function generateReport(config: PosthogReportConfig, now: Date, { fetch }: ReportDeps = {}): Promise<GeneratedReport> {
-  const data = await fetchReportData(clientFor(config, fetch));
+export const fetchReport = (config: PosthogReportConfig, { fetch }: ReportDeps = {}): Promise<ReportData> => fetchReportData(clientFor(config, fetch));
+
+export async function generateReport(config: PosthogReportConfig, now: Date, deps: ReportDeps = {}): Promise<GeneratedReport> {
+  const data = await fetchReport(config, deps);
   return {
     text: buildReport(data, now, config.reportTitle),
     blocks: reportBlocks(buildReportSpec(data, now, config.reportTitle)),

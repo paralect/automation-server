@@ -87,13 +87,21 @@ describe("sentry tools", () => {
 });
 
 describe("posthog tool", () => {
-  test("returns the weekly report text and posts nothing to Slack", async () => {
+  test("returns the weekly numbers as JSON for the model and posts nothing to Slack", async () => {
     const { fn, calls, slackPosts } = fakeFetch();
     const tools = buildReadTools({ posthog: CONFIG, fetch: fn });
     const tool = named(tools, "posthog.weeklyReport");
     expect(tool.kind).toBe("read");
     const result = await executeTool(tool, {}, ctx);
-    expect(result.ok && result.text).toContain("Unique users");
+    const data = result.ok ? JSON.parse(result.text) : null;
+    expect(Object.keys(data)).toEqual(["title", "period", "totals", "dailyUniqueUsers", "topPages", "topEvents"]);
+    expect(data.dailyUniqueUsers).toHaveLength(7);
+    // The session count once came back as "[redacted]": a key named like "sessions" looks like a secret to the redactor.
+    expect(data.totals).toEqual([
+      { metric: "Unique users", thisWeek: 1200, previousWeek: 1000, change: "+20.0%" },
+      { metric: "Pageviews", thisWeek: 5000, previousWeek: 5000, change: "no change" },
+      { metric: "Sessions", thisWeek: 1500, previousWeek: 2000, change: "-25.0%" },
+    ]);
     expect(calls.length).toBeGreaterThan(0);
     expect(slackPosts()).toHaveLength(0);
     expect(JSON.stringify(result)).not.toContain(API_KEY);

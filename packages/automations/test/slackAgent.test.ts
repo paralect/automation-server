@@ -7,7 +7,7 @@ import { buildReadTools, createToolRegistry, defineTool, type AnyTool, type Tool
 const ctx: ToolContext = { requestedBy: "U1", channel: "C1", threadTs: "1.1", dryRun: false };
 const input: AgentInput = { question: "what Linear issues mention billing?", user: "U1", thread: [] };
 
-type Wire = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null };
+type Wire = { type: "tool" | "final"; tool: string | null; argsJson: string | null; text: string | null; specJson?: string | null };
 const call = (tool: string, args: unknown = {}): Wire => ({ type: "tool", tool, argsJson: JSON.stringify(args), text: null });
 const final = (text: string): Wire => ({ type: "final", tool: null, argsJson: null, text });
 
@@ -21,7 +21,7 @@ const scripted = (script: (Wire | Error)[]) => {
       const next = script.shift();
       if (!next) throw new Error("script ran out");
       if (next instanceof Error) throw next;
-      return req.schema.parse(next);
+      return req.schema.parse({ specJson: null, ...next });
     }) as AgentModel["structured"],
   };
   return { model, seen };
@@ -96,7 +96,7 @@ describe("agent loop", () => {
     const result = await agent.run(input, ctx);
     expect(result.status).toBe("answered");
     expect(seen[1]!.user).toContain("argsJson is not valid JSON");
-    expect(seen[2]!.user).toContain("non-empty text");
+    expect(seen[2]!.user).toContain("needs specJson");
   });
 
   test("the step budget ends the run, tools stop running, and the reply says so", async () => {
@@ -240,5 +240,59 @@ describe("agent safety", () => {
     const { agent } = agentWith([final("a".repeat(9000))], []);
     const result = await agent.run(input, ctx);
     expect(result.reply.length).toBeLessThanOrEqual(3000);
+  });
+});
+
+describe("answer cards", () => {
+  const cardJson = (content: string) =>
+    JSON.stringify({ root: "c", elements: { c: { type: "Card", props: { title: "Linear" }, children: ["t"] }, t: { type: "Text", props: { content }, children: [] } } });
+  const finalCard = (specJson: string, text: string | null = null): Wire => ({ type: "final", tool: null, argsJson: null, text, specJson });
+  const threeCharts = JSON.stringify({
+    root: "c",
+    elements: {
+      c: { type: "Card", props: {}, children: ["a", "b", "d"] },
+      ...Object.fromEntries(["a", "b", "d"].map((id) => [id, { type: "Chart", props: { title: id, chart: { type: "bar", categories: ["x"], series: [{ name: "s", values: [1] }] } }, children: [] }])),
+    },
+  });
+
+  test("the system prompt describes the card components", () => {
+    const prompt = systemPrompt(createToolRegistry([]));
+    expect(prompt).toContain("specJson");
+    expect(prompt).toContain("Fields {} with Field");
+    expect(prompt).toContain("At most 2 Charts per card");
+  });
+
+  test("a final card is rendered to blocks, with escaped fallback text as the reply", async () => {
+    const { agent } = agentWith([finalCard(cardJson("*ENG-1* <!channel> mentions billing"))], []);
+    const result = await agent.run(input, ctx);
+    expect(result.status).toBe("answered");
+    expect(result.blocks!.map((b) => b.type)).toEqual(["header", "section"]);
+    expect(JSON.stringify(result.blocks)).toContain("*ENG-1* &lt;!channel&gt; mentions billing");
+    expect(result.reply).toContain("Linear");
+    expect(result.reply).not.toContain("<!channel>");
+  });
+
+  test("a rejected card goes back to the model with its issues, without charging a step", async () => {
+    const { agent, seen } = agentWith([finalCard(threeCharts), finalCard(cardJson("fixed"))], [], { maxSteps: 1 });
+    const result = await agent.run(input, ctx);
+    expect(result.status).toBe("answered");
+    expect(seen[1]!.user).toContain("the card was rejected");
+    expect(seen[1]!.user).toContain("at most 2 Chart per message");
+    expect(result.steps.map((s) => [s.tool, s.ok])).toEqual([["(invalid card)", false]]);
+  });
+
+  test("after the one free fix, the plain text the model also sent is posted", async () => {
+    const { agent } = agentWith([finalCard(threeCharts), finalCard("{broken", "Three charts, *in words*")], []);
+    const result = await agent.run(input, ctx);
+    expect(result.status).toBe("answered");
+    expect(result.blocks).toBeUndefined();
+    expect(result.reply).toBe("Three charts, *in words*");
+  });
+
+  test("a final with only text still works and leaves the card to the bot", async () => {
+    const { agent } = agentWith([final("plain")], []);
+    const result = await agent.run(input, ctx);
+    expect(result).toMatchObject({ status: "answered", reply: "plain" });
+    expect(result.blocks).toBeUndefined();
   });
 });

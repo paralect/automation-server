@@ -1,3 +1,4 @@
+import type { SlackBlock } from "@chat-adapter/slack/blocks";
 import { z } from "zod";
 
 import { scrub } from "../posthogWeeklyReport/scrub";
@@ -30,7 +31,9 @@ export type SlackIdentity = {
 export type PostMessage = {
   readonly channel: string;
   readonly threadTs: string;
+  // Slack shows `text` in notifications and wherever blocks cannot render.
   readonly text: string;
+  readonly blocks?: readonly SlackBlock[];
 };
 
 export type SlackThreadMessage = {
@@ -181,8 +184,8 @@ export function createSlackBotClient({ token, apiBaseUrl = SLACK_API, fetch: doF
       }
       return newest;
     },
-    async postMessage({ channel, threadTs, text }) {
-      const parsed = postBody.safeParse(await call("chat.postMessage", { channel, thread_ts: threadTs, text }));
+    async postMessage({ channel, threadTs, text, blocks }) {
+      const parsed = postBody.safeParse(await call("chat.postMessage", { channel, thread_ts: threadTs, text, ...(blocks?.length ? { blocks } : {}) }));
       if (!parsed.success) return fail("chat.postMessage", "unexpected response");
       return { ts: parsed.data.ts };
     },
